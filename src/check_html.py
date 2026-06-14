@@ -38,6 +38,10 @@ MIN_CONTENT = 80  # min chars of zh/en source content per lesson (catch empty tr
 PRE_INLINE = ("span", "strong", "b", "em", "u", "a")
 SOFT_EXEMPT = {"40-glossary.html"}
 
+# Visual-block density (soft): containers that count as a "diagram/table".
+DIAGRAM_CLASSES = ("layers", "vflow", "flow", "cols", "cellgroup", "timeline")
+MIN_DIAGRAMS = 6  # per lesson, counting BOTH languages (>= 3 per language)
+
 issues = []
 
 
@@ -77,6 +81,10 @@ def check_lesson(fname, html):
             add("WARN", fname, "no key-points card")
         if "card analogy" not in html:
             add("WARN", fname, "no analogy card")
+        nvis = sum(html.count(f'class="{c}"') for c in DIAGRAM_CLASSES)
+        nvis += html.count('<table class="t"')
+        if nvis < MIN_DIAGRAMS:
+            add("WARN", fname, f"only {nvis} visual blocks (want >= {MIN_DIAGRAMS}; add diagrams)")
 
     for pre in re.findall(r"<pre[^>]*>(.*?)</pre>", html, re.S):
         cleaned = re.sub(r"</?(?:%s)\b[^>]*>" % "|".join(PRE_INLINE), "", pre)

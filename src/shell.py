@@ -339,7 +339,6 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 .timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
   color: var(--blue); font-weight: 700; }
 .timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
-.timeline .tnote { font-size: .76rem; color: var(--muted); margin-top: .1rem; }
 """
 
 SEARCH_JS = """
