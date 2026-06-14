@@ -319,19 +319,9 @@ SEARCH_JS = """
       h.classList.toggle('hide',!any);
     });
     empty.classList.toggle('show', !!t && n===0);
-    count.textContent = t ? (n+' \u8bfe') : '';
+    count.textContent = t ? String(n) : '';
   }
   q.addEventListener('input',run);
-})();
-"""
-
-NAV_SCRIPT = """
-(function(){
-  var onDisk = location.protocol === 'file:';
-  document.querySelectorAll('[data-nav]').forEach(function(a){
-    var n = a.getAttribute('data-nav');
-    a.setAttribute('href', onDisk ? n : '/files/' + n);
-  });
 })();
 """
 
@@ -427,100 +417,83 @@ def page(filename, content, home_href="../index.html"):
     return html
 
 
-def index_page(standalone=False, lesson_prefix=""):
-    parts = {}
-    order = []
-    for i, (fname, title, part) in enumerate(PAGES):
-        parts.setdefault(part, [])
-        if part not in order:
-            order.append(part)
-        parts[part].append((i + 1, fname, title))
+# Per-lesson TOC subtitle: filename -> (zh, en). Missing entries render blank.
+SUBTITLES = {
+    "01-what-is-llamacpp.html": ("解决什么问题 · 零依赖哲学",
+                                 "What problem it solves; zero-dep philosophy"),
+}
+
+
+def index_page(lesson_prefix="lessons/"):
+    """Build the bilingual index (table of contents). Always relative links."""
+    order = []   # ordered list of (part_zh, part_en)
+    groups = {}  # part_zh -> [(num, fname, title_zh, title_en), ...]
+    for i, (fname, tz, te, pz, pe) in enumerate(PAGES):
+        if pz not in groups:
+            groups[pz] = []
+            order.append((pz, pe))
+        groups[pz].append((i + 1, fname, tz, te))
 
     blocks = []
-    subtitles = {
-        "01-what-is-langchain.html": "解决什么问题 · 核心心智模型",
-        "02-monorepo.html": "core / langchain / partners 三层",
-        "03-lifecycle.html": "从你的代码到 LLM 的完整数据流",
-        "04-messages.html": "Human / AI / Tool / System 消息",
-        "05-chat-models.html": "init_chat_model · invoke / stream / batch",
-        "06-tools.html": "@tool 装饰器 · 工具调用",
-        "07-agents-intro.html": "create_agent · Agent 循环",
-        "08-runnable.html": "invoke/stream/batch · LCEL 管道 |",
-        "09-runnable-compose.html": "Sequence / Parallel / Branch 组合",
-        "10-output-parsers.html": "StrOutputParser · JsonOutputParser · 闭环",
-        "11-chat-internals.html": "BaseChatModel 调用链",
-        "12-tool-internals.html": "函数 → JSON Schema → tool_calls",
-        "13-agent-internals.html": "LangGraph 状态图 · Send/Command · add_messages reducer",
-        "14-streaming-callbacks.html": "流式输出与回调追踪",
-        "15-contributing.html": "uv · 测试 · 调试 · 贡献",
-        "16-prompts.html": "ChatPromptTemplate · MessagesPlaceholder · few-shot",
-        "17-rag.html": "Document → 切块 → Embeddings → VectorStore → Retriever",
-        "18-custom-middleware.html": "AgentMiddleware 钩子 · before/after/wrap",
-        "19-runtime-context.html": "context_schema · with_fallbacks · stream_mode",
-        "20-capstone.html": "把所有零件拼成一个完整可跑的 Agent",
-        "21-langchain-vs-autogen.html": "两种范式对照：图/管道 vs 多 Agent 对话",
-        "22-ai-stack.html": "Agent 编排 5 流派 · AI 全栈 7 层 · 你在哪",
-        "23-learning-map.html": "vLLM/llama.cpp/Ollama · hnswlib/pgvector/Qdrant",
-        "24-langgraph-mental-model.html": "为什么 LCEL 不够 · State/Node/Edge/compile",
-        "25-langgraph-pregel-engine.html": "Pregel/BSP 超步 · Plan→Execution→Update · channels",
-        "26-langgraph-persistence-control.html": "Checkpoint/StateSnapshot · interrupt · Send/Command",
-        "27-glossary.html": "全书术语一句话查 + 点链接跳到对应课",
-    }
-    for part in order:
-        blocks.append(f'<div class="toc-part">{part}</div>')
-        for num, fname, title in parts[part]:
-            sub = subtitles.get(fname, "")
+    for pz, pe in order:
+        blocks.append(f'<div class="toc-part">{bi(pz, pe)}</div>')
+        for num, fname, tz, te in groups[pz]:
+            sz, se = SUBTITLES.get(fname, ("", ""))
             blocks.append(
-                f'<a data-nav="{lesson_prefix}{fname}"><span class="n">{num:02d}</span>'
-                f'<span class="tt">{title}</span>'
-                f'<span class="ts">{sub}</span></a>'
+                f'<a href="{lesson_prefix}{fname}"><span class="n">{num:02d}</span>'
+                f'<span class="tt"><span class="lang-zh">{tz}</span>'
+                f'<span class="lang-en">{te}</span></span>'
+                f'<span class="ts"><span class="lang-zh">{sz}</span>'
+                f'<span class="lang-en">{se}</span></span></a>'
             )
     toc = "\n".join(blocks)
+    total = len(PAGES)
+    nparts = len(order)
 
-    script_tag = "" if standalone else f"<script>{NAV_SCRIPT}</script>"
-    html = f"""<!DOCTYPE html>
-<html lang="zh-CN"><head>
+    title_tag = "llama.cpp 图解教程 · 从零理解整个项目 / llama.cpp Visual Guide"
+    desc = ("从零理解整个 llama.cpp 项目的中英双语图解教程：宏观结构、用法、ggml 引擎、"
+            "llama 推理内部、底层内核，每课配真实源码对应、折叠深挖与设计亮点。")
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LangChain 图解教程 · 从零理解整个项目</title>
-{head_meta("LangChain 图解教程 · 从零理解整个项目", f"从零理解整个 LangChain 项目的图解教程：宏观结构、用户用法、内部源码、自己动手做 Agent，外加横向对比 / AI 全栈坐标系 / LangGraph 引擎深入等番外。{len(order)} 部分 {len(PAGES)} 课，每课配真实代码对应、折叠深挖与设计亮点。", og_type="website")}
+{LANG_BOOT}
+<title>{title_tag}</title>
+{head_meta(title_tag, desc, og_type="website")}
 <style>{CSS}</style>
 </head><body>
 <div class="topbar">
   <div class="topbar-inner">
-    <span class="home">📘 LangChain 图解教程</span>
-    <span class="pill">共 {len(PAGES)} 课 · {len(order)} 个部分</span>
+    <span class="home">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></span>
+    <span class="pill"><span class="lang-zh">共 {total} 课 · {nparts} 个部分</span><span class="lang-en">{total} lessons · {nparts} parts</span></span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
   <div class="progress"><span style="width:100%"></span></div>
 </div>
 <div class="wrap">
   <div class="hero index">
-    <div class="part">从零开始 · 面向完全新手</div>
-    <h1>用图解理解整个 LangChain 项目</h1>
-    <p class="lead">这套教程带你<strong>层层深入</strong>：先建立<strong>宏观全景</strong>，再从<strong>用户视角</strong>学会使用，
-    然后深入<strong>内部源码</strong>，接着<strong>自己动手做 Agent</strong>，最后还有<strong>横向对比、AI 全栈坐标系、深入 LangGraph 引擎</strong>等番外。
-    每一课都配有真实的代码文件对应，既有宏观理解，也有细节拆解。</p>
+    <div class="part">{bi("从零开始 · 面向完全新手", "From scratch · for complete beginners")}</div>
+    <h1><span class="lang-zh">用图解理解整个 llama.cpp 项目</span><span class="lang-en">Understand the whole llama.cpp project, visually</span></h1>
+    <p class="lead"><span class="lang-zh">这套教程带你<strong>层层深入</strong>：先建立<strong>宏观全景</strong>，再学会<strong>使用</strong>，
+    然后深入 <strong>ggml 引擎</strong>与 <strong>llama 推理内部</strong>，最后直抵<strong>底层内核</strong>。每课配真实源码对应、图解与设计亮点。</span>
+    <span class="lang-en">A layered tour: build the <strong>big picture</strong> first, learn to <strong>use</strong> it,
+    then dive into the <strong>ggml engine</strong> and <strong>llama inference internals</strong>, down to the <strong>low-level kernels</strong>. Every lesson maps to real source, with diagrams and design insights.</span></p>
     <div class="legend">
-      <span><i style="background:var(--blue)"></i>宏观理解</span>
-      <span><i style="background:var(--purple)"></i>细节 / 源码</span>
-      <span><i style="background:var(--amber)"></i>生活类比</span>
-      <span><i style="background:var(--accent)"></i>关键要点</span>
+      <span><i style="background:var(--blue)"></i>{bi("宏观理解", "Big picture")}</span>
+      <span><i style="background:var(--purple)"></i>{bi("细节 / 源码", "Details / source")}</span>
+      <span><i style="background:var(--amber)"></i>{bi("生活类比", "Analogy")}</span>
+      <span><i style="background:var(--accent)"></i>{bi("关键要点", "Key points")}</span>
     </div>
-    <div style="margin-top:1.1rem">
-      <a href="langchain-visual-guide.pdf" class="pdf-btn">📄 下载完整 PDF（全 {len(PAGES)} 课）</a>
-    </div>
-    <p style="margin:.8rem 0 0;color:var(--faint);font-size:.8rem">📌 对照 <strong>LangChain v1（<span class="mono">langchain_v1</span>）</strong> 与 <strong>LangGraph</strong> 源码讲解 · 最后核验 2026-06 · 源码引用以"文件 + 符号名"为主（行号会随上游更新而变）</p>
+    <p style="margin:.8rem 0 0;color:var(--faint);font-size:.8rem">{bi("📌 对照 llama.cpp 仓库真实源码核实 · 源码引用以“文件 + 符号名”为主（行号随上游更新而变）", "📌 Verified against the real llama.cpp source; references cite file + symbol (line numbers drift upstream)")}</p>
   </div>
   <div class="toc-search">
-    <input id="q" type="search" placeholder="🔎 搜索课程：标题 / 关键词（如 RAG、Pregel、中间件）" autocomplete="off" aria-label="搜索课程">
+    <input id="q" type="search" placeholder="🔎 搜索课程 / Search lessons" autocomplete="off" aria-label="search">
     <span class="qcount" id="qcount"></span>
   </div>
   <div class="toc">{toc}</div>
-  <div class="toc-empty" id="tocempty">没有匹配的课程，换个关键词试试。</div>
+  <div class="toc-empty" id="tocempty">{bi("没有匹配的课程，换个关键词试试。", "No matching lessons, try another keyword.")}</div>
 </div>
-{script_tag}
+<script>{LANG_JS}</script>
 <script>{SEARCH_JS}</script>
 </body></html>"""
-    if standalone:
-        html = html.replace('data-nav="', 'href="')
-    return html
