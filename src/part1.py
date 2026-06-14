@@ -19,7 +19,7 @@ llama.cpp 是一个用<strong>纯 C/C++</strong> 写的<strong>大模型推理�
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  用<strong>零外部依赖的 C/C++</strong> + <strong>量化</strong>（把权重压成 4/5/8 bit）+ <strong>自研张量引擎 ggml</strong>，
+  用<strong>零外部依赖的 C/C++</strong> + <strong>量化</strong>（把权重压成 4/5/8 bit 等低位宽，K-quant 甚至能到 2/3/6 bit）+ <strong>自研张量引擎 ggml</strong>，
   让大模型能在<strong>消费级硬件</strong>上本地、离线、低成本地推理。一个可执行文件 + 一个 <span class="inline">.gguf</span> 文件即可运行。
 </div>
 
@@ -52,6 +52,10 @@ llama_backend_init();
 
 llama_model   *model = <span class="fn">llama_model_load_from_file</span>(<span class="st">"model.gguf"</span>, mparams);
 llama_context *ctx   = <span class="fn">llama_init_from_model</span>(model, cparams);  <span class="cm">// 新接口</span>
+
+const llama_vocab *vocab = <span class="fn">llama_model_get_vocab</span>(model);
+llama_sampler     *smpl  = <span class="fn">llama_sampler_chain_init</span>(<span class="fn">llama_sampler_chain_default_params</span>());
+<span class="fn">llama_sampler_chain_add</span>(smpl, <span class="fn">llama_sampler_init_greedy</span>());  <span class="cm">// 最简：贪心采样</span>
 
 <span class="cm">// 1) prompt 切成 token</span>
 int n = <span class="fn">llama_tokenize</span>(vocab, prompt, /*...*/, tokens, /*...*/);
@@ -106,7 +110,7 @@ ordinary devices. llama.cpp aims for the opposite:</p>
 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
-  With <strong>zero-dependency C/C++</strong> + <strong>quantization</strong> (compressing weights to 4/5/8 bits) +
+  With <strong>zero-dependency C/C++</strong> + <strong>quantization</strong> (compressing weights to e.g. 4/5/8 bits, down to 2/3/6-bit K-quants) +
   its own tensor engine <strong>ggml</strong>, it makes LLMs run <strong>locally, offline, and cheaply on consumer
   hardware</strong>. One executable plus one <span class="inline">.gguf</span> file is enough.
 </div>
@@ -127,7 +131,7 @@ ordinary devices. llama.cpp aims for the opposite:</p>
 <table class="t">
   <tr><th>Project</th><th>Role</th><th>Lang / deps</th><th>Typical use</th></tr>
   <tr><td><strong>PyTorch</strong></td><td>Training + inference framework</td><td>Python, heavy</td><td>Research, training</td></tr>
-  <tr><td><strong>transformers</strong></td><td>Model hub / high-level wrapper</td><td>Python, heavy</td><td>Fast experiments</td></tr>
+  <tr><td><strong>transformers</strong></td><td>Model library / high-level wrapper</td><td>Python, heavy</td><td>Fast experiments</td></tr>
   <tr><td><strong>vLLM</strong></td><td>High-throughput GPU serving</td><td>Python + CUDA</td><td>Cloud, high concurrency</td></tr>
   <tr><td><strong>llama.cpp</strong></td><td>Lightweight local inference</td><td>C/C++, near-zero deps</td><td>Local / edge / embedded</td></tr>
 </table>
@@ -141,6 +145,10 @@ llama_backend_init();
 
 llama_model   *model = <span class="fn">llama_model_load_from_file</span>(<span class="st">"model.gguf"</span>, mparams);
 llama_context *ctx   = <span class="fn">llama_init_from_model</span>(model, cparams);  <span class="cm">// new API</span>
+
+const llama_vocab *vocab = <span class="fn">llama_model_get_vocab</span>(model);
+llama_sampler     *smpl  = <span class="fn">llama_sampler_chain_init</span>(<span class="fn">llama_sampler_chain_default_params</span>());
+<span class="fn">llama_sampler_chain_add</span>(smpl, <span class="fn">llama_sampler_init_greedy</span>());  <span class="cm">// simplest: greedy</span>
 
 <span class="cm">// 1) split the prompt into tokens</span>
 int n = <span class="fn">llama_tokenize</span>(vocab, prompt, /*...*/, tokens, /*...*/);
