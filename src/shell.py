@@ -12,10 +12,23 @@ _FAVICON_SVG = (
 FAVICON = "data:image/svg+xml;base64," + base64.b64encode(_FAVICON_SVG.encode()).decode()
 
 
+def esc(s):
+    """Escape plain text for an HTML text/attribute context.
+
+    For chrome/meta strings that are NOT meant to carry inline markup (page
+    titles, descriptions). Do NOT use on lesson body content or bi() inputs,
+    which may legitimately contain inline tags.
+    """
+    return (
+        str(s).replace("&", "&amp;").replace("<", "&lt;")
+        .replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
 def head_meta(title, description, og_type="website"):
     """SEO / social meta tags + favicon for a page <head>."""
-    t = title.replace('"', "&quot;")
-    d = description.replace('"', "&quot;")
+    t = esc(title)
+    d = esc(description)
     return (
         f'<meta name="description" content="{d}">\n'
         f'<meta name="theme-color" content="#c2630e">\n'
@@ -390,7 +403,7 @@ def page(filename, content, home_href="../index.html"):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
-<title>{title_tag}</title>
+<title>{esc(title_tag)}</title>
 {head_meta(title_tag, desc, og_type="article")}
 <style>{CSS}</style>
 </head><body>
@@ -459,7 +472,7 @@ def index_page(lesson_prefix="lessons/"):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
-<title>{title_tag}</title>
+<title>{esc(title_tag)}</title>
 {head_meta(title_tag, desc, og_type="website")}
 <style>{CSS}</style>
 </head><body>

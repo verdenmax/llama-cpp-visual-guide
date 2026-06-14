@@ -27,6 +27,8 @@ def build():
     written = []
     for page in shell.PAGES:
         fname = page[0]
+        if fname not in CONTENT:
+            sys.exit(f"build error: no registry.CONTENT entry for {fname!r} (declared in shell.PAGES)")
         html = shell.page(fname, CONTENT[fname], home_href="../index.html")
         with open(os.path.join(LESSONS_DIR, fname), "w", encoding="utf-8") as f:
             f.write(html)
