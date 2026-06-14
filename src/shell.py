@@ -12,10 +12,23 @@ _FAVICON_SVG = (
 FAVICON = "data:image/svg+xml;base64," + base64.b64encode(_FAVICON_SVG.encode()).decode()
 
 
+def esc(s):
+    """Escape plain text for an HTML text/attribute context.
+
+    For chrome/meta strings that are NOT meant to carry inline markup (page
+    titles, descriptions). Do NOT use on lesson body content or bi() inputs,
+    which may legitimately contain inline tags.
+    """
+    return (
+        str(s).replace("&", "&amp;").replace("<", "&lt;")
+        .replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
 def head_meta(title, description, og_type="website"):
     """SEO / social meta tags + favicon for a page <head>."""
-    t = title.replace('"', "&quot;")
-    d = description.replace('"', "&quot;")
+    t = esc(title)
+    d = esc(description)
     return (
         f'<meta name="description" content="{d}">\n'
         f'<meta name="theme-color" content="#c2630e">\n'
@@ -34,6 +47,10 @@ def head_meta(title, description, og_type="website"):
 # (filename, title_zh, title_en, part_zh, part_en)
 PAGES = [
     ("01-what-is-llamacpp.html", "llama.cpp 是什么", "What is llama.cpp",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("02-project-map.html", "项目全景地图", "The project map",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("03-inference-lifecycle.html", "一次推理的生命周期", "Lifecycle of one inference",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
 ]
 
@@ -390,7 +407,7 @@ def page(filename, content, home_href="../index.html"):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
-<title>{title_tag}</title>
+<title>{esc(title_tag)}</title>
 {head_meta(title_tag, desc, og_type="article")}
 <style>{CSS}</style>
 </head><body>
@@ -421,6 +438,10 @@ def page(filename, content, home_href="../index.html"):
 SUBTITLES = {
     "01-what-is-llamacpp.html": ("解决什么问题 · 零依赖哲学",
                                  "What problem it solves; zero-dep philosophy"),
+    "02-project-map.html": ("ggml / src·llama / common / tools / 转换脚本",
+                            "ggml / src·llama / common / tools / converters"),
+    "03-inference-lifecycle.html": ("prompt -> 分词 -> 计算图 -> logits -> 采样 -> token",
+                                    "prompt -> tokenize -> graph -> logits -> sample -> token"),
 }
 
 
@@ -459,14 +480,14 @@ def index_page(lesson_prefix="lessons/"):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {LANG_BOOT}
-<title>{title_tag}</title>
+<title>{esc(title_tag)}</title>
 {head_meta(title_tag, desc, og_type="website")}
 <style>{CSS}</style>
 </head><body>
 <div class="topbar">
   <div class="topbar-inner">
     <span class="home">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></span>
-    <span class="pill"><span class="lang-zh">共 {total} 课 · {nparts} 个部分</span><span class="lang-en">{total} lessons · {nparts} parts</span></span>
+    <span class="pill"><span class="lang-zh">共 {total} 课 · {nparts} 个部分</span><span class="lang-en">{total} lesson{'' if total == 1 else 's'} · {nparts} part{'' if nparts == 1 else 's'}</span></span>
     <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
   <div class="progress"><span style="width:100%"></span></div>

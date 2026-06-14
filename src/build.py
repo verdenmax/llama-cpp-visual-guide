@@ -19,6 +19,7 @@ LESSONS_DIR = os.path.join(ROOT, "lessons")
 sys.path.insert(0, HERE)
 
 import shell  # noqa: E402
+import quizzes  # noqa: E402
 from registry import CONTENT  # noqa: E402
 
 
@@ -27,7 +28,14 @@ def build():
     written = []
     for page in shell.PAGES:
         fname = page[0]
-        html = shell.page(fname, CONTENT[fname], home_href="../index.html")
+        if fname not in CONTENT:
+            sys.exit(f"build error: no registry.CONTENT entry for {fname!r} (declared in shell.PAGES)")
+        base = CONTENT[fname]
+        content = {
+            "zh": base["zh"] + quizzes.render(fname, "zh"),
+            "en": base["en"] + quizzes.render(fname, "en"),
+        }
+        html = shell.page(fname, content, home_href="../index.html")
         with open(os.path.join(LESSONS_DIR, fname), "w", encoding="utf-8") as f:
             f.write(html)
         written.append(os.path.join("lessons", fname))
