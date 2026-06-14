@@ -709,22 +709,25 @@ directory actually do</strong>". The table below is the map's legend:</p>
 LESSON_03 = {
     "zh": r"""
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-课 01 给了你一条最小主线（加载 -> 分词 -> 解码循环 -> 采样）。这一课把它<strong>放慢成慢镜头</strong>：
-看清<strong>一个 token</strong> 是怎么从 prompt 一步步算出来的，又怎么被<strong>回灌</strong>进队尾，驱动下一步。
+课 01 给了你一条最小主线（加载 -&gt; 分词 -&gt; 解码循环 -&gt; 采样）。这一课把它<strong>放慢成慢镜头</strong>：
+看清<strong>一个 token</strong> 是怎么从 prompt 一步步算出来的，又怎么被<strong>回灌</strong>进队尾、驱动下一步。
+我们先走一遍<strong>七步数据流</strong>，再<strong>放大其中最重的"一次 decode"</strong>——看清它内部其实是"先建计算图、再交后端执行、最后吐出 logits"；
+最后用 <strong>prefill / decode 两种节奏</strong>和 <strong>KV cache</strong>，讲清为什么这个循环能在本地<strong>便宜地一圈圈转下去</strong>。
 </p>
 
 <div class="card analogy">
   <div class="tag">🔌 生活类比</div>
   把一次推理想成<strong>接力赛 / 流水线</strong>：整段 prompt 从起点进入，依次经过几个工位（分词、前向、采样……），
-  终点吐出<strong>一个字</strong>；这个字再被接到队伍<strong>尾巴</strong>上，开始下一棒。每跑一圈，只多产出一个字。
+  终点吐出<strong>一个字</strong>；这个字再被接到队伍<strong>尾巴</strong>上，开始下一棒。每跑一圈，只多产出一个字——
+  而队伍前面那些<strong>已经算过的字</strong>不用重新排队，这正是后面 <strong>KV cache</strong> 要替我们守住的"便宜"。
 </div>
 
 <h2>七步数据流</h2>
-<p>把"一段 prompt 变出下一个 token"拆开，正好是这 7 步，从左到右流过去：</p>
+<p>把"一段 prompt 变出下一个 token"拆开，正好是这 7 步，从上到下顺次流过去：</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>分词 Tokenize</h4>
-    <p>把 prompt 文本切成一串 token id 序列——模型只认数字 id，不认字符。</p>
+    <p>把 prompt 文本切成一串 token id 序列——模型只认数字 id，不认字符；同一句话用不同分词器切出的 id 可能完全不同。</p>
     <p class="mono">src/llama-vocab.cpp · llama_tokenize</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
@@ -734,17 +737,17 @@ LESSON_03 = {
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>解码 Decode（前向）</h4>
-    <p><span class="mono">llama_decode</span> 跑一次前向；内部先<strong>建计算图</strong>，再交给<strong>后端</strong>真正算在硬件上。</p>
+    <p><span class="mono">llama_decode</span> 跑一次前向；内部先<strong>建计算图</strong>，再交给<strong>后端</strong>真正算在硬件上。这一步最重，下一节会专门把它<strong>放大</strong>看。</p>
     <p class="mono">src/llama-context.cpp · llama_decode；建图 src/llama-graph.cpp（llm_graph_*）+ src/llama-model.cpp；执行 ggml-backend</p>
   </div></div>
   <div class="step"><div class="num">4</div><div class="sc">
     <h4>取 logits</h4>
-    <p>从这次前向里拿到"下一个 token 的分数向量"——词表里每个 token 各有一个分。</p>
+    <p>从这次前向里拿到"下一个 token 的分数向量"——词表里每个 token 各有一个分。注意此刻还<strong>没有</strong>选定任何 token。</p>
     <p class="mono">src/llama-context.cpp · llama_get_logits_ith</p>
   </div></div>
   <div class="step"><div class="num">5</div><div class="sc">
     <h4>采样 Sample</h4>
-    <p>采样器链（sampler chain）按策略（贪心 / top-k / top-p……）从 logits 里选出一个 token。</p>
+    <p>采样器链（sampler chain）按策略（贪心 / top-k / top-p……）从 logits 里选出一个 token；策略不同，同一份 logits 也会选出不同的字。</p>
     <p class="mono">src/llama-sampler.cpp · llama_sampler_sample</p>
   </div></div>
   <div class="step"><div class="num">6</div><div class="sc">
@@ -754,18 +757,49 @@ LESSON_03 = {
   </div></div>
   <div class="step"><div class="num">7</div><div class="sc">
     <h4>回灌 + 循环</h4>
-    <p>把新 token 作为下一步输入再 <span class="mono">decode</span>；过去 token 的 K/V 已存在 KV cache 里，无需重算。</p>
+    <p>把新 token 作为下一步输入再 <span class="mono">decode</span>；过去 token 的 K/V 已存在 KV cache 里，无需重算——于是循环每转一圈只多算一个 token。</p>
     <p class="mono">src/llama-kv-cache.cpp</p>
   </div></div>
 </div>
 
+<h2>放大第 3 步：一次 decode 内部</h2>
+<p>七步里最"重"的是第 3 步 <span class="mono">decode</span>。别把它当成一个黑盒——拆开看，一次前向内部正好是三小步串起来：</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_decode</div><div class="nd">一次前向</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">建计算图</div><div class="nd">llama-graph.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">后端执行</div><div class="nd">ggml-backend</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">logits</div><div class="nd">llama_get_logits_ith</div></div>
+</div>
+<p>所以"一次 decode"= <strong>建计算图 + 后端执行 -&gt; logits</strong>：先由 <span class="mono">src/llama-graph.cpp</span> 的 <span class="mono">llm_graph_*</span>（经 <span class="mono">src/llama-model.cpp</span> 的 <span class="mono">build_graph</span> 拼出）把这一步运算<strong>描述成一张图</strong>，再交 <span class="mono">ggml-backend</span> 调度到硬件上<strong>真正算</strong>，算完用 <span class="mono">llama_get_logits_ith</span> 取出"下一个 token 的分数向量"。它的产出是 <strong>logits</strong>——不是文字，也不是已经选好的 token。</p>
+
+<h2>prefill vs decode：两种节奏</h2>
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
   这个循环其实分两种节奏：<strong>第一次前向（prefill）</strong>把<strong>整段 prompt 并行地</strong>一次算完，
   顺手把每个 token 的 K/V 填进 <strong>KV cache</strong>；之后每一步 <strong>decode</strong> 只算<strong>一个新 token</strong>，
   直接复用缓存里过去的 K/V，<strong>不再重算整段历史</strong>——这就是循环能跑得快、能在本地跑得起来的关键。
 </div>
+<p>把这两种节奏摆到一条时间线上，差别一眼就清楚：prefill 是<strong>一段宽</strong>的并行块，decode 是<strong>一格一格</strong>往后接的小步。</p>
+<div class="timeline">
+  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">整段 prompt（t1…t5）一次并行算，填满 KV cache</span></div>
+  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8…</span></div>
+</div>
+<p class="acc-intro">Prefill 把整段提示词<strong>一次并行</strong>算完；之后每步 decode <strong>只算 1 个新 token</strong>，所以"接着往下写"很便宜。</p>
 
+<h2>KV cache 为什么让循环不贵</h2>
+<p>承上：decode 之所以每步只算一个新 token，靠的就是 <strong>KV cache</strong>。它把每个算过的 token 的 <strong>K/V</strong> 存下来，下一步直接复用，免去重算整段历史：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>KV cache</b>：每生成一个 token 就把它的 K/V 追加进缓存，下一步直接复用、不重算历史</div>
+  <div class="cells"><span class="lab">prefill 后</span><span class="cell">K1</span><span class="cell">K2</span><span class="cell">K3</span><span class="cell">K4</span><span class="cell">K5</span></div>
+  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1…K5（复用）</span><span class="cell hl">+K6</span></div>
+  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1…K6（复用）</span><span class="cell hl">+K7</span></div>
+</div>
+<p>每一行只多出<strong>一个高亮新格</strong>（<span class="mono">+K6</span>、<span class="mono">+K7</span>），前面灰掉的部分都是"<strong>复用、不重算</strong>"。没有这层缓存，生成第 n 个 token 就得把前面 n-1 个全重算一遍；有了它，每步的<strong>新增计算</strong>基本是常数——这就是自回归循环能在本地便宜地一直转下去的原因。</p>
+
+<h2>对回最小主线</h2>
 <div class="card detail">
   <div class="tag">🔬 细节 / 源码对应</div>
   把这 7 步对回上一课的 C API 主线，就是下面这段伪代码骨架，每一行正好对应一步：
@@ -783,42 +817,78 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <p style="margin:.5rem 0 0">循环体就是"自回归"引擎：每转一圈吐一个 token，直到 <span class="mono">llama_vocab_is_eog</span> 命中结束符才停。</p>
 </div>
 
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个常见问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么 decode 输出的是 logits、不是文字？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>一句话：</strong>一次前向只算到"打分"为止。<span class="mono">logits</span> 是<strong>词表上每个 token 的"分数向量"</strong>——词表多大它就多长，每个 token 一个分，谁高谁低而已，还没"拍板"。</p>
+    <p><strong>选哪个是另一步：</strong>从这串分数里挑出一个 token，是<strong>采样器</strong>的事（<span class="mono">src/llama-sampler.cpp</span> 的 <span class="mono">llama_sampler_sample</span>，按贪心 / top-k / top-p 等策略选）；把选中的 token 再<strong>还原成文字</strong>，是 <span class="mono">llama_token_to_piece</span>（<span class="mono">src/llama-vocab.cpp</span>）的事。</p>
+    <p><strong>为什么这么分：</strong>把"打分 / 选词 / 还原文字"三件事拆开，采样策略就能随意替换而不动前向——同一份 logits，换个采样器就有不同风格的输出。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> KV cache 到底省了什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>省的是"重算过去"：</strong>没有它，生成第 n 个 token 要把前 n-1 个<strong>重算一遍</strong> -&gt; 总成本约 <span class="mono">O(n^2)</span>；有了它，每步只算<strong>新 token</strong> 的 K/V 并追加进缓存 -&gt; 约 <span class="mono">O(n)</span>。</p>
+    <p><strong>注意别夸大：</strong>注意力对历史的<strong>扫描</strong>仍是每步 <span class="mono">O(n)</span>（要看过去所有 token），省掉的是<strong>重复计算过去 token 的 K/V</strong>，不是把注意力也变成常数。</p>
+    <p><strong>源码：</strong>缓存的分配、写入与复用在 <span class="mono">src/llama-kv-cache.cpp</span>；上下文越长，这块占用越大，也是本地推理要预留内存的地方。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> "计算图"是什么？为什么先建图再算？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>一句话：</strong><span class="mono">ggml</span> 先把这一步运算<strong>描述成一张图</strong>（节点是算子：matmul、rope、softmax……，边是数据流），再交后端按图执行。</p>
+    <p><strong>谁来建：</strong>图由 <span class="mono">src/llama-graph.cpp</span> 的 <span class="mono">llm_graph_*</span> 搭骨架、由 <span class="mono">src/llama-model.cpp</span> 的 <span class="mono">build_graph</span> 按具体模型结构拼出；建好后交 <span class="mono">ggml-backend</span> 调度执行。</p>
+    <p><strong>为什么分两步：</strong>把"<strong>描述</strong>运算"与"<strong>执行</strong>运算"分开，同一张图就能落到不同后端（CPU / CUDA / Metal……）上跑，也便于做内存复用、算子融合等优化——这是 ggml 能"一处描述、多端执行"的根。</p>
+  </div>
+</details>
+
 <div class="card key">
   <div class="tag">✅ 本课要点</div>
   <ul>
-    <li>一次推理 = <strong>分词 -> 组批 -> 解码(前向) -> 取 logits -> 采样 -> 还原文字 -> 回灌循环</strong>。</li>
-    <li>"一次 decode"内部 = <strong>建计算图 + 后端执行</strong>；它的产出是<strong>下一个 token 的 logits</strong>（不是文字，也不是已经选好的 token）。</li>
-    <li><strong>prefill</strong> 把整段 prompt 一次性并行算完；之后每一步只算<strong>一个新 token</strong>。</li>
-    <li><strong>KV cache</strong> 记住过去的 K/V——这是"循环不重算、能在本地跑"的关键。</li>
+    <li>一次推理 = <strong>分词 -&gt; 组批 -&gt; 解码(前向) -&gt; 取 logits -&gt; 采样 -&gt; 还原文字 -&gt; 回灌循环</strong>。</li>
+    <li>"一次 decode"内部 = <strong>建计算图 + 后端执行</strong>；它的产出是<strong>下一个 token 的 logits</strong>（不是文字，也不是已经选好的 token）——选词靠采样器，还原文字靠 <span class="mono">llama_token_to_piece</span>。</li>
+    <li><strong>prefill</strong> 把整段 prompt 一次性<strong>并行</strong>算完；之后每一步 <strong>decode</strong> 只算<strong>一个新 token</strong>。</li>
+    <li><strong>KV cache</strong> 记住过去的 K/V，把朴素实现的 <span class="mono">O(n^2)</span> 重算摊成约 <span class="mono">O(n)</span>（但注意力对历史的扫描仍是每步 <span class="mono">O(n)</span>）——这是"循环不重算、能在本地跑"的关键。</li>
   </ul>
 </div>
 
 <div class="card spark">
   <div class="tag">💡 设计亮点</div>
   <strong>自回归 + KV cache</strong> 把每一步从"重算整段历史"变成"只算一个新 token"，
-  避开了朴素实现里 O(n^2) 的重复计算——这正是本地大模型推理能跑得动的关键原因之一。
+  避开了朴素实现里 <span class="mono">O(n^2)</span> 的重复计算；再加上 <strong>decode 内部"先建图、后执行"</strong>的分层，
+  让同一套推理既能把单步成本压到接近常数，又能落到各种后端上跑——这正是本地大模型推理能跑得动的关键原因之一。
 </div>
 """,
     "en": r"""
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-Lesson 01 gave you the minimal main line (load -> tokenize -> decode loop -> sample). This lesson plays it in
+Lesson 01 gave you the minimal main line (load -&gt; tokenize -&gt; decode loop -&gt; sample). This lesson plays it in
 <strong>slow motion</strong>: how <strong>one token</strong> is produced from the prompt step by step, then
-<strong>fed back</strong> to the tail of the queue to drive the next step.
+<strong>fed back</strong> to the tail of the queue to drive the next step. We first walk the <strong>7-step data flow</strong>,
+then <strong>zoom into the heaviest part - "one decode"</strong> - to see it is really "build a compute graph, run it on the
+backend, then emit logits"; finally we use the <strong>prefill / decode rhythms</strong> and the <strong>KV cache</strong> to
+explain why this loop can keep turning <strong>cheaply, round after round</strong>, on local hardware.
 </p>
 
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
   Think of one inference as a <strong>relay race / assembly line</strong>: the whole prompt enters at the start,
   passes a few stations (tokenize, forward, sample...), and the finish line emits <strong>one character</strong>;
-  that character is appended to the <strong>tail</strong> of the queue to start the next leg. One extra character per loop.
+  that character is appended to the <strong>tail</strong> of the queue to start the next leg. One extra character per loop -
+  and the characters <strong>already computed</strong> at the front never have to queue up again, which is exactly the
+  "cheapness" the <strong>KV cache</strong> will preserve for us later.
 </div>
 
 <h2>The 7-step data flow</h2>
-<p>Break "turn a prompt into the next token" apart and it is exactly these 7 steps, flowing left to right:</p>
+<p>Break "turn a prompt into the next token" apart and it is exactly these 7 steps, flowing top to bottom:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Tokenize</h4>
-    <p>Cut the prompt text into a sequence of token ids - the model understands numeric ids, not characters.</p>
+    <p>Cut the prompt text into a sequence of token ids - the model understands numeric ids, not characters; the same sentence can split into completely different ids under a different tokenizer.</p>
     <p class="mono">src/llama-vocab.cpp · llama_tokenize</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
@@ -828,17 +898,17 @@ Lesson 01 gave you the minimal main line (load -> tokenize -> decode loop -> sam
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>Decode (forward)</h4>
-    <p><span class="mono">llama_decode</span> runs one forward pass; internally it first <strong>builds the compute graph</strong>, then hands it to the <strong>backend</strong> to run on hardware.</p>
+    <p><span class="mono">llama_decode</span> runs one forward pass; internally it first <strong>builds the compute graph</strong>, then hands it to the <strong>backend</strong> to run on hardware. This is the heaviest step - the next section <strong>zooms into</strong> it.</p>
     <p class="mono">src/llama-context.cpp · llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
   </div></div>
   <div class="step"><div class="num">4</div><div class="sc">
     <h4>Get logits</h4>
-    <p>Read out the "score vector for the next token" from this forward pass - one score per token in the vocabulary.</p>
+    <p>Read out the "score vector for the next token" from this forward pass - one score per token in the vocabulary. At this point <strong>no</strong> token has been chosen yet.</p>
     <p class="mono">src/llama-context.cpp · llama_get_logits_ith</p>
   </div></div>
   <div class="step"><div class="num">5</div><div class="sc">
     <h4>Sample</h4>
-    <p>The sampler chain picks one token from the logits by some strategy (greedy / top-k / top-p...).</p>
+    <p>The sampler chain picks one token from the logits by some strategy (greedy / top-k / top-p...); a different strategy can pick a different token from the very same logits.</p>
     <p class="mono">src/llama-sampler.cpp · llama_sampler_sample</p>
   </div></div>
   <div class="step"><div class="num">6</div><div class="sc">
@@ -848,11 +918,25 @@ Lesson 01 gave you the minimal main line (load -> tokenize -> decode loop -> sam
   </div></div>
   <div class="step"><div class="num">7</div><div class="sc">
     <h4>Feed-back + loop</h4>
-    <p>The new token becomes the next step's input and we <span class="mono">decode</span> again; past tokens' K/V already live in the KV cache, so nothing is recomputed.</p>
+    <p>The new token becomes the next step's input and we <span class="mono">decode</span> again; past tokens' K/V already live in the KV cache, so nothing is recomputed - each turn of the loop adds just one token of work.</p>
     <p class="mono">src/llama-kv-cache.cpp</p>
   </div></div>
 </div>
 
+<h2>Zoom into step 3: inside one decode</h2>
+<p>The heaviest of the 7 steps is step 3, <span class="mono">decode</span>. Don't treat it as a black box - opened up, one forward pass is exactly three little steps chained together:</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_decode</div><div class="nd">one forward pass</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">build graph</div><div class="nd">llama-graph.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">run on backend</div><div class="nd">ggml-backend</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">logits</div><div class="nd">llama_get_logits_ith</div></div>
+</div>
+<p>So "one decode" = <strong>build graph + run on backend -&gt; logits</strong>: first <span class="mono">llm_graph_*</span> in <span class="mono">src/llama-graph.cpp</span> (assembled by <span class="mono">build_graph</span> in <span class="mono">src/llama-model.cpp</span>) <strong>describes</strong> this step's computation <strong>as a graph</strong>, then <span class="mono">ggml-backend</span> schedules it onto hardware to <strong>actually compute</strong>, and afterwards <span class="mono">llama_get_logits_ith</span> reads out the "score vector for the next token". Its output is <strong>logits</strong> - not text, and not an already-chosen token.</p>
+
+<h2>prefill vs decode: two rhythms</h2>
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
   The loop actually has two rhythms: the <strong>first forward pass (prefill)</strong> computes the
@@ -861,7 +945,24 @@ Lesson 01 gave you the minimal main line (load -> tokenize -> decode loop -> sam
   from the cache instead of <strong>recomputing the whole history</strong> - the key to why the loop is fast and
   can run locally.
 </div>
+<p>Put the two rhythms on one timeline and the difference is obvious at a glance: prefill is <strong>one wide</strong> parallel block, decode is <strong>cell-by-cell</strong> steps appended after it.</p>
+<div class="timeline">
+  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1…t5) computed in parallel at once, filling the KV cache</span></div>
+  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8…</span></div>
+</div>
+<p class="acc-intro">Prefill computes the whole prompt <strong>in parallel</strong> in one pass; afterwards each decode step computes <strong>just 1 new token</strong>, so "keep writing" is cheap.</p>
 
+<h2>Why the KV cache keeps the loop cheap</h2>
+<p>Following on: the reason decode computes only one new token per step is the <strong>KV cache</strong>. It stores each computed token's <strong>K/V</strong> so the next step reuses them directly, sparing a recompute of the whole history:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>KV cache</b>: each generated token appends its K/V to the cache; the next step reuses them directly instead of recomputing history</div>
+  <div class="cells"><span class="lab">after prefill</span><span class="cell">K1</span><span class="cell">K2</span><span class="cell">K3</span><span class="cell">K4</span><span class="cell">K5</span></div>
+  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1…K5 (reuse)</span><span class="cell hl">+K6</span></div>
+  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1…K6 (reuse)</span><span class="cell hl">+K7</span></div>
+</div>
+<p>Each row adds only <strong>one highlighted new cell</strong> (<span class="mono">+K6</span>, <span class="mono">+K7</span>); everything greyed out before it is "<strong>reused, not recomputed</strong>". Without this cache, generating the n-th token would recompute all n-1 before it; with it, the <strong>added work</strong> per step is essentially constant - that is why an autoregressive loop can keep running cheaply on local hardware.</p>
+
+<h2>Back to the minimal main line</h2>
 <div class="card detail">
   <div class="tag">🔬 Details / source</div>
   Map these 7 steps back onto the previous lesson's C API main line and it is just this pseudo-code skeleton,
@@ -880,21 +981,52 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <p style="margin:.5rem 0 0">The loop body is the "autoregressive" engine: each turn emits one token, until <span class="mono">llama_vocab_is_eog</span> hits an end token.</p>
 </div>
 
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three common questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why does decode output logits, not text? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>In one line:</strong> a forward pass only goes as far as "scoring". <span class="mono">logits</span> is a <strong>score vector over the whole vocabulary</strong> - as long as the vocab is big, with one score per token; it just says who is higher or lower, nothing is "decided" yet.</p>
+    <p><strong>Picking is a separate step:</strong> choosing one token out of those scores is the <strong>sampler</strong>'s job (<span class="mono">llama_sampler_sample</span> in <span class="mono">src/llama-sampler.cpp</span>, by greedy / top-k / top-p...); turning the chosen token <strong>back into text</strong> is <span class="mono">llama_token_to_piece</span>'s job (<span class="mono">src/llama-vocab.cpp</span>).</p>
+    <p><strong>Why split it:</strong> separating "score / pick / detokenize" lets the sampling strategy be swapped freely without touching the forward pass - same logits, a different sampler, a different style of output.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What exactly does the KV cache save? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>It saves "recomputing the past":</strong> without it, generating the n-th token would <strong>recompute the previous n-1</strong> -&gt; total cost about <span class="mono">O(n^2)</span>; with it, each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; about <span class="mono">O(n)</span>.</p>
+    <p><strong>Don't overstate it:</strong> attention's <strong>scan</strong> over history is still <span class="mono">O(n)</span> per step (it must look at all past tokens); what is saved is <strong>recomputing past tokens' K/V</strong>, not turning attention itself into a constant.</p>
+    <p><strong>Source:</strong> allocation, writing and reuse of the cache live in <span class="mono">src/llama-kv-cache.cpp</span>; the longer the context, the bigger this footprint - and the memory you must reserve for local inference.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> What is a "compute graph", and why build then run? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>In one line:</strong> <span class="mono">ggml</span> first <strong>describes</strong> this step's computation <strong>as a graph</strong> (nodes are operators: matmul, rope, softmax...; edges are data flow), then the backend executes the graph.</p>
+    <p><strong>Who builds it:</strong> the graph skeleton comes from <span class="mono">llm_graph_*</span> in <span class="mono">src/llama-graph.cpp</span>, assembled per the concrete model structure by <span class="mono">build_graph</span> in <span class="mono">src/llama-model.cpp</span>; once built it is handed to <span class="mono">ggml-backend</span> to schedule and run.</p>
+    <p><strong>Why two steps:</strong> separating "<strong>describe</strong>" from "<strong>execute</strong>" lets the same graph run on different backends (CPU / CUDA / Metal...), and makes optimizations like memory reuse and operator fusion possible - the root of ggml's "describe once, run on many backends".</p>
+  </div>
+</details>
+
 <div class="card key">
   <div class="tag">✅ Key points</div>
   <ul>
-    <li>One inference = <strong>tokenize -> batch -> decode(forward) -> get logits -> sample -> detokenize -> feed-back loop</strong>.</li>
-    <li>"One decode" internally = <strong>build compute graph + run on backend</strong>; its output is the <strong>next token's logits</strong> (not text, not an already-chosen token).</li>
-    <li><strong>Prefill</strong> computes the whole prompt in parallel once; afterwards each step computes only <strong>one new token</strong>.</li>
-    <li>The <strong>KV cache</strong> remembers past K/V - the key to "loop without recompute, runnable locally".</li>
+    <li>One inference = <strong>tokenize -&gt; batch -&gt; decode(forward) -&gt; get logits -&gt; sample -&gt; detokenize -&gt; feed-back loop</strong>.</li>
+    <li>"One decode" internally = <strong>build compute graph + run on backend</strong>; its output is the <strong>next token's logits</strong> (not text, not an already-chosen token) - picking is the sampler's job, detokenizing is <span class="mono">llama_token_to_piece</span>'s.</li>
+    <li><strong>Prefill</strong> computes the whole prompt <strong>in parallel</strong> once; afterwards each <strong>decode</strong> step computes only <strong>one new token</strong>.</li>
+    <li>The <strong>KV cache</strong> remembers past K/V, amortizing the naive <span class="mono">O(n^2)</span> recompute down to about <span class="mono">O(n)</span> (though attention's scan over history is still <span class="mono">O(n)</span> per step) - the key to "loop without recompute, runnable locally".</li>
   </ul>
 </div>
 
 <div class="card spark">
   <div class="tag">💡 Design insight</div>
   <strong>Autoregression + the KV cache</strong> turn each step from "recompute the whole history" into
-  "compute just one new token", avoiding the naive O(n^2) recomputation - one of the key reasons local LLM
-  inference is feasible at all.
+  "compute just one new token", avoiding the naive <span class="mono">O(n^2)</span> recomputation; together with decode's internal
+  <strong>"build graph, then execute"</strong> split, the same inference can both shrink per-step cost toward constant and
+  run on a variety of backends - one of the key reasons local LLM inference is feasible at all.
 </div>
 """,
 }

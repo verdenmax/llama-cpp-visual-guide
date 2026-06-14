@@ -206,6 +206,26 @@ QUIZZES = {
             },
             {
                 "q": {
+                    "zh": "“一次 llama_decode 前向”在内部大致是怎么完成的？",
+                    "en": "Internally, how is a single llama_decode forward pass carried out?",
+                },
+                "opts": [
+                    {"zh": "直接查表返回下一个 token", "en": "It looks the next token up in a table directly"},
+                    {
+                        "zh": "先建计算图，再交后端执行，最后得到 logits",
+                        "en": "It builds a compute graph, runs it on the backend, then yields logits",
+                    },
+                    {"zh": "在 Python 里跑一遍前向", "en": "It runs a forward pass in Python"},
+                    {"zh": "重新加载并量化模型权重", "en": "It reloads and quantizes the model weights"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "decode 内部先由 llama-graph.cpp 的 llm_graph_*（经 build_graph）把这步描述成计算图，再交 ggml-backend 调度到硬件执行，算完用 llama_get_logits_ith 取出 logits。",
+                    "en": "Inside decode, llm_graph_* in llama-graph.cpp (via build_graph) describes the step as a compute graph, ggml-backend schedules it on hardware, then llama_get_logits_ith reads out the logits.",
+                },
+            },
+            {
+                "q": {
                     "zh": "自回归循环里，为什么每生成一个新 token 不必把整段历史重算一遍？",
                     "en": "In the autoregressive loop, why doesn't each new token require recomputing the whole history?",
                 },
