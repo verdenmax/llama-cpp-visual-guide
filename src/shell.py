@@ -21,7 +21,7 @@ def head_meta(title, description, og_type="website"):
         f'<meta name="theme-color" content="#c2630e">\n'
         f'<link rel="icon" type="image/svg+xml" href="{FAVICON}">\n'
         f'<meta property="og:type" content="{og_type}">\n'
-        f'<meta property="og:site_name" content="LangChain 图解教程">\n'
+        f'<meta property="og:site_name" content="llama.cpp 图解教程">\n'
         f'<meta property="og:title" content="{t}">\n'
         f'<meta property="og:description" content="{d}">\n'
         f'<meta name="twitter:card" content="summary">\n'
@@ -284,7 +284,9 @@ table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-s
   box-shadow:var(--shadow); transition:.15s; }
 .pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
 
-/* ---- bilingual language switch ---- */
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
 html[data-lang="en"] .lang-zh { display: none !important; }
 html[data-lang="zh"] .lang-en { display: none !important; }
 .langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
@@ -335,6 +337,7 @@ NAV_SCRIPT = """
 
 LANG_JS = """
 function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
   var d=document.documentElement;
   d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
   try{localStorage.setItem('lcvg-lang',l);}catch(e){}
@@ -352,67 +355,75 @@ LANG_BOOT = (
 )
 
 
-def page(filename, content, standalone=False, home_href=None):
-    """Wrap lesson content in the full HTML shell with nav.
+def page(filename, content, home_href="../index.html"):
+    """Wrap one lesson's bilingual content in the full HTML shell.
 
-    When ``standalone`` is True, navigation uses plain relative ``href`` links
-    (works via file:// and any static server). Otherwise it uses ``data-nav``
-    plus a script that targets the brainstorm companion's ``/files/`` route.
-
-    ``home_href`` overrides the link back to the index (use ``"../index.html"``
-    when lesson pages live in a subdirectory). Sibling lesson links always use
-    bare filenames, so lessons must share one directory.
+    ``content`` is a dict ``{"zh": html, "en": html}``. Both are emitted; CSS
+    shows only the active language. Navigation uses plain relative ``href``
+    links so the site works via file:// and any static server (lessons share
+    one directory; home defaults to ``../index.html``).
     """
     idx = next(i for i, p in enumerate(PAGES) if p[0] == filename)
-    fname, title, part = PAGES[idx]
+    fname, title_zh, title_en, part_zh, part_en = PAGES[idx]
     total = len(PAGES)
     pct = int((idx + 1) / total * 100)
-    home = home_href or INDEX_FILE
+    home = home_href
 
-    prev_link = (
-        f'<a class="prev" data-nav="{PAGES[idx-1][0]}"><div class="dir">← 上一课</div>'
-        f'<div class="ttl">{PAGES[idx-1][1]}</div></a>'
-        if idx > 0 else
-        f'<a class="prev" data-nav="{home}"><div class="dir">← 返回</div>'
-        f'<div class="ttl">目录</div></a>'
-    )
-    next_link = (
-        f'<a class="next" data-nav="{PAGES[idx+1][0]}"><div class="dir">下一课 →</div>'
-        f'<div class="ttl">{PAGES[idx+1][1]}</div></a>'
-        if idx + 1 < total else
-        f'<a class="next" data-nav="{home}"><div class="dir">完成 →</div>'
-        f'<div class="ttl">返回目录</div></a>'
-    )
+    if idx > 0:
+        p = PAGES[idx - 1]
+        prev_link = (
+            f'<a class="prev" href="{p[0]}"><div class="dir">{bi("← 上一课", "← Prev")}</div>'
+            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+        )
+    else:
+        prev_link = (
+            f'<a class="prev" href="{home}"><div class="dir">{bi("← 返回", "← Back")}</div>'
+            f'<div class="ttl">{bi("目录", "Contents")}</div></a>'
+        )
+    if idx + 1 < total:
+        p = PAGES[idx + 1]
+        next_link = (
+            f'<a class="next" href="{p[0]}"><div class="dir">{bi("下一课 →", "Next →")}</div>'
+            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+        )
+    else:
+        next_link = (
+            f'<a class="next" href="{home}"><div class="dir">{bi("完成 →", "Done →")}</div>'
+            f'<div class="ttl">{bi("返回目录", "Back to index")}</div></a>'
+        )
 
-    script_tag = "" if standalone else f"<script>{NAV_SCRIPT}</script>"
+    title_tag = f"{idx+1:02d} · {title_zh} / {title_en} - llama.cpp 图解教程"
+    desc = f"{part_zh}｜{title_zh} - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）"
+
     html = f"""<!DOCTYPE html>
-<html lang="zh-CN"><head>
+<html lang="zh-CN" data-lang="zh"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{idx+1:02d} · {title} — LangChain 图解教程</title>
-{head_meta(f"{idx+1:02d} · {title} — LangChain 图解教程", f"{part}｜{title}：面向新手的 LangChain 图解教程，配真实源码对应、折叠深挖与设计亮点。", og_type="article")}
+{LANG_BOOT}
+<title>{title_tag}</title>
+{head_meta(title_tag, desc, og_type="article")}
 <style>{CSS}</style>
 </head><body>
 <div class="topbar">
   <div class="topbar-inner">
-    <a class="home" data-nav="{home}">📘 LangChain 图解教程 · <b>目录</b></a>
-    <span class="pill">{part}</span>
+    <a class="home" href="{home}">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill">{bi(part_zh, part_en)}</span>
     <span class="pill">{idx+1:02d} / {total:02d}</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
   <div class="progress"><span style="width:{pct}%"></span></div>
 </div>
 <div class="wrap">
   <div class="hero">
-    <div class="part">{part}</div>
-    <h1>{title}</h1>
+    <div class="part">{bi(part_zh, part_en)}</div>
+    <h1><span class="lang-zh">{title_zh}</span><span class="lang-en">{title_en}</span></h1>
   </div>
-  {content}
+  <div class="lang-zh">{content["zh"]}</div>
+  <div class="lang-en">{content["en"]}</div>
   <div class="footnav">{prev_link}{next_link}</div>
 </div>
-{script_tag}
+<script>{LANG_JS}</script>
 </body></html>"""
-    if standalone:
-        html = html.replace('data-nav="', 'href="')
     return html
 
 
