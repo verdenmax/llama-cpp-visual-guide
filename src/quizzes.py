@@ -92,6 +92,53 @@ QUIZZES = {
             },
         ],
     },
+    "02-project-map.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "整个项目对外的公共 C API 主要收在哪里？",
+                    "en": "Where does the project's public C API mainly live?",
+                },
+                "opts": [
+                    {"zh": "<code>src/llama.cpp</code>", "en": "<code>src/llama.cpp</code>"},
+                    {"zh": "<code>include/llama.h</code>", "en": "<code>include/llama.h</code>"},
+                    {"zh": "<code>common/common.h</code>", "en": "<code>common/common.h</code>"},
+                    {"zh": "<code>ggml/include/ggml.h</code>", "en": "<code>ggml/include/ggml.h</code>"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "对外契约只有 include/llama.h（外加 llama-cpp.h 的 C++ 薄封装）；src 与 ggml 是内部实现。",
+                    "en": "The public contract is just include/llama.h (plus the llama-cpp.h C++ wrapper); src and ggml are internal.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把一个 HuggingFace 模型变成能被 llama.cpp 运行的文件，靠的是哪部分？",
+                    "en": "What turns a HuggingFace model into a file llama.cpp can run?",
+                },
+                "opts": [
+                    {"zh": "<code>tools/llama-quantize</code>", "en": "<code>tools/llama-quantize</code>"},
+                    {"zh": "<code>src/llama-model-loader</code>", "en": "<code>src/llama-model-loader</code>"},
+                    {
+                        "zh": "<code>gguf-py/</code> + <code>convert_*.py</code>（Python 转换脚本）",
+                        "en": "<code>gguf-py/</code> + <code>convert_*.py</code> (Python conversion scripts)",
+                    },
+                    {"zh": "ggml 后端", "en": "the ggml backends"},
+                ],
+                "answer": 2,
+                "why": {
+                    "zh": "转换在 Python 侧（gguf-py + convert_*.py）产出 .gguf；C++ 运行时只负责加载已是 GGUF 的文件。",
+                    "en": "Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "如果要新增一个采样策略，你认为应该改哪个目录？为什么不是 ggml/？",
+                "en": "If you were adding a new sampling strategy, which directory would you change - and why not ggml/?",
+            },
+        ],
+    },
 }
 
 

@@ -48,6 +48,8 @@ def head_meta(title, description, og_type="website"):
 PAGES = [
     ("01-what-is-llamacpp.html", "llama.cpp 是什么", "What is llama.cpp",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("02-project-map.html", "项目全景地图", "The project map",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
 ]
 
 
@@ -434,6 +436,8 @@ def page(filename, content, home_href="../index.html"):
 SUBTITLES = {
     "01-what-is-llamacpp.html": ("解决什么问题 · 零依赖哲学",
                                  "What problem it solves; zero-dep philosophy"),
+    "02-project-map.html": ("ggml / src·llama / common / tools / 转换脚本",
+                            "ggml / src·llama / common / tools / converters"),
 }
 
 
