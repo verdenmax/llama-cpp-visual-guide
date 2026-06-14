@@ -1,4 +1,4 @@
-"""Shared HTML shell (CSS design system + navigation) for the LangChain tutorial."""
+"""Shared HTML shell (CSS design system + navigation) for the llama.cpp visual guide."""
 
 import base64
 
