@@ -487,7 +487,7 @@ def index_page(lesson_prefix="lessons/"):
 <div class="topbar">
   <div class="topbar-inner">
     <span class="home">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></span>
-    <span class="pill"><span class="lang-zh">共 {total} 课 · {nparts} 个部分</span><span class="lang-en">{total} lessons · {nparts} parts</span></span>
+    <span class="pill"><span class="lang-zh">共 {total} 课 · {nparts} 个部分</span><span class="lang-en">{total} lesson{'' if total == 1 else 's'} · {nparts} part{'' if nparts == 1 else 's'}</span></span>
     <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
   <div class="progress"><span style="width:100%"></span></div>
