@@ -361,7 +361,41 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
   把"<strong>推理</strong>"从"<strong>训练框架</strong>"里彻底剥离，再用<strong>量化 + 自研引擎</strong>压掉对 Python 生态与大显存的依赖
   ——这就是它能"一个文件到处跑"的根本原因。
 </div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. llama.cpp 把“推理”从“训练框架”里彻底剥离出来。这个定位选择，最主要换来了什么？</div>
+  <ol class="opts">
+    <li>自动帮你下载模型</li>
+    <li>甩掉对 Python 生态与大显存的依赖，能在消费级硬件上本地、离线、低成本跑</li>
+    <li>更高的训练精度</li>
+    <li>让模型变得更聪明</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。只做推理，就能用零依赖 C/C++ + 量化 + 自研 ggml 引擎压掉重依赖——这正是它“一个文件到处跑”的根本原因。</div></div></div>
+  </details>
 </div>
+<div class="quiz">
+  <div class="qn">2. 整体四层结构里，真正“把算子算在硬件上（SIMD / GPU kernel）”的是哪一层？</div>
+  <ol class="opts">
+    <li>后端层 CPU/CUDA/Metal/Vulkan</li>
+    <li>工具层 tools/</li>
+    <li>引擎层 ggml</li>
+    <li>推理层 src/llama-*</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。ggml 负责描述张量与计算图、调度算子；真正落到硬件上的乘加由各“后端”实现。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>什么场景你会选 llama.cpp，而不是 vLLM？反过来又是什么场景？把你的判断依据写下来。</li>
+  </ul>
+</div>
+</div></div>
   <div class="lang-en">
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
 llama.cpp is an <strong>LLM inference engine written in plain C/C++</strong>: it takes an already-trained
@@ -452,7 +486,41 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
   <strong>quantization + a custom engine</strong> to drop the dependency on the Python ecosystem and large VRAM -
   that is why it can "run anywhere from a single file".
 </div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. llama.cpp deliberately separates inference from the training framework. What does that choice mainly buy?</div>
+  <ol class="opts">
+    <li>It downloads models for you automatically</li>
+    <li>Dropping the Python-ecosystem and large-VRAM dependency, so it runs locally/offline/cheaply on consumer hardware</li>
+    <li>Higher training accuracy</li>
+    <li>It makes the model itself smarter</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>。By doing inference only, it can use zero-dependency C/C++ + quantization + the ggml engine to shed heavy deps - the root reason it 'runs anywhere from a single file'.</div></div></div>
+  </details>
 </div>
+<div class="quiz">
+  <div class="qn">2. In the four-layer structure, which layer actually 'runs the ops on hardware (SIMD / GPU kernels)'?</div>
+  <ol class="opts">
+    <li>the backend layer CPU/CUDA/Metal/Vulkan</li>
+    <li>tools/ layer</li>
+    <li>the ggml engine layer</li>
+    <li>inference layer src/llama-*</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>。ggml describes tensors/graphs and schedules ops; the actual hardware math is implemented by each backend.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>When would you pick llama.cpp over vLLM, and when the reverse? Write down the criteria you'd use.</li>
+  </ul>
+</div>
+</div></div>
   <div class="footnav"><a class="prev" href="../index.html"><div class="dir"><span class="lang-zh">← 返回</span><span class="lang-en">← Back</span></div><div class="ttl"><span class="lang-zh">目录</span><span class="lang-en">Contents</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
 </div>
 <script>
