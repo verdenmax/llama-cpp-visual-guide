@@ -151,6 +151,29 @@ QUIZZES = {
                     "en": "Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.",
                 },
             },
+            {
+                "q": {
+                    "zh": "<code>common/</code> 在整个项目里扮演什么角色？",
+                    "en": "What role does <code>common/</code> play in the project?",
+                },
+                "opts": [
+                    {
+                        "zh": "推理库本体：模型加载、计算图、采样都在这里",
+                        "en": "The inference core: model loading, the compute graph and sampling all live here",
+                    },
+                    {
+                        "zh": "各可执行程序共用的“胶水”（参数解析、采样封装、日志…），推理本体在 <code>src/llama-*</code>",
+                        "en": "The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code>",
+                    },
+                    {"zh": "ggml 的一部分，负责底层算子", "en": "Part of ggml, handling the low-level ops"},
+                    {"zh": "一组 Python 转换脚本", "en": "A set of Python conversion scripts"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "common 把各程序重复要写的胶水（arg、采样封装、日志…）抽出来给 tools/ 复用；真正的加载/计算图/采样在 src/llama-*，对外只经 include/llama.h。",
+                    "en": "common factors out the boilerplate the programs repeat (arg, sampler wrapper, logging...) for tools/ to reuse; the real loading/graph/sampling is in src/llama-*, exposed only via include/llama.h.",
+                },
+            },
         ],
         "open": [
             {

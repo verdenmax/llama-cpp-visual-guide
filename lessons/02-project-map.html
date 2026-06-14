@@ -310,32 +310,35 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div>
   <div class="lang-zh">
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-第一次打开 llama.cpp，几百个文件、十几个目录，很容易发懵。其实它<strong>分层非常清晰</strong>：
-先给你一张"校园地图"，认清每个目录在干什么，后面读源码就不会迷路。
+第一次打开 llama.cpp，几百个文件、十几个目录，很容易发懵：到底先看哪儿？其实它<strong>分层非常清晰</strong>，每个目录各司其职。
+这一课先给你一张"校园地图"——认清顶层目录在干什么，再把它们对回上一课的"四层"，接着看清<strong>一个模型从训练到运行</strong>
+要穿过哪几个目录、边界落在哪里。读完这张图，无论你是想跑工具还是钻源码，都不会迷路。
 </p>
 
 <div class="card analogy">
   <div class="tag">🔌 生活类比</div>
   把整个仓库想成一座<strong>工厂园区</strong>，而<strong>目录就是地图</strong>：每个车间（目录）只干一件事——
-  有的造引擎（<span class="mono">ggml</span>）、有的负责装配（<span class="mono">src/llama-*</span>）、有的是对外门店（<span class="mono">tools/</span>）。
-  先认地图，比一头扎进某个车间更重要。
+  有的造引擎（<span class="mono">ggml</span>）、有的负责装配（<span class="mono">src/llama-*</span>）、有的是对外门店（<span class="mono">tools/</span>），
+  还有的是把原料运进园区的<strong>码头</strong>（<span class="mono">convert_*.py</span> 把外面的模型转成 <span class="inline">.gguf</span>）。
+  先认地图、看清车间之间怎么衔接，比一头扎进某个车间更重要。
 </div>
 
 <h2>顶层目录速览</h2>
-<p>站在仓库根目录，按"作用"把主要目录读一遍：</p>
+<p>站在仓库根目录，先别急着点开文件，按"<strong>这个目录到底在干什么</strong>"把主要目录扫一遍。下面这张表就是地图的图例：</p>
 <table class="t">
   <tr><th>目录</th><th>作用</th></tr>
-  <tr><td class="mono">ggml/</td><td>自研<strong>张量引擎</strong>：张量 · 计算图 · 算子 · 后端调度；独立子项目（自带 <code>include/</code> 与 <code>src/</code>）</td></tr>
-  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</td><td>各<strong>硬件后端</strong>（还有 hip / sycl / musa / opencl 等十余种）</td></tr>
-  <tr><td class="mono">src/</td><td><strong>llama 推理库</strong>：<code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> …</td></tr>
-  <tr><td class="mono">include/</td><td><strong>公共 C API</strong>：<code>llama.h</code>；<code>llama-cpp.h</code>（C++ 薄封装 + RAII）</td></tr>
-  <tr><td class="mono">common/</td><td><strong>复用工具</strong>：<code>arg</code>（参数解析）· <code>sampling</code>（采样封装）· <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> …</td></tr>
+  <tr><td class="mono">ggml/</td><td>自研<strong>张量引擎</strong>：张量 · 计算图 · 算子 · 后端调度；独立子项目（自带 <code>include/</code> 与 <code>src/</code>），是整个项目最底层、也最"硬"的一块</td></tr>
+  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</td><td>各<strong>硬件后端</strong>，把算子真正算在 CPU / GPU 上（还有 hip / sycl / musa / opencl 等十余种）</td></tr>
+  <tr><td class="mono">src/</td><td><strong>llama 推理库</strong>：把引擎拼成"会话级"推理——<code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> …</td></tr>
+  <tr><td class="mono">include/</td><td><strong>公共 C API</strong>：<code>llama.h</code>（唯一对外契约）；<code>llama-cpp.h</code>（C++ 薄封装 + RAII）</td></tr>
+  <tr><td class="mono">common/</td><td><strong>复用工具 / 胶水</strong>：<code>arg</code>（参数解析）· <code>sampling</code>（采样封装）· <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> …；给程序用，不是推理库本体</td></tr>
   <tr><td class="mono">tools/</td><td><strong>可执行程序</strong>：<span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code>（多模态）· <code>llama-perplexity</code> · <span class="mono">llama-bench</span> …</td></tr>
-  <tr><td class="mono">examples/</td><td>小型示例程序（如 <code>simple</code>）</td></tr>
-  <tr><td class="mono">gguf-py/</td><td><strong>Python 的 GGUF 读写库</strong></td></tr>
-  <tr><td class="mono">convert_hf_to_gguf.py 等</td><td><strong>Python 转换脚本</strong>（共 4 个 <code>convert_*.py</code>，主力是 HuggingFace -> GGUF）</td></tr>
+  <tr><td class="mono">examples/</td><td>小型示例程序：<code>simple</code> 用两百多行演示最小推理，是最佳"可读"入口</td></tr>
+  <tr><td class="mono">gguf-py/</td><td><strong>Python 的 GGUF 读写库</strong>：转换脚本靠它写出 <span class="inline">.gguf</span></td></tr>
+  <tr><td class="mono">convert_hf_to_gguf.py 等</td><td><strong>Python 转换脚本</strong>（共 4 个 <code>convert_*.py</code>，主力是 HuggingFace -&gt; GGUF）</td></tr>
   <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>模型数据 / 测试 / 文档 / GBNF 示例 / 构建系统</td></tr>
 </table>
+<p>一个简单的判断法：<strong>越往下越"硬"</strong>——<span class="mono">ggml/</span> 偏数学与硬件，<span class="mono">src/</span> 偏模型与会话逻辑，<span class="mono">tools/</span> 与 <span class="mono">common/</span> 偏"给人用"。而真正对外暴露的，自始至终只有 <span class="mono">include/llama.h</span> 这一个公共头文件。</p>
 
 <h2>它们怎么对上"四层"</h2>
 <p>把上面这些目录映射回上一课的"四层"结构，就一目了然：</p>
@@ -351,24 +354,82 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 <p>除了这条主干，还有两条<strong>支线</strong>：① <strong>模型准备</strong>——<span class="mono">gguf-py/</span> 加 <span class="mono">convert_*.py</span>（Python）把 HuggingFace 模型转成 <span class="inline">.gguf</span>，再喂给引擎；② <strong>配套支撑</strong>——<span class="mono">common/</span>（把库粘成程序的胶水）以及 <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span>。</p>
 
-<div class="card detail">
-  <div class="tag">🔬 细节 / 源码对应</div>
-  想读源码却不知道从哪下手？按目标找入口：想看<strong>怎么用</strong> → <span class="mono">tools/</span> 与 <span class="mono">examples/simple</span>；想看<strong>推理逻辑</strong> → <span class="mono">src/llama-*</span>；想看<strong>底层算子</strong> → <span class="mono">ggml/</span>；想看<strong>对外契约</strong> → 只有一个 <span class="mono">include/llama.h</span>。先认入口，再逐层往下钻。
+<h2>一个模型怎么从训练到运行</h2>
+<p>把目录串起来看，一个模型的"一生"其实是一条很直的流水线：左边在 Python 里准备，右边在 C++ 里运行，中间靠一个文件交接。顺着这条线走一遍，就知道每个目录在整条链路里站在哪一站：</p>
+<div class="flow">
+  <div class="node"><div class="nt">HF / PyTorch 模型</div><div class="nd">safetensors 权重</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python · gguf-py</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model.gguf</div><div class="nd">单文件 · 权重 + 元数据</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llama_model_load_from_file</div><div class="nd">C++ 运行时</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">跑出字</div><div class="nd">llama-cli / server</div></div>
 </div>
+<p class="acc-intro">左半截是 <strong>Python（准备）</strong>，右半截是 <strong>C++（运行）</strong>，两者的边界就是中间那个 <span class="inline">.gguf</span> 文件。</p>
+<p>这条边界很关键：转换脚本只在<strong>准备</strong>阶段跑一次，产出 <span class="inline">.gguf</span> 后就退场；运行时<strong>完全不碰 Python</strong>，只认这一个文件。所以同一个 <span class="inline">.gguf</span>，既能喂给 <span class="mono">llama-cli</span>，也能喂给 <span class="mono">llama-server</span> 或 <span class="mono">examples/simple</span>——它们共享同一套加载与推理代码。</p>
+
+<h2>想读源码，从哪进</h2>
+<p>想读源码，却不知道从哪下手？与其从第一个文件啃到最后一个，不如<strong>先想清楚你的目标</strong>，再选对应的入口往下钻。常见的三种目标，正好对应三个入口：</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">想会用</span><span class="name">tools/ · examples/simple</span></div>
+    <div class="ld">先把 <code>llama-cli</code>/<code>llama-server</code> 跑起来，再读 <code>examples/simple</code> 的最小调用</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">懂推理</span><span class="name">src/llama-*</span></div>
+    <div class="ld">按主线读：<code>llama-model-loader</code> -&gt; <code>llama-graph</code> -&gt; <code>llama-kv-cache</code> -&gt; <code>llama-sampler</code></div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">懂算子</span><span class="name">ggml/</span></div>
+    <div class="ld">进引擎：<code>ggml.c</code> 与各 <code>ggml-*</code> 后端，看张量/算子/调度怎么实现</div></div>
+</div>
+<p>不管从哪条路进，记住对外只有一个<strong>公共契约</strong> <span class="mono">include/llama.h</span>：搞不清某个能力归谁管时，先回到这个头文件，看它把哪些函数暴露给了外面。先认入口，再逐层往下钻，比漫无目的地翻文件高效得多。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想把这张地图看透的同学点开看；只想记住主干的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> GGUF 文件里到底装了什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>示例：</strong>一个 <span class="inline">.gguf</span> 从头到尾大致分四段：<strong>文件头</strong>（magic + 版本 + 张量数 / 元数据条数）-&gt; <strong>元数据 KV</strong>（一串键值对：层数、维度、词表大小、分词器、聊天模板…）-&gt; <strong>张量信息表</strong>（每个权重张量的名字、形状、类型、偏移）-&gt; <strong>权重数据块</strong>（真正的数值，按张量信息里的偏移排布）。</p>
+    <p><strong>为什么这么设计：</strong>全部塞进<strong>一个文件</strong>，加载时直接 <span class="mono">mmap</span> 进内存、按偏移随用随取，不必先解压或拷贝；超参数与词表都<strong>自带</strong>，引擎读完头部就知道"这是什么模型、该怎么搭计算图"，<strong>免配置文件、免 Python</strong>。</p>
+    <p><strong>源码：</strong>读写与解析在 <span class="mono">ggml/src/gguf.cpp</span>（<code>gguf_kv</code> / <code>gguf_tensor_info</code> 等结构）；把这些元数据接到 llama 模型上、按 key 取超参的，是 <span class="mono">src/llama-model-loader.cpp</span>。</p>
+    <p><strong>替代：</strong>更早的 <strong>GGML / GGJT</strong> 等老格式也干过同样的活，但字段零散、版本兼容差，<strong>已被 GGUF 取代</strong>（仓库里还留着一个 <code>convert_llama_ggml_to_gguf.py</code> 专门把老格式转过来）。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么 ggml 是独立子项目？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>一句话：</strong>因为<strong>同一个引擎被多个项目复用</strong>——ggml 不只为 llama.cpp 服务，所以它被切成一个能单独存在的子项目。</p>
+    <p><strong>例子：</strong>同作者的 <span class="mono">whisper.cpp</span>（语音转文字）等项目也直接拿 ggml 当计算引擎；它们和 llama.cpp 共享同一套张量、算子与后端代码，只是上层逻辑不同。</p>
+    <p><strong>源码：</strong><span class="mono">ggml/</span> 自带完整的 <code>include/</code> 与 <code>src/</code>，对外的张量 / 计算图 / 后端接口是独立的一套，不依赖 <span class="mono">src/llama-*</span> 里的任何东西——依赖是<strong>单向</strong>的：llama 用 ggml，反过来不成立。</p>
+    <p><strong>好处：</strong>引擎可以<strong>独立演进</strong>（加新算子、新后端不必动 llama），也<strong>便于嵌入</strong>到任何想要本地张量计算的程序里；llama 只是它众多使用者中的一个。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> common/ 和 src/ 有啥区别？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>一句话：</strong><span class="mono">common/</span> 是各个可执行程序<strong>共用的胶水</strong>，<strong>不是</strong>推理库本体；真正的推理逻辑住在 <span class="mono">src/llama-*</span>。</p>
+    <p><strong>它管什么：</strong>命令行参数解析、把 C API 的采样接口包成更顺手的封装、日志、下载模型、聊天模板拼接……这些是"把库变成一个能用的程序"要反复写的活，抽到 <span class="mono">common/</span> 让 <span class="mono">tools/</span> 里每个程序都能复用。</p>
+    <p><strong>它不管什么：</strong>加载权重、搭计算图、KV cache、真正的采样算法——这些都在 <span class="mono">src/llama-*</span> 里，对外只通过 <span class="mono">include/llama.h</span> 暴露。换句话说，删掉 <span class="mono">common/</span> 推理库照样能用，只是你得自己手写一堆样板代码。</p>
+    <p><strong>源码：</strong>参数解析看 <span class="mono">common/arg.cpp</span>，其余通用工具看 <span class="mono">common/common.cpp</span>。</p>
+  </div>
+</details>
 
 <div class="card key">
   <div class="tag">✅ 本课要点</div>
   <ul>
-    <li>仓库 = <strong>ggml</strong>（引擎）+ <strong>src/llama-*</strong>（推理库）+ <strong>common</strong>（胶水）+ <strong>tools</strong>（程序）+ <strong>gguf-py / convert_*</strong>（模型准备）。</li>
-    <li>对外只有一个公共 C API：<span class="mono">include/llama.h</span>——这就是整个项目的<strong>外部契约</strong>。</li>
-    <li><strong>ggml</strong> 是独立、可复用的引擎；<strong>llama</strong> 只是它的众多使用者之一。</li>
-    <li>模型<strong>准备</strong>（Python 转换）与<strong>运行</strong>（C++ 推理）完全分离，桥梁就是 <span class="inline">.gguf</span> 文件。</li>
+    <li>仓库 = <strong>ggml</strong>（引擎）+ <strong>src/llama-*</strong>（推理库）+ <strong>common</strong>（胶水）+ <strong>tools / examples</strong>（程序）+ <strong>gguf-py / convert_*</strong>（模型准备）。</li>
+    <li>这些目录对回<strong>四层</strong>：后端 -&gt; ggml -&gt; src/llama-* -&gt; tools，自底向上各管一段。</li>
+    <li>一个模型的一生是条流水线：<strong>Python 准备</strong> -&gt; <span class="inline">.gguf</span> -&gt; <strong>C++ 运行</strong>，边界就是那个单文件。</li>
+    <li>读源码<strong>按目标选入口</strong>：想会用看 <span class="mono">tools/</span> 与 <span class="mono">examples/simple</span>，懂推理看 <span class="mono">src/llama-*</span>，懂算子看 <span class="mono">ggml/</span>。</li>
+    <li>对外只有一个公共 C API：<span class="mono">include/llama.h</span>——整个项目的<strong>外部契约</strong>。</li>
+    <li><strong>ggml</strong> 是独立、可复用的引擎；<strong>common</strong> 是胶水、不是推理本体——两者都别和 <span class="mono">src/llama-*</span> 搞混。</li>
   </ul>
 </div>
 
 <div class="card spark">
   <div class="tag">💡 设计亮点</div>
-  引擎与模型逻辑分层 + 单头文件公共 API + Python 准备 / C++ 运行解耦——于是 ggml 能独立演进、llama 轻量地嵌进来用、转换脚本也不会拖累运行时。
+  引擎与模型逻辑分层 + 单头文件公共 API + Python 准备 / C++ 运行解耦——于是 ggml 能独立演进、被 <span class="mono">whisper.cpp</span> 等项目复用，llama 轻量地嵌进来用，转换脚本也不会拖累运行时。一张<strong>清晰的目录地图</strong>背后，其实是一组刻意划好的<strong>边界</strong>：谁依赖谁、谁对外、谁只是胶水，全摆在明面上。
 </div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -398,6 +459,19 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。转换在 Python 侧（gguf-py + convert_*.py）产出 .gguf；C++ 运行时只负责加载已是 GGUF 的文件。</div></div></div>
   </details>
 </div>
+<div class="quiz">
+  <div class="qn">3. <code>common/</code> 在整个项目里扮演什么角色？</div>
+  <ol class="opts">
+    <li>ggml 的一部分，负责底层算子</li>
+    <li>推理库本体：模型加载、计算图、采样都在这里</li>
+    <li>一组 Python 转换脚本</li>
+    <li>各可执行程序共用的“胶水”（参数解析、采样封装、日志…），推理本体在 <code>src/llama-*</code></li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。common 把各程序重复要写的胶水（arg、采样封装、日志…）抽出来给 tools/ 复用；真正的加载/计算图/采样在 src/llama-*，对外只经 include/llama.h。</div></div></div>
+  </details>
+</div>
 <div class="card spark">
   <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
   <ul>
@@ -407,34 +481,41 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div></div>
   <div class="lang-en">
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-Open llama.cpp for the first time and a few hundred files across a dozen directories can feel overwhelming.
-In fact it is <strong>cleanly layered</strong>: here is a "campus map" so you know what each directory does and
-never get lost reading the source.
+Open llama.cpp for the first time and a few hundred files across a dozen directories can feel overwhelming -
+where do you even start? In fact it is <strong>cleanly layered</strong>, every directory with one job. This lesson
+hands you a "campus map": learn what the top-level directories do, map them back onto the four layers from the
+previous lesson, then watch how <strong>a model travels from training to running</strong> - which directories it
+passes through and where the boundary falls. Once you have read the map you will not get lost, whether you want
+to run a tool or dig into the source.
 </p>
 
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
   Think of the whole repo as a <strong>factory campus</strong>, and the <strong>directories are the map</strong>: each
   workshop (directory) does exactly one job - some build the engine (<span class="mono">ggml</span>), some do the
-  assembly (<span class="mono">src/llama-*</span>), some are the storefront (<span class="mono">tools/</span>).
-  Reading the map first beats diving head-first into one workshop.
+  assembly (<span class="mono">src/llama-*</span>), some are the storefront (<span class="mono">tools/</span>), and
+  some are the <strong>loading dock</strong> that brings raw material in (<span class="mono">convert_*.py</span> turns
+  an outside model into a <span class="inline">.gguf</span>). Reading the map - and seeing how the workshops
+  connect - beats diving head-first into one workshop.
 </div>
 
 <h2>Top-level directories at a glance</h2>
-<p>Standing at the repo root, here are the main directories by what they do:</p>
+<p>Standing at the repo root, do not rush to open files; first scan the main directories by "<strong>what does this
+directory actually do</strong>". The table below is the map's legend:</p>
 <table class="t">
   <tr><th>Directory</th><th>Role</th></tr>
-  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors · compute graph · ops · backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>)</td></tr>
-  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
-  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: <code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> ...</td></tr>
-  <tr><td class="mono">include/</td><td>The <strong>public C API</strong>: <code>llama.h</code>; <code>llama-cpp.h</code> (a thin C++ wrapper + RAII)</td></tr>
-  <tr><td class="mono">common/</td><td><strong>Reusable helpers</strong>: <code>arg</code> (argument parsing) · <code>sampling</code> (sampler wrapper) · <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> ...</td></tr>
+  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors · compute graph · ops · backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
+  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
+  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> ...</td></tr>
+  <tr><td class="mono">include/</td><td>The <strong>public C API</strong>: <code>llama.h</code> (the only external contract); <code>llama-cpp.h</code> (a thin C++ wrapper + RAII)</td></tr>
+  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) · <code>sampling</code> (sampler wrapper) · <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
   <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code> (multimodal) · <code>llama-perplexity</code> · <span class="mono">llama-bench</span> ...</td></tr>
-  <tr><td class="mono">examples/</td><td>Small example programs (e.g. <code>simple</code>)</td></tr>
-  <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong></td></tr>
-  <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>; the main one is HuggingFace -> GGUF)</td></tr>
+  <tr><td class="mono">examples/</td><td>Small example programs: <code>simple</code> demonstrates minimal inference in a couple hundred lines - the best "readable" entry point</td></tr>
+  <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong>: the conversion scripts use it to write out a <span class="inline">.gguf</span></td></tr>
+  <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>; the main one is HuggingFace -&gt; GGUF)</td></tr>
   <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
 </table>
+<p>A simple rule of thumb: <strong>the lower you go, the "harder" it gets</strong> - <span class="mono">ggml/</span> leans toward math and hardware, <span class="mono">src/</span> toward model and session logic, <span class="mono">tools/</span> and <span class="mono">common/</span> toward "for people to use". The only thing ever exposed to the outside, start to finish, is the single public header <span class="mono">include/llama.h</span>.</p>
 
 <h2>How they map onto the "four layers"</h2>
 <p>Mapping those directories back onto the four-layer structure from the previous lesson makes it click:</p>
@@ -450,25 +531,85 @@ never get lost reading the source.
 </div>
 <p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span>.</p>
 
-<div class="card detail">
-  <div class="tag">🔬 Details / source</div>
-  Not sure where to start reading? Pick an entry point by goal: to see <strong>how it is used</strong> -> <span class="mono">tools/</span> and <span class="mono">examples/simple</span>; the <strong>inference logic</strong> -> <span class="mono">src/llama-*</span>; the <strong>low-level ops</strong> -> <span class="mono">ggml/</span>; the <strong>single public contract</strong> -> just <span class="mono">include/llama.h</span>. Find the entry first, then drill down.
+<h2>How a model travels from training to running</h2>
+<p>String the directories together and a model's "life" is really a straight pipeline: prepared in Python on the left, run in C++ on the right, handed over through one file in the middle. Walk it once and you will see which station each directory occupies along the whole chain:</p>
+<div class="flow">
+  <div class="node"><div class="nt">HF / PyTorch model</div><div class="nd">safetensors weights</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python · gguf-py</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file · weights + metadata</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llama_model_load_from_file</div><div class="nd">C++ runtime</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">emit text</div><div class="nd">llama-cli / server</div></div>
 </div>
+<p class="acc-intro">The left half is <strong>Python (prepare)</strong>, the right half is <strong>C++ (run)</strong>, and the boundary between them is exactly that <span class="inline">.gguf</span> file in the middle.</p>
+<p>That boundary matters: the conversion script runs <strong>once</strong> during prep, emits the <span class="inline">.gguf</span>, and then bows out; the runtime <strong>never touches Python</strong> and knows only this one file. So the same <span class="inline">.gguf</span> can feed <span class="mono">llama-cli</span>, <span class="mono">llama-server</span>, or <span class="mono">examples/simple</span> alike - they share the same loading and inference code.</p>
+
+<h2>Want to read the source - where to enter</h2>
+<p>Want to read the source but not sure where to start? Rather than chewing from the first file to the last, <strong>decide your goal first</strong>, then pick the matching entry point and drill down. Three common goals map to three entries:</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ · examples/simple</span></div>
+    <div class="ld">First get <code>llama-cli</code>/<code>llama-server</code> running, then read the minimal call in <code>examples/simple</code></div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">to grok inference</span><span class="name">src/llama-*</span></div>
+    <div class="ld">Follow the main line: <code>llama-model-loader</code> -&gt; <code>llama-graph</code> -&gt; <code>llama-kv-cache</code> -&gt; <code>llama-sampler</code></div></div>
+  <div class="layer l-main"><div class="lh"><span class="badge">to grok the ops</span><span class="name">ggml/</span></div>
+    <div class="ld">Into the engine: <code>ggml.c</code> and the <code>ggml-*</code> backends - how tensors/ops/scheduling are implemented</div></div>
+</div>
+<p>Whichever path you take, remember there is only one <strong>public contract</strong>, <span class="mono">include/llama.h</span>: when you cannot tell which part owns some capability, go back to this header and see which functions it exposes to the outside. Find the entry first, then drill down layer by layer - far more efficient than flipping through files at random.</p>
+
+<h2>Go deeper (optional)</h2>
+<p class="acc-intro">Three questions below - open them if you want to see the whole map clearly; skip them if you just want the main trunk.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What is actually inside a GGUF file? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>Example:</strong> a <span class="inline">.gguf</span> is roughly four sections end to end: a <strong>header</strong> (magic + version + tensor count / metadata count) -&gt; <strong>metadata KV</strong> (a list of key-value pairs: layers, dimensions, vocab size, tokenizer, chat template...) -&gt; a <strong>tensor info table</strong> (each weight tensor's name, shape, type, offset) -&gt; <strong>weight data blocks</strong> (the actual numbers, laid out by the offsets in the tensor info).</p>
+    <p><strong>Why this design:</strong> packing everything into <strong>one file</strong> means loading just <span class="mono">mmap</span>s it into memory and reads on demand by offset - no unpacking or copying first; the hyper-parameters and vocab are <strong>built in</strong>, so once the engine reads the header it knows "what model this is and how to build the compute graph", with <strong>no config files and no Python</strong>.</p>
+    <p><strong>Source:</strong> reading/parsing lives in <span class="mono">ggml/src/gguf.cpp</span> (the <code>gguf_kv</code> / <code>gguf_tensor_info</code> structs); wiring that metadata onto a llama model and fetching hyper-parameters by key is <span class="mono">src/llama-model-loader.cpp</span>.</p>
+    <p><strong>Alternatives:</strong> the earlier <strong>GGML / GGJT</strong> formats did the same job, but with scattered fields and poor version compatibility - now <strong>superseded by GGUF</strong> (the repo still keeps a <code>convert_llama_ggml_to_gguf.py</code> just to migrate the old format over).</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is ggml a standalone sub-project? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>In one line:</strong> because <strong>the same engine is reused by several projects</strong> - ggml does not serve only llama.cpp, so it is carved out as a sub-project that can stand on its own.</p>
+    <p><strong>Example:</strong> same-author projects like <span class="mono">whisper.cpp</span> (speech-to-text) use ggml directly as their compute engine; they share the very same tensor, op, and backend code as llama.cpp, only the upper layer differs.</p>
+    <p><strong>Source:</strong> <span class="mono">ggml/</span> ships its own complete <code>include/</code> and <code>src/</code>; its tensor / graph / backend interface is a self-contained set that depends on nothing in <span class="mono">src/llama-*</span> - the dependency is <strong>one-way</strong>: llama uses ggml, never the reverse.</p>
+    <p><strong>Benefit:</strong> the engine can <strong>evolve independently</strong> (new ops or backends without touching llama) and is <strong>easy to embed</strong> in any program that wants local tensor compute; llama is just one of its many users.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> What is the difference between common/ and src/? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>In one line:</strong> <span class="mono">common/</span> is the <strong>glue shared</strong> by the executable programs - it is <strong>not</strong> the inference library itself; the real inference logic lives in <span class="mono">src/llama-*</span>.</p>
+    <p><strong>What it handles:</strong> command-line argument parsing, wrapping the C API's sampler into something handier, logging, downloading models, assembling chat templates... the boilerplate every "turn the library into a usable program" needs, factored into <span class="mono">common/</span> so each program in <span class="mono">tools/</span> can reuse it.</p>
+    <p><strong>What it does not:</strong> it does <strong>not</strong> load weights, build the compute graph, manage the KV cache, or implement the actual sampling algorithms - those all live in <span class="mono">src/llama-*</span> and are exposed only through <span class="mono">include/llama.h</span>. In other words, delete <span class="mono">common/</span> and the inference library still works; you would just hand-write a pile of boilerplate yourself.</p>
+    <p><strong>Source:</strong> for argument parsing see <span class="mono">common/arg.cpp</span>; for the rest of the shared helpers see <span class="mono">common/common.cpp</span>.</p>
+  </div>
+</details>
 
 <div class="card key">
   <div class="tag">✅ Key points</div>
   <ul>
-    <li>The repo = <strong>ggml</strong> (engine) + <strong>src/llama-*</strong> (inference lib) + <strong>common</strong> (glue) + <strong>tools</strong> (programs) + <strong>gguf-py / convert_*</strong> (model prep).</li>
+    <li>The repo = <strong>ggml</strong> (engine) + <strong>src/llama-*</strong> (inference lib) + <strong>common</strong> (glue) + <strong>tools / examples</strong> (programs) + <strong>gguf-py / convert_*</strong> (model prep).</li>
+    <li>Those directories map back onto the <strong>four layers</strong>: backend -&gt; ggml -&gt; src/llama-* -&gt; tools, bottom-up, each owning one slice.</li>
+    <li>A model's life is a pipeline: <strong>Python prep</strong> -&gt; <span class="inline">.gguf</span> -&gt; <strong>C++ run</strong>; the single file is the boundary.</li>
+    <li>Read the source <strong>by goal</strong>: to use it look at <span class="mono">tools/</span> and <span class="mono">examples/simple</span>, to grok inference <span class="mono">src/llama-*</span>, to grok the ops <span class="mono">ggml/</span>.</li>
     <li>The only public C API is <span class="mono">include/llama.h</span> - the project's <strong>external contract</strong>.</li>
-    <li><strong>ggml</strong> is an independent, reusable engine; <strong>llama</strong> is just one of its users.</li>
-    <li>Model <strong>prep</strong> (Python conversion) and <strong>run</strong> (C++ inference) are fully separated; the bridge is the <span class="inline">.gguf</span> file.</li>
+    <li><strong>ggml</strong> is an independent, reusable engine; <strong>common</strong> is glue, not the inference core - do not confuse either with <span class="mono">src/llama-*</span>.</li>
   </ul>
 </div>
 
 <div class="card spark">
   <div class="tag">💡 Design insight</div>
   Engine / model-logic layering + a single-header public API + Python-prep / C++-run decoupling - so ggml can
-  evolve independently, llama embeds lightly, and conversion never burdens the runtime.
+  evolve independently and be reused by projects like <span class="mono">whisper.cpp</span>, llama embeds lightly, and
+  conversion never burdens the runtime. Behind one <strong>clean directory map</strong> sits a set of deliberately
+  drawn <strong>boundaries</strong>: who depends on whom, who faces outward, who is just glue - all out in the open.
 </div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -496,6 +637,19 @@ never get lost reading the source.
   <details class="accordion">
     <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What role does <code>common/</code> play in the project?</div>
+  <ol class="opts">
+    <li>Part of ggml, handling the low-level ops</li>
+    <li>The inference core: model loading, the compute graph and sampling all live here</li>
+    <li>A set of Python conversion scripts</li>
+    <li>The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code></li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common factors out the boilerplate the programs repeat (arg, sampler wrapper, logging...) for tools/ to reuse; the real loading/graph/sampling is in src/llama-*, exposed only via include/llama.h.</div></div></div>
   </details>
 </div>
 <div class="card spark">
