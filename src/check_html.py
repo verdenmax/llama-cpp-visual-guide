@@ -12,7 +12,11 @@ Checks each lesson + index:
 * cross-references "第 N 课" within 1..MAX_LESSON (forward refs allowed)
 * nav prev/next chain matches shell.PAGES order
 * index TOC lists every page; '共 N 课 · N 个部分' pill matches PAGES
+* registry CONTENT has non-empty zh+en for every PAGES filename (no orphan keys)
 * (WARN) every lesson has a key-points card and an analogy card
+
+The "第 N 课" cross-ref check matches Chinese-Arabic digits only (e.g. "第 12 课");
+English ("Lesson N") or Chinese-numeral references are not range-checked.
 """
 import os
 import re
@@ -23,11 +27,13 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, HERE)
 
 import shell  # noqa: E402
+from registry import CONTENT  # noqa: E402
 
 PAGES = shell.PAGES
 ORDER = [p[0] for p in PAGES]
 TOTAL = len(PAGES)
 MAX_LESSON = 40  # planned final lesson count; cross-refs may point forward
+MIN_CONTENT = 80  # min chars of zh/en source content per lesson (catch empty translations)
 
 PRE_INLINE = ("span", "strong", "b", "em", "u", "a")
 SOFT_EXEMPT = {"40-glossary.html"}
@@ -54,7 +60,9 @@ def check_lesson(fname, html):
     if nd != ns:
         add("ERR", fname, f"details({nd}) != summary({ns})")
     h1 = len(re.findall(r"<h1", html))
-    if h1 != 1:
+    if h1 == 0:
+        add("ERR", fname, "missing <h1>")
+    elif h1 > 1:
         add("WARN", fname, f"{h1} <h1> (expected 1)")
     if "<title>" not in html:
         add("ERR", fname, "missing <title>")
@@ -98,10 +106,28 @@ def main():
         if not os.path.exists(path):
             add("ERR", fname, "lesson file missing (run build.py)")
             continue
-        check_lesson(fname, open(path, encoding="utf-8").read())
+        with open(path, encoding="utf-8") as fh:
+            check_lesson(fname, fh.read())
+
+    # registry <-> PAGES alignment + non-empty bilingual source content.
+    # Checking the source (not the rendered HTML) avoids being fooled by the
+    # shell chrome, which always emits lang-zh/lang-en spans.
+    for page in PAGES:
+        fname = page[0]
+        c = CONTENT.get(fname)
+        if c is None:
+            add("ERR", fname, "no registry CONTENT entry")
+            continue
+        for lang in ("zh", "en"):
+            if len(c.get(lang, "").strip()) < MIN_CONTENT:
+                add("ERR", fname, f"{lang} content missing or too short")
+    for fname in CONTENT:
+        if fname not in ORDER:
+            add("ERR", "registry", f"CONTENT key not in PAGES: {fname}")
 
     index_path = os.path.join(ROOT, shell.INDEX_FILE)
-    idx = open(index_path, encoding="utf-8").read()
+    with open(index_path, encoding="utf-8") as fh:
+        idx = fh.read()
     for page in PAGES:
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:
