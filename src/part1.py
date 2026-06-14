@@ -45,7 +45,7 @@ Python 代码——拿到一个 <span class="inline">.gguf</span>，引擎就知
     <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">…</span>
     <span class="lab">一块 32 个 × 16 bit</span>
   </div>
-  <div class="cg-cap" style="margin-top:.7rem"><b>Q4_0 量化后</b>：整块共享 1 个 scale，每个权重只存 4 bit 档位</div>
+  <div class="cg-cap" style="margin-top:.7rem"><b>Q4_0 量化后</b>：整块共享 1 个 scale，每个权重只存 4 bit 档位；反量化 = scale × (码值 − 8)</div>
   <div class="cells">
     <span class="cell scale">scale</span><span class="sep">×</span>
     <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">…</span>
@@ -155,8 +155,8 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
     <p><strong>示例：</strong>上面的 Q4_0 把 32 个权重分成一<strong>块</strong>，整块共享一个 scale；块内每个权重只存一个 4 bit 的"档位"，
     用时再乘回 scale 还原。关键在于<strong>缩放是按小块算的</strong>，每块都能贴合自己那段数值的范围。</p>
     <p><strong>为什么够用：</strong>神经网络权重大多挤在 0 附近、对单个权重的微小误差并不敏感；按块缩放 + 低位宽，
-    就能在"省 4 倍空间"和"几乎不掉精度"之间取得平衡。更进一步的 <strong>K-quant</strong> 还会用<strong>重要性矩阵</strong>
-    区分哪些权重更关键，把有限的比特预算优先分给它们。</p>
+    就能在"省 4 倍空间"和"几乎不掉精度"之间取得平衡。更进一步的 <strong>K-quant</strong> 常<strong>可选</strong>配合<strong>重要性矩阵（imatrix）</strong>：
+    用它给每个权重的量化<strong>误差加权</strong>，让更关键的权重被<strong>更精确地保留</strong>（位宽不变——是误差被加权，而非给它更多比特）。</p>
     <p><strong>源码：</strong>量化与反量化的核心实现在 <span class="mono">ggml/src/ggml-quants.c</span>；重要性矩阵由 <span class="mono">tools/imatrix</span> 统计产出。</p>
     <p><strong>替代：</strong>GPTQ、AWQ 等也是主流量化方案，思路类似（按块 / 按通道缩放），只是格式与具体算法不同。</p>
   </div>
@@ -258,7 +258,7 @@ design keeps that loss almost unnoticeable:</p>
     <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">…</span>
     <span class="lab">a block of 32 x 16 bit</span>
   </div>
-  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level</div>
+  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale × (code − 8)</div>
   <div class="cells">
     <span class="cell scale">scale</span><span class="sep">×</span>
     <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">…</span>
@@ -384,8 +384,9 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
     <strong>scaling is done per small block</strong>, so each block hugs the value range of its own slice.</p>
     <p><strong>Why it is enough:</strong> network weights mostly cluster near 0 and are insensitive to tiny per-weight
     errors; per-block scaling + low bit-width strikes a balance between "4x smaller" and "barely any accuracy loss".
-    The further <strong>K-quant</strong> even uses an <strong>importance matrix</strong> to tell which weights matter
-    more and spends the limited bit budget on them first.</p>
+    <strong>K-quants</strong> can <strong>optionally</strong> pair with an <strong>importance matrix (imatrix)</strong>: it
+    <strong>weights</strong> each weight's quantization error so the more important weights are <strong>preserved more
+    faithfully</strong> (bit-width is unchanged - the error is weighted, bits are not reallocated).</p>
     <p><strong>Source:</strong> the core quant/dequant code lives in <span class="mono">ggml/src/ggml-quants.c</span>;
     the importance matrix is produced by <span class="mono">tools/imatrix</span>.</p>
     <p><strong>Alternatives:</strong> GPTQ and AWQ are mainstream too, with a similar idea (per-block / per-channel
