@@ -631,7 +631,7 @@ Assisted-by: GitHub Copilot"
    再把这个字**接回队尾**，开始下一棒。一次只多产出一个字。
 3. `<h2>` 七步数据流 + 一个 `<div class="vflow">`（**竖向编号步骤**；每步 `num` + `h4` 标题 + `p` 说明 + `.mono` 文件）。**七步（照此写，en 同序翻译）**：
    1. **分词 Tokenize** — prompt 文本 -> token id 序列 · `src/llama-vocab.cpp`（`llama_tokenize`）
-   2. **组批 Batch** — token + 位置 `pos` + 序列 `seq_id` 打包成一次输入 · `src/llama-batch.cpp`（`llama_batch_get_one`）
+   2. **组批 Batch** — 把 token 序列包成一次输入；用 `llama_batch_get_one` 时位置 `pos`/序列 `seq_id` 由 `llama_decode` 自动补（位置顺序、序列 0），多序列/自定义位置才用 `llama_batch_init` · `src/llama-batch.cpp`（`llama_batch_get_one`）
    3. **解码 Decode（前向）** — `llama_decode` 跑一次前向 · `src/llama-context.cpp`；
       内部：**建计算图** `src/llama-graph.cpp`（`llm_graph_*`）+ `src/llama-model.cpp`，再**在后端执行**（`ggml-backend`）
    4. **取 logits** — 拿到"下一个 token 的分数向量" · `llama_get_logits_ith`
