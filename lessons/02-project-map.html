@@ -335,7 +335,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <tr><td class="mono">tools/</td><td><strong>可执行程序</strong>：<span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code>（多模态）· <code>llama-perplexity</code> · <span class="mono">llama-bench</span> …</td></tr>
   <tr><td class="mono">examples/</td><td>小型示例程序：<code>simple</code> 用两百多行演示最小推理，是最佳"可读"入口</td></tr>
   <tr><td class="mono">gguf-py/</td><td><strong>Python 的 GGUF 读写库</strong>：转换脚本靠它写出 <span class="inline">.gguf</span></td></tr>
-  <tr><td class="mono">convert_hf_to_gguf.py 等</td><td><strong>Python 转换脚本</strong>（共 4 个 <code>convert_*.py</code>，主力是 HuggingFace -&gt; GGUF）</td></tr>
+  <tr><td class="mono">convert_hf_to_gguf.py 等</td><td><strong>Python 转换脚本</strong>（共 4 个 <code>convert_*.py</code>：3 个转换器 + 1 个 tokenizer 哈希维护脚本；主力是 HuggingFace -&gt; GGUF）</td></tr>
   <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>模型数据 / 测试 / 文档 / GBNF 示例 / 构建系统</td></tr>
 </table>
 <p>一个简单的判断法：<strong>越往下越"硬"</strong>——<span class="mono">ggml/</span> 偏数学与硬件，<span class="mono">src/</span> 偏模型与会话逻辑，<span class="mono">tools/</span> 与 <span class="mono">common/</span> 偏"给人用"。而真正对外暴露的，自始至终只有 <span class="mono">include/llama.h</span> 这一个公共头文件。</p>
@@ -389,7 +389,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <summary><span class="badge-num">1</span> GGUF 文件里到底装了什么？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
     <p><strong>示例：</strong>一个 <span class="inline">.gguf</span> 从头到尾大致分四段：<strong>文件头</strong>（magic + 版本 + 张量数 / 元数据条数）-&gt; <strong>元数据 KV</strong>（一串键值对：层数、维度、词表大小、分词器、聊天模板…）-&gt; <strong>张量信息表</strong>（每个权重张量的名字、形状、类型、偏移）-&gt; <strong>权重数据块</strong>（真正的数值，按张量信息里的偏移排布）。</p>
-    <p><strong>为什么这么设计：</strong>全部塞进<strong>一个文件</strong>，加载时直接 <span class="mono">mmap</span> 进内存、按偏移随用随取，不必先解压或拷贝；超参数与词表都<strong>自带</strong>，引擎读完头部就知道"这是什么模型、该怎么搭计算图"，<strong>免配置文件、免 Python</strong>。</p>
+    <p><strong>为什么这么设计：</strong>全部塞进<strong>一个文件</strong>，加载时直接 <span class="mono">mmap</span> 进内存、按偏移随用随取，不必先解压或拷贝（CPU 推理时近乎零拷贝；用 GPU 后端则权重还会再拷进显存）；超参数与词表都<strong>自带</strong>，引擎读完头部就知道"这是什么模型、该怎么搭计算图"，<strong>免配置文件、免 Python</strong>。</p>
     <p><strong>源码：</strong>读写与解析在 <span class="mono">ggml/src/gguf.cpp</span>（<code>gguf_kv</code> / <code>gguf_tensor_info</code> 等结构）；把这些元数据接到 llama 模型上、按 key 取超参的，是 <span class="mono">src/llama-model-loader.cpp</span>。</p>
     <p><strong>替代：</strong>更早的 <strong>GGML / GGJT</strong> 等老格式也干过同样的活，但字段零散、版本兼容差，<strong>已被 GGUF 取代</strong>（仓库里还留着一个 <code>convert_llama_ggml_to_gguf.py</code> 专门把老格式转过来）。</p>
   </div>
@@ -512,7 +512,7 @@ directory actually do</strong>". The table below is the map's legend:</p>
   <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code> (multimodal) · <code>llama-perplexity</code> · <span class="mono">llama-bench</span> ...</td></tr>
   <tr><td class="mono">examples/</td><td>Small example programs: <code>simple</code> demonstrates minimal inference in a couple hundred lines - the best "readable" entry point</td></tr>
   <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong>: the conversion scripts use it to write out a <span class="inline">.gguf</span></td></tr>
-  <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>; the main one is HuggingFace -&gt; GGUF)</td></tr>
+  <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>: 3 converters + 1 tokenizer-hash updater; the main one is HuggingFace -&gt; GGUF)</td></tr>
   <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
 </table>
 <p>A simple rule of thumb: <strong>the lower you go, the "harder" it gets</strong> - <span class="mono">ggml/</span> leans toward math and hardware, <span class="mono">src/</span> toward model and session logic, <span class="mono">tools/</span> and <span class="mono">common/</span> toward "for people to use". The only thing ever exposed to the outside, start to finish, is the single public header <span class="mono">include/llama.h</span>.</p>
@@ -566,7 +566,7 @@ directory actually do</strong>". The table below is the map's legend:</p>
   <summary><span class="badge-num">1</span> What is actually inside a GGUF file? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
     <p><strong>Example:</strong> a <span class="inline">.gguf</span> is roughly four sections end to end: a <strong>header</strong> (magic + version + tensor count / metadata count) -&gt; <strong>metadata KV</strong> (a list of key-value pairs: layers, dimensions, vocab size, tokenizer, chat template...) -&gt; a <strong>tensor info table</strong> (each weight tensor's name, shape, type, offset) -&gt; <strong>weight data blocks</strong> (the actual numbers, laid out by the offsets in the tensor info).</p>
-    <p><strong>Why this design:</strong> packing everything into <strong>one file</strong> means loading just <span class="mono">mmap</span>s it into memory and reads on demand by offset - no unpacking or copying first; the hyper-parameters and vocab are <strong>built in</strong>, so once the engine reads the header it knows "what model this is and how to build the compute graph", with <strong>no config files and no Python</strong>.</p>
+    <p><strong>Why this design:</strong> packing everything into <strong>one file</strong> means loading just <span class="mono">mmap</span>s it into memory and reads on demand by offset - no unpacking or copying first (near-zero-copy for CPU inference; with a GPU backend the weights are then copied into VRAM); the hyper-parameters and vocab are <strong>built in</strong>, so once the engine reads the header it knows "what model this is and how to build the compute graph", with <strong>no config files and no Python</strong>.</p>
     <p><strong>Source:</strong> reading/parsing lives in <span class="mono">ggml/src/gguf.cpp</span> (the <code>gguf_kv</code> / <code>gguf_tensor_info</code> structs); wiring that metadata onto a llama model and fetching hyper-parameters by key is <span class="mono">src/llama-model-loader.cpp</span>.</p>
     <p><strong>Alternatives:</strong> the earlier <strong>GGML / GGJT</strong> formats did the same job, but with scattered fields and poor version compatibility - now <strong>superseded by GGUF</strong> (the repo still keeps a <code>convert_llama_ggml_to_gguf.py</code> just to migrate the old format over).</p>
   </div>
