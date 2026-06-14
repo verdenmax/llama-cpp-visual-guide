@@ -5,9 +5,9 @@ import base64
 # ---- favicon (inline SVG, base64) ----
 _FAVICON_SVG = (
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
-    "<rect width='32' height='32' rx='7' fill='#1a7f64'/>"
-    "<text x='16' y='23' font-family='system-ui,sans-serif' font-size='20'"
-    " font-weight='700' fill='#fff' text-anchor='middle'>λ</text></svg>"
+    "<rect width='32' height='32' rx='7' fill='#c2630e'/>"
+    "<text x='16' y='22' font-family='system-ui,sans-serif' font-size='15'"
+    " font-weight='800' fill='#fff' text-anchor='middle'>ll</text></svg>"
 )
 FAVICON = "data:image/svg+xml;base64," + base64.b64encode(_FAVICON_SVG.encode()).decode()
 
@@ -18,7 +18,7 @@ def head_meta(title, description, og_type="website"):
     d = description.replace('"', "&quot;")
     return (
         f'<meta name="description" content="{d}">\n'
-        f'<meta name="theme-color" content="#1a7f64">\n'
+        f'<meta name="theme-color" content="#c2630e">\n'
         f'<link rel="icon" type="image/svg+xml" href="{FAVICON}">\n'
         f'<meta property="og:type" content="{og_type}">\n'
         f'<meta property="og:site_name" content="LangChain 图解教程">\n'
@@ -68,7 +68,7 @@ CSS = r"""
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
   --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
-  --accent: #1a7f64; --accent-soft: #e4f3ee; --accent-ink: #0f5c48;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
   --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
   --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
   --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
@@ -79,7 +79,7 @@ CSS = r"""
   :root {
     --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
     --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
-    --accent: #3fb892; --accent-soft: #14302a; --accent-ink: #8ee0c6;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
     --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
     --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
     --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
