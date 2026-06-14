@@ -30,36 +30,18 @@ def head_meta(title, description, og_type="website"):
     )
 
 
-# Ordered list of all pages: (filename, short title, part label)
+# Ordered list of all pages:
+# (filename, title_zh, title_en, part_zh, part_en)
 PAGES = [
-    ("01-what-is-langchain.html", "LangChain 是什么", "第一部分 · 宏观全景"),
-    ("02-monorepo.html", "Monorepo 全景", "第一部分 · 宏观全景"),
-    ("03-lifecycle.html", "一次调用的生命周期", "第一部分 · 宏观全景"),
-    ("04-messages.html", "消息系统", "第二部分 · 用户视角"),
-    ("05-chat-models.html", "聊天模型", "第二部分 · 用户视角"),
-    ("06-tools.html", "工具 Tools", "第二部分 · 用户视角"),
-    ("07-agents-intro.html", "Agent 入门", "第二部分 · 用户视角"),
-    ("08-runnable.html", "Runnable 万物之基", "第三部分 · 内部源码"),
-    ("09-runnable-compose.html", "Runnable 如何组合", "第三部分 · 内部源码"),
-    ("10-output-parsers.html", "输出解析器 Output Parsers", "第三部分 · 内部源码"),
-    ("11-chat-internals.html", "聊天模型内部", "第三部分 · 内部源码"),
-    ("12-tool-internals.html", "工具调用内部", "第三部分 · 内部源码"),
-    ("13-agent-internals.html", "Agent 内部", "第三部分 · 内部源码"),
-    ("14-streaming-callbacks.html", "Streaming 与 Callbacks", "第三部分 · 内部源码"),
-    ("15-contributing.html", "读源码 / 调试 / 测试 / 贡献", "第四部分 · 进阶"),
-    ("16-prompts.html", "提示词 Prompts", "第五部分 · 自己动手做 Agent"),
-    ("17-rag.html", "RAG 检索增强", "第五部分 · 自己动手做 Agent"),
-    ("18-custom-middleware.html", "写自己的中间件", "第五部分 · 自己动手做 Agent"),
-    ("19-runtime-context.html", "运行时上下文与健壮性", "第五部分 · 自己动手做 Agent"),
-    ("20-capstone.html", "端到端实战：拼一个客服 Agent", "第五部分 · 自己动手做 Agent"),
-    ("21-langchain-vs-autogen.html", "横向对比：LangChain vs AutoGen", "第六部分 · 番外篇"),
-    ("22-ai-stack.html", "全栈坐标系：从 LangChain 缩放到整个生态", "第六部分 · 番外篇"),
-    ("23-learning-map.html", "隔壁层学习地图：L5 推理 · L6 向量检索", "第六部分 · 番外篇"),
-    ("24-langgraph-mental-model.html", "深入 LangGraph：图 / 状态 / 节点 / 边", "第七部分 · 深入 LangGraph"),
-    ("25-langgraph-pregel-engine.html", "执行引擎：Pregel 与超步", "第七部分 · 深入 LangGraph"),
-    ("26-langgraph-persistence-control.html", "持久化 · 中断 · 控制流", "第七部分 · 深入 LangGraph"),
-    ("27-glossary.html", "术语表 · 概念索引", "第八部分 · 速查"),
+    ("01-what-is-llamacpp.html", "llama.cpp 是什么", "What is llama.cpp",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
 ]
+
+
+def bi(zh, en):
+    """Inline bilingual pair; only the active language is shown (CSS-controlled)."""
+    return f'<span class="lang-zh">{zh}</span><span class="lang-en">{en}</span>'
+
 
 INDEX_FILE = "index.html"
 
@@ -301,6 +283,14 @@ table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-s
   background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
   box-shadow:var(--shadow); transition:.15s; }
 .pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ---- */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
 """
 
 SEARCH_JS = """
@@ -342,6 +332,24 @@ NAV_SCRIPT = """
   });
 })();
 """
+
+LANG_JS = """
+function lcvgSetLang(l){
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+"""
+
+# Runs in <head> before first paint to avoid a flash of the wrong language.
+LANG_BOOT = (
+    "<script>try{var l=localStorage.getItem('lcvg-lang');"
+    "if(l==='en'){document.documentElement.dataset.lang='en';"
+    "document.documentElement.lang='en';}}catch(e){}</script>"
+)
 
 
 def page(filename, content, standalone=False, home_href=None):
