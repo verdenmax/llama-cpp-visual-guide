@@ -50,6 +50,8 @@ PAGES = [
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
     ("02-project-map.html", "项目全景地图", "The project map",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("03-inference-lifecycle.html", "一次推理的生命周期", "Lifecycle of one inference",
+     "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
 ]
 
 
@@ -438,6 +440,8 @@ SUBTITLES = {
                                  "What problem it solves; zero-dep philosophy"),
     "02-project-map.html": ("ggml / src·llama / common / tools / 转换脚本",
                             "ggml / src·llama / common / tools / converters"),
+    "03-inference-lifecycle.html": ("prompt -> 分词 -> 计算图 -> logits -> 采样 -> token",
+                                    "prompt -> tokenize -> graph -> logits -> sample -> token"),
 }
 
 

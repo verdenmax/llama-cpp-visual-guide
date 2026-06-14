@@ -139,6 +139,56 @@ QUIZZES = {
             },
         ],
     },
+    "03-inference-lifecycle.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_decode 跑一次前向，直接产出的是什么？",
+                    "en": "What does a single llama_decode forward pass directly produce?",
+                },
+                "opts": [
+                    {"zh": "最终要显示的文字", "en": "The final text to display"},
+                    {"zh": "一个已经选好的 token", "en": "An already-chosen token"},
+                    {
+                        "zh": "下一个 token 的 logits（分数向量）",
+                        "en": "The next token's logits (a score vector)",
+                    },
+                    {"zh": "更新后的模型权重", "en": "The updated model weights"},
+                ],
+                "answer": 2,
+                "why": {
+                    "zh": "decode 只算出 logits；选哪个 token 是采样器 llama_sampler_sample 的事，还原文字是 llama_token_to_piece 的事。",
+                    "en": "decode only yields logits; picking a token is llama_sampler_sample's job, turning it into text is llama_token_to_piece's.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "自回归循环里，为什么每生成一个新 token 不必把整段历史重算一遍？",
+                    "en": "In the autoregressive loop, why doesn't each new token require recomputing the whole history?",
+                },
+                "opts": [
+                    {"zh": "因为 prompt 很短", "en": "Because the prompt is short"},
+                    {
+                        "zh": "因为 KV cache 缓存了过去 token 的 K/V",
+                        "en": "Because the KV cache stores past tokens' K/V",
+                    },
+                    {"zh": "因为用了 GPU", "en": "Because a GPU is used"},
+                    {"zh": "因为权重被量化了", "en": "Because the weights are quantized"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "prefill 填满 KV cache 后，每步 decode 只算新 token 的 Q 并复用缓存的 K/V，省掉对历史的重复计算。",
+                    "en": "After prefill fills the KV cache, each decode step only computes the new token's Q and reuses cached K/V, skipping recomputation over history.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "如果完全不用 KV cache，生成第 1000 个 token 的成本会怎么变化？这对本地推理意味着什么？",
+                "en": "Without any KV cache, how would the cost of generating the 1000th token change - and what would that mean for local inference?",
+            },
+        ],
+    },
 }
 
 

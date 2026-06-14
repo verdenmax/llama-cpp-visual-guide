@@ -10,4 +10,5 @@ import part1
 CONTENT = {
     "01-what-is-llamacpp.html": part1.LESSON_01,
     "02-project-map.html": part1.LESSON_02,
+    "03-inference-lifecycle.html": part1.LESSON_03,
 }
