@@ -26,7 +26,7 @@ llama.cpp 是一个用<strong>纯 C/C++</strong> 写的<strong>大模型推理�
 <h3>整体结构图：四层自底向上</h3>
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">工具</span><span class="name">tools/ · examples/</span></div>
-    <div class="ld">面向用户：<span class="mono">llama-cli</span> 命令行、<span class="mono">llama-server</span> HTTP 服务、<span class="mono">quantize</span> 量化器</div></div>
+    <div class="ld">面向用户：<span class="mono">llama-cli</span> 命令行、<span class="mono">llama-server</span> HTTP 服务、<span class="mono">llama-quantize</span> 量化器</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">推理</span><span class="name">src/llama-*</span></div>
     <div class="ld">模型加载 · 计算图 · KV cache · 采样 · 分词 · 聊天模板（把"模型"变成"会话"）</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">引擎</span><span class="name">ggml</span></div>
@@ -114,7 +114,7 @@ ordinary devices. llama.cpp aims for the opposite:</p>
 <h3>Structure map: four layers, bottom-up</h3>
 <div class="layers">
   <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ · examples/</span></div>
-    <div class="ld">User-facing: <span class="mono">llama-cli</span>, the <span class="mono">llama-server</span> HTTP service, the <span class="mono">quantize</span> tool</div></div>
+    <div class="ld">User-facing: <span class="mono">llama-cli</span>, the <span class="mono">llama-server</span> HTTP service, the <span class="mono">llama-quantize</span> tool</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">infer</span><span class="name">src/llama-*</span></div>
     <div class="ld">Model loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
