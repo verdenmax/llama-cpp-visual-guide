@@ -300,7 +300,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>组批 Batch</h4>
-    <p>把 token 连同它的位置 <span class="mono">pos</span> 和序列号 <span class="mono">seq_id</span> 打包成一次模型输入。</p>
+    <p>把 token 序列包成一次输入（batch）；用 <span class="mono">llama_batch_get_one</span> 时，位置 <span class="mono">pos</span> 与序列 <span class="mono">seq_id</span> 由 <span class="mono">llama_decode</span> 自动补（位置顺序排、序列固定为 0），需要多序列 / 自定义位置时才用 <span class="mono">llama_batch_init</span>。</p>
     <p class="mono">src/llama-batch.cpp · llama_batch_get_one</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
@@ -350,6 +350,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <span class="kw">if</span> <span class="fn">llama_vocab_is_eog</span>(vocab, id): <span class="kw">break</span>  <span class="cm">// 6 结束?</span>
     print(<span class="fn">llama_token_to_piece</span>(vocab, id))      <span class="cm">// 6 还原文字</span>
     batch = <span class="fn">llama_batch_get_one</span>([id])          <span class="cm">// 7 回灌; KV cache 记住过去</span></pre>
+  <p style="margin:.5rem 0 0">第 4 步的 <span class="mono">logits</span>：真实代码里采样器会自己从 <span class="mono">ctx</span> 取，这里单独列出只为把"产出 logits"这一步看清楚。</p>
   <p style="margin:.5rem 0 0">循环体就是"自回归"引擎：每转一圈吐一个 token，直到 <span class="mono">llama_vocab_is_eog</span> 命中结束符才停。</p>
 </div>
 
@@ -427,7 +428,7 @@ Lesson 01 gave you the minimal main line (load -> tokenize -> decode loop -> sam
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Batch</h4>
-    <p>Pack the tokens together with their position <span class="mono">pos</span> and sequence id <span class="mono">seq_id</span> into one model input.</p>
+    <p>Wrap the token sequence into one input (batch); with <span class="mono">llama_batch_get_one</span>, <span class="mono">pos</span>/<span class="mono">seq_id</span> are auto-assigned by <span class="mono">llama_decode</span> (sequential positions, sequence 0) - use <span class="mono">llama_batch_init</span> only when you need multiple sequences / custom positions.</p>
     <p class="mono">src/llama-batch.cpp · llama_batch_get_one</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
@@ -480,6 +481,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <span class="kw">if</span> <span class="fn">llama_vocab_is_eog</span>(vocab, id): <span class="kw">break</span>  <span class="cm">// 6 end?</span>
     print(<span class="fn">llama_token_to_piece</span>(vocab, id))      <span class="cm">// 6 detokenize</span>
     batch = <span class="fn">llama_batch_get_one</span>([id])          <span class="cm">// 7 feed-back; KV cache remembers the past</span></pre>
+  <p style="margin:.5rem 0 0">In real code the sampler reads the logits from <span class="mono">ctx</span> itself; the explicit step-4 <span class="mono">logits</span> line is shown only to make the "produce logits" step visible.</p>
   <p style="margin:.5rem 0 0">The loop body is the "autoregressive" engine: each turn emits one token, until <span class="mono">llama_vocab_is_eog</span> hits an end token.</p>
 </div>
 
