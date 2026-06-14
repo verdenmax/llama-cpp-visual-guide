@@ -771,14 +771,15 @@ LESSON_03 = {
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">后端执行</div><div class="nd">ggml-backend</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node"><div class="nt">logits</div><div class="nd">llama_get_logits_ith</div></div>
+  <div class="node"><div class="nt">logits（产出）</div><div class="nd">用 llama_get_logits_ith 取出</div></div>
 </div>
 <p>所以"一次 decode"= <strong>建计算图 + 后端执行 -&gt; logits</strong>：先由 <span class="mono">src/llama-graph.cpp</span> 的 <span class="mono">llm_graph_*</span>（经 <span class="mono">src/llama-model.cpp</span> 的 <span class="mono">build_graph</span> 拼出）把这一步运算<strong>描述成一张图</strong>，再交 <span class="mono">ggml-backend</span> 调度到硬件上<strong>真正算</strong>，算完用 <span class="mono">llama_get_logits_ith</span> 取出"下一个 token 的分数向量"。它的产出是 <strong>logits</strong>——不是文字，也不是已经选好的 token。</p>
 
 <h2>prefill vs decode：两种节奏</h2>
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
-  这个循环其实分两种节奏：<strong>第一次前向（prefill）</strong>把<strong>整段 prompt 并行地</strong>一次算完，
+  这个循环其实分两种节奏：<strong>第一次前向（prefill）</strong>把<strong>整段 prompt 并行地</strong>一次算完
+  （很长的 prompt 会切成几个 ubatch 分块、各自一次并行，默认每块 512 token），
   顺手把每个 token 的 K/V 填进 <strong>KV cache</strong>；之后每一步 <strong>decode</strong> 只算<strong>一个新 token</strong>，
   直接复用缓存里过去的 K/V，<strong>不再重算整段历史</strong>——这就是循环能跑得快、能在本地跑得起来的关键。
 </div>
@@ -832,7 +833,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
 <details class="accordion">
   <summary><span class="badge-num">2</span> KV cache 到底省了什么？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
-    <p><strong>省的是"重算过去"：</strong>没有它，生成第 n 个 token 要把前 n-1 个<strong>重算一遍</strong> -&gt; 总成本约 <span class="mono">O(n^2)</span>；有了它，每步只算<strong>新 token</strong> 的 K/V 并追加进缓存 -&gt; 约 <span class="mono">O(n)</span>。</p>
+    <p><strong>省的是"重算过去"：</strong>没有它，每生成一个新 token 都要把前面所有 token <strong>重算一遍</strong> -&gt; <strong>重算成本</strong>约 <span class="mono">O(n^2)</span>；有了它每步只算<strong>新 token</strong> 的 K/V 并追加进缓存 -&gt; <strong>重算降到</strong> <span class="mono">O(n)</span>。</p>
     <p><strong>注意别夸大：</strong>注意力对历史的<strong>扫描</strong>仍是每步 <span class="mono">O(n)</span>（要看过去所有 token），省掉的是<strong>重复计算过去 token 的 K/V</strong>，不是把注意力也变成常数。</p>
     <p><strong>源码：</strong>缓存的分配、写入与复用在 <span class="mono">src/llama-kv-cache.cpp</span>；上下文越长，这块占用越大，也是本地推理要预留内存的地方。</p>
   </div>
@@ -932,7 +933,7 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">run on backend</div><div class="nd">ggml-backend</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node"><div class="nt">logits</div><div class="nd">llama_get_logits_ith</div></div>
+  <div class="node"><div class="nt">logits (produced)</div><div class="nd">read via llama_get_logits_ith</div></div>
 </div>
 <p>So "one decode" = <strong>build graph + run on backend -&gt; logits</strong>: first <span class="mono">llm_graph_*</span> in <span class="mono">src/llama-graph.cpp</span> (assembled by <span class="mono">build_graph</span> in <span class="mono">src/llama-model.cpp</span>) <strong>describes</strong> this step's computation <strong>as a graph</strong>, then <span class="mono">ggml-backend</span> schedules it onto hardware to <strong>actually compute</strong>, and afterwards <span class="mono">llama_get_logits_ith</span> reads out the "score vector for the next token". Its output is <strong>logits</strong> - not text, and not an already-chosen token.</p>
 
@@ -940,7 +941,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
   The loop actually has two rhythms: the <strong>first forward pass (prefill)</strong> computes the
-  <strong>whole prompt in parallel</strong> once, filling each token's K/V into the <strong>KV cache</strong>;
+  <strong>whole prompt in parallel</strong> once (very long prompts are split into a few ubatch chunks,
+  each computed in one parallel pass; default 512 tokens per chunk), filling each token's K/V into the <strong>KV cache</strong>;
   after that each <strong>decode</strong> step computes only <strong>one new token</strong>, reusing the past K/V
   from the cache instead of <strong>recomputing the whole history</strong> - the key to why the loop is fast and
   can run locally.
@@ -996,7 +998,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
 <details class="accordion">
   <summary><span class="badge-num">2</span> What exactly does the KV cache save? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p><strong>It saves "recomputing the past":</strong> without it, generating the n-th token would <strong>recompute the previous n-1</strong> -&gt; total cost about <span class="mono">O(n^2)</span>; with it, each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; about <span class="mono">O(n)</span>.</p>
+    <p><strong>It saves "recomputing the past":</strong> without it, every new token re-runs all previous tokens -&gt; the <strong>recompute cost</strong> is ~<span class="mono">O(n^2)</span>; with it each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; <strong>recompute drops to</strong> <span class="mono">O(n)</span>.</p>
     <p><strong>Don't overstate it:</strong> attention's <strong>scan</strong> over history is still <span class="mono">O(n)</span> per step (it must look at all past tokens); what is saved is <strong>recomputing past tokens' K/V</strong>, not turning attention itself into a constant.</p>
     <p><strong>Source:</strong> allocation, writing and reuse of the cache live in <span class="mono">src/llama-kv-cache.cpp</span>; the longer the context, the bigger this footprint - and the memory you must reserve for local inference.</p>
   </div>
