@@ -84,6 +84,26 @@ QUIZZES = {
                     "en": "ggml describes tensors/graphs and schedules ops; the actual hardware math is implemented by each backend.",
                 },
             },
+            {
+                "q": {
+                    "zh": "Q4_0 量化为什么能大幅压缩体积，却几乎不掉精度？",
+                    "en": "Why can Q4_0 quantization shrink the size so much yet barely lose accuracy?",
+                },
+                "opts": [
+                    {"zh": "因为它直接丢掉了不重要的网络层", "en": "It simply drops the unimportant network layers"},
+                    {
+                        "zh": "整块权重共享一个 scale、按小块贴合数值范围，低位宽档位已够用",
+                        "en": "A whole block shares one scale and hugs that block's value range, so the low-bit levels are enough",
+                    },
+                    {"zh": "因为它用 GPU 重新训练了权重", "en": "It retrains the weights on a GPU"},
+                    {"zh": "因为模型本来就不需要精度", "en": "Because the model never needed precision anyway"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "量化按块共享缩放因子，每块贴合自己的数值范围；权重对微小误差不敏感，4 bit 档位足够，于是省约 4 倍空间而精度几乎不变。",
+                    "en": "Quantization shares a scale per block, each fitting its own value range; weights tolerate tiny errors and 4-bit levels suffice, so it saves ~4x space with almost no accuracy change.",
+                },
+            },
         ],
         "open": [
             {
