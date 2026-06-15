@@ -66,6 +66,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("10-graph-execution.html", "图的执行与调度", "Graph execution & scheduling",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("11-core-operators.html", "核心算子", "Core operators",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -499,6 +501,8 @@ SUBTITLES = {
                               "build-then-run; op/src back-pointers; nodes vs leafs"),
     "10-graph-execution.html": ("backend 执行 · sched 多后端调度 · ggml-alloc 内存复用",
                                 "backend compute; multi-backend sched; ggml-alloc memory reuse"),
+    "11-core-operators.html": ("mul_mat 形状推导 · rms_norm/rope/soft_max_ext · CPU 计算",
+                               "mul_mat shapes; rms_norm/rope/soft_max_ext; CPU compute"),
 }
 
 

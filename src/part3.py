@@ -1084,3 +1084,338 @@ tight.</p>
 </div>
 """,
 }
+
+
+LESSON_11 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+计算图是由<strong>算子</strong>搭起来的。这一课，我们挑出 transformer 里最核心的几个算子——矩阵乘 <span class="mono">mul_mat</span>、归一化
+<span class="mono">rms_norm</span>、位置编码 <span class="mono">rope</span>、带掩码的 <span class="mono">soft_max_ext</span>，看清它们各算什么、
+<strong>输入输出的形状怎么对上</strong>，以及一个算子在 CPU 上"真正落地计算"的地方在哪。这一课把 L04 的注意力数学和 L09/L10 的图与执行，
+用具体的算子串到了一起。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">前三课我们一直在讲"<strong>容器和流程</strong>"——内存怎么放（L08）、图怎么搭（L09）、图怎么跑（L10），但<strong>始终没碰"每个算子具体在算什么"</strong>。
+这一课补上这一块。不过要说明：我们<strong>不</strong>逐行去抠某个矩阵乘的循环（那是第六部分内核课的事），而是站在"<strong>会读、会搭网络</strong>"的高度，搞清楚四件事——
+这些算子各自<strong>做什么</strong>、形状<strong>怎么对</strong>、注意力<strong>怎么由它们拼成</strong>、以及它们<strong>在哪真正落地算</strong>。学完这一课，你再看 llama.cpp 里那些建图代码，就能大致读懂每一行在拼什么。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  算子就像一块块<strong>乐高积木</strong>：每块都有固定的凸点和凹槽（输入、输出的形状），只有<strong>形状对得上</strong>，两块才能拼在一起。
+  建一个模型，就是按形状把这些积木拼成一座塔；要是哪两块形状对不上，拼装（建图时的断言检查）当场就会失败、提醒你拼错了。
+  懂了每块积木的"接口形状"，你就懂了怎么读、怎么搭一个网络。而所有积木里，<strong>矩阵乘是那块最大、最关键的底座</strong>，所以我们从它讲起。
+</div>
+
+<h2>头号算子：矩阵乘 mul_mat</h2>
+<p>神经网络里<strong>绝大部分的计算量，都花在矩阵乘上</strong>——注意力、前馈层、输出投影，本质都是矩阵乘。所以 <span class="mono">ggml_mul_mat</span>
+是当之无愧的头号算子。它的形状规则，是这一课<strong>最该记牢</strong>的一条：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>mul_mat 形状推导</b>：内维 ne[0] 必须相等(被消去)，结果取两者的"另一维"</div>
+  <div class="cells"><span class="lab">a</span><span class="cell hl">k</span><span class="cell">m</span><span class="lab">ne=[k, m]</span></div>
+  <div class="cells"><span class="lab">b</span><span class="cell hl">k</span><span class="cell">n</span><span class="lab">ne=[k, n]</span></div>
+  <div class="cells"><span class="lab">结果</span><span class="cell">m</span><span class="cell">n</span><span class="lab">ne=[m, n]，k 被消去</span></div>
+</div>
+<p>看那两个高亮的 <span class="mono">k</span>：<strong>a 和 b 在 ne[0]（内维）上必须相等</strong>，这个相等的维在相乘时被"消去"，结果的形状由两者各自的"另一维"拼成。
+落到源码（<span class="mono">ggml/src/ggml.c</span> 的 <span class="mono">ggml_mul_mat</span> / <span class="mono">ggml_can_mul_mat</span>）：</p>
+<pre class="code"><span class="cm">// 断言: a 的内维 == b 的内维 (ne[0] 相等)</span>
+GGML_ASSERT(a-&gt;ne[0] == b-&gt;ne[0]);          <span class="cm">// k 必须对上, 否则建图就报错</span>
+<span class="cm">// 结果形状: 取 a 的"另一维"、b 的"另一维", 高两维来自 b</span>
+ne = { a-&gt;ne[1], b-&gt;ne[1], b-&gt;ne[2], b-&gt;ne[3] };  <span class="cm">// 结果类型固定 F32</span></pre>
+<p>这里有个<strong>容易栽跟头</strong>的点：ggml 的形状规则，读起来和你数学课上学的"行 × 列"<strong>方向是反的</strong>。原因是 L05 讲过的——ggml <strong>行优先、ne[0] 是最内维</strong>，
+所以"内维相等"对应的其实是数学里"左矩阵的列数 == 右矩阵的行数"。只要牢记 L05 那句口诀"<strong>ne[0] 永远是最贴着内存、变化最快的那一维</strong>"，就不会把行当成列。
+此外，结果的高两维（<span class="mono">ne[2]</span>、<span class="mono">ne[3]</span>）来自 b，且支持<strong>广播</strong>（a 的对应维可以是 b 的整数分之一），这正是多头注意力里"一组权重作用于多个头"的实现方式。</p>
+<p>为什么矩阵乘这么重要，值得单拎出来讲？因为它<strong>又重又频繁</strong>。一个 7B 模型，每生成一个 token，要做几百次矩阵乘，每次都是几千乘几千的大矩阵相乘——
+模型的绝大部分参数（那几个 GB 的权重）都是以"矩阵乘里的那个权重矩阵"的身份存在的。所以你之前学的所有东西，到头来几乎都在为矩阵乘服务：量化（L06）是为了让权重矩阵更小、搬得更快，
+后端（L07）是为了让矩阵乘算得更快，内存复用（L10）是为了腾地方装矩阵乘的中间结果。<strong>看懂 mul_mat，就看懂了推理的主战场。</strong></p>
+<p>再多说一句形状里那个"<strong>消去</strong>"。为什么内维相等、还被消去？因为矩阵乘的本质，就是拿 a 的一行和 b 的一行（在 ggml 的布局下）<strong>逐元素相乘再求和</strong>——
+那条被"相乘求和"吃掉的维，就是内维 k。它在结果里不复存在，只留下 a、b 各自的"另一维"组成结果的形状。理解了"k 被求和吃掉"，你就明白为什么两个 <span class="mono">[k, ...]</span>
+的张量乘出来是 <span class="mono">[m, n]</span>，而不是别的——这不是死记的规则，而是"求和把一维压没了"的自然结果。</p>
+<p>把矩阵乘的形状这条线收个尾：在 ggml 里你会反复看到形如 <span class="mono">cur = ggml_mul_mat(ctx, model.layers[i].wq, cur)</span> 的代码——拿这一层的 Q 权重矩阵去乘当前的隐藏状态，
+得到 Query。整座 transformer 的建图，骨架上就是一串这样的 mul_mat，中间穿插着归一化、rope、softmax。所以只要你能<strong>对着权重的形状，推出每个 mul_mat 的输出形状</strong>，
+你就能顺着代码把整个模型的数据流"走"一遍。这正是这一课开头说的"会读、会搭网络"的具体含义——而它的核心，就是 mul_mat 这条形状规则。</p>
+<p>这里也顺势点明 ggml 的一个取舍：它的算子不像有些框架那样"什么都能广播、什么形状都自动对齐"，而是<strong>把形状约束定得相当严格</strong>，对不上就当场断言失败。
+为什么宁可严格、也不要"智能地自动适配"？因为推理引擎最怕<strong>悄悄出错</strong>——一个被自动广播"凑合"过去的形状错误，可能让模型输出一堆看似正常实则错误的结果，极难排查。
+严格的断言把错误<strong>挡在建图阶段、暴露在第一现场</strong>，反而让整个系统更可靠。这是性能工程里常见的态度：<strong>宁可早失败、响亮地失败，也不要带病运行。</strong></p>
+
+<h2>三个常客：rms_norm / rope / soft_max_ext</h2>
+<p>除了矩阵乘，注意力层里还反复出现三个算子。把 L04 讲的注意力，用 ggml 算子串起来，大致是这样一条流水线：</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>rms_norm(x)</h4><p>先把输入归一化，稳住数值尺度（L04 说的"训练稳定"就靠它）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, ·)</h4><p>投影出 Query / Key / Value 三个张量。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>rope(q, k)</h4><p>给 Q、K 注入位置信息（L04 说的 RoPE 旋转）。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>soft_max_ext(scores, mask)</h4><p>算注意力分数、施加因果掩码、归一成权重（L04 的 -inf 掩码就在这）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>mul_mat(V, weights)</h4><p>按权重把 Value 加权汇总，得到注意力输出。</p></div></div>
+</div>
+<p>注意上面流水线里 mul_mat 出现了<strong>好几次</strong>——投影 Q/K/V 是三次 mul_mat、最后按权重汇总 Value 又是一次。这正印证了前面说的"矩阵乘是主战场"：一个注意力层里，
+真正吃算力的几乎全是这些 mul_mat，而 rms_norm、rope、softmax 更像是穿插其间的"调味"步骤，单独看都不重，但少了谁注意力都不对。把这条流水线和 L04 的注意力数学对照着看，
+你会发现"<strong>数学公式</strong>"和"<strong>ggml 算子序列</strong>"几乎是一一对应的——这也是为什么说看懂算子，就看懂了模型怎么落地成代码。</p>
+<p>这三个常客的签名都很直白（<span class="mono">ggml/include/ggml.h</span>）：</p>
+<pre class="code"><span class="fn">ggml_rms_norm</span>(ctx, a, eps);                       <span class="cm">// 按最后一维做 RMS 归一化, eps 防止除零</span>
+<span class="fn">ggml_rope_ext</span>(ctx, a, pos, ff, n_dims, mode, ...); <span class="cm">// 按位置 pos 旋转, 注入相对位置信息</span>
+<span class="fn">ggml_soft_max_ext</span>(ctx, a, mask, scale, max_bias); <span class="cm">// 融合: softmax(a*scale + mask)</span></pre>
+<p>逐个一句话：<span class="mono">rms_norm</span> 把一行向量按其均方根缩放到稳定范围，比 LayerNorm 更省（不用算均值）；<span class="mono">rope</span> 不是给位置加一个"序号向量"，
+而是<strong>按位置旋转</strong> Q、K，让注意力分数自带"两个 token 相距多远"的信息；<span class="mono">soft_max_ext</span> 是个<strong>融合算子</strong>，把"乘缩放系数 + 加掩码 + softmax"三步并成一次，
+省内存又省带宽。注意 <span class="mono">scale</span> 通常是 <span class="mono">1/sqrt(d)</span>（防止分数过大）、<span class="mono">mask</span> 装的就是因果掩码（未来位置为 -inf）。</p>
+<p>为什么要把这三个算子单独点出来？因为它们<strong>体现了 ggml 算子设计的两个常见手法</strong>。一是<strong>融合</strong>：<span class="mono">soft_max_ext</span> 把本可以拆成三四个算子的事（缩放、加掩码、求指数、归一）
+压成一个，少建几个中间张量、少搬几趟数据——在 decode 这种"带宽比算力更紧张"的场景（L04 说过），融合的收益尤其明显。二是<strong>专用化</strong>：transformer 几乎离不开归一化和位置编码，
+ggml 干脆为它们提供 <span class="mono">rms_norm</span>、<span class="mono">rope_ext</span> 这样的<strong>专用算子</strong>，而不是让你用一堆基础算子拼。专用算子既好读、又给了后端"整段优化"的机会。
+这两手——该融合的融合、该专用的专用——贯穿 ggml 的算子库。</p>
+<p>顺带澄清一个容易混的点：<span class="mono">ggml_rope</span> 和 <span class="mono">ggml_rope_ext</span> 是同一族，后者多了一串参数（<span class="mono">freq_base</span>、<span class="mono">freq_scale</span> 等），
+用来支持 YaRN 这类<strong>长上下文扩展</strong>技术——简单说，就是通过调整旋转的"频率"，让一个原本只在 4K 上下文训练的模型，也能在几万 token 的长上下文上工作。你现在不必深究这些参数，
+只要知道"<strong>位置编码也是可以调的，调它能换来更长的上下文</strong>"，这个认识就够了。</p>
+<p>把这三个算子和 mul_mat 放在一起，你就掌握了读懂任何 transformer 建图代码所需的"<strong>核心词汇表</strong>"：<span class="mono">mul_mat</span>（投影、注意力打分、汇总）、
+<span class="mono">rms_norm</span>（每个子层前的归一化）、<span class="mono">rope</span>（位置）、<span class="mono">soft_max_ext</span>（注意力权重）。再加上加法（残差）、逐元素乘（门控）这几个基础算子，
+一个 transformer block 的建图代码，<strong>九成的行你都能认出来在干什么</strong>。剩下的一成是各家模型的小花样，但万变不离这套核心算子——这正是这一课最实在的收获。</p>
+
+<h2>一个算子，两处代码</h2>
+<p>最后破除一个常见困惑：一个算子在 ggml 里其实有<strong>两处</strong>代码，分工明确。一处负责"建图"（定义形状、填 op/src，L09），另一处负责"真正算"（在某个后端上跑数）：</p>
+<div class="cols">
+  <div class="col"><h4>建图侧：ggml.c</h4><p><span class="mono">ggml_mul_mat(ctx, a, b)</span>：只<strong>定义</strong>结果张量的形状、填好 op 和 src，<strong>不算</strong>。每个算子在这里都有一个"构造函数"。</p></div>
+  <div class="col"><h4>计算侧：ggml-cpu / ggml-cuda …</h4><p><span class="mono">ggml_compute_forward_mul_mat(...)</span>：<strong>真正</strong>把矩阵乘算出来。CPU 用 SIMD、CUDA 用 GPU kernel，各后端各写一份。</p></div>
+</div>
+<p>这两处通过 <span class="mono">enum ggml_op</span> 这个"算子编号"对接：建图时把编号记在 <span class="mono">tensor-&gt;op</span> 里，执行时后端用一个大 <span class="mono">switch(op)</span>
+把每个节点<strong>派发</strong>到对应的 <span class="mono">ggml_compute_forward_*</span>（CPU 端在 <span class="mono">ggml/src/ggml-cpu/</span>）。所以"算子很多"并不可怕——它们共享同一套建图与派发框架，
+<strong>加一个新算子，主要就是加一个 enum 值 + 写一份 forward 实现</strong>。这种"声明与实现分离"的设计，正是同一张图能在 CPU、CUDA、Metal 上各自高效跑起来的根本。</p>
+<p>这个"两处代码"的分工，回头看也解释了前面几课的很多设计。L09 说算子函数"只填 op/src 不计算"——那是因为它<strong>只是建图侧</strong>，计算侧的代码根本不在那儿。
+L10 说后端"逐节点 compute"——那个 compute，就是在<strong>计算侧</strong>按 op 派发、逐个调 forward。所以建图侧和计算侧，恰好对应了 L09 的"建图"和 L10 的"执行"两个阶段；
+一个算子横跨这两个阶段，在建图侧露个脸（定形状）、在计算侧出全力（真算）。把这条线理顺，ggml 的整个执行流程在你脑子里就<strong>串成一根完整的链</strong>了。</p>
+<p>这也是为什么 ggml 能<strong>把模型逻辑和硬件加速彻底分开</strong>：写一个新模型，你只在建图侧用现成算子拼一拼，完全不碰任何 CPU/GPU 的计算代码；
+而优化某个算子在某种硬件上的速度，你只改计算侧那一份 forward，不影响任何模型。这种"<strong>模型作者和内核作者各管一摊、互不打扰</strong>"的分工，是 ggml 这类引擎能被广泛复用、又能持续优化的组织学基础。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么 mul_mat 的形状规则看起来和数学反着来？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为 ggml 是<strong>行优先</strong>、<span class="mono">ne[0]</span> 是最内（最贴内存、变化最快）的维。数学里我们写"<span class="mono">A(m×k) · B(k×n) = C(m×n)</span>"，
+    要求"A 的列数 k == B 的行数 k"。但在 ggml 里，那个连续的 k 维被放在了 <span class="mono">ne[0]</span>，于是规则写成"<span class="mono">a.ne[0] == b.ne[0]</span>"。</p>
+    <p>换句话说，<strong>数学的"行/列"和 ggml 的 ne 维度顺序是反过来的</strong>——这正是 L05 那个"维度顺序和 PyTorch 相反"的坑在算子层的体现。
+    记住 L05 的口诀"ne[0] 最贴内存"，再看任何 ggml 算子的形状约束，都不会再绕晕。</p>
+    <p>给个实操建议：读 ggml 建图代码时，<strong>把每个张量的 ne 在草稿纸上标出来</strong>，顺着算子一个个推导形状，遇到 mul_mat 就检查"两个内维对上没有"。
+    这是 ggml 编程最有效的排错法——大多数建图 bug，都是某处形状对不上、被那句 <span class="mono">GGML_ASSERT</span> 当场拦下。形状推导手熟了，你读再复杂的模型建图代码也不慌。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> soft_max_ext 的 mask 和 scale 到底干嘛？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">scale</span> 是<strong>缩放系数</strong>，通常取 <span class="mono">1/sqrt(d)</span>（d 是每个头的维度）。注意力分数是 Q 和 K 的点积，维度越高、点积越容易变得很大，
+    softmax 后会过于"尖锐"（几乎一边倒）；先乘一个 <span class="mono">1/sqrt(d)</span> 把分数压回合理范围，梯度和数值都更稳。</p>
+    <p><span class="mono">mask</span> 则是把<strong>因果掩码</strong>加进分数：未来位置加上 <span class="mono">-inf</span>，softmax 后权重就变成 0（L04 讲过）。
+    <span class="mono">max_bias</span> 控制 ALiBi 这类相对位置偏置，不用时为 0。<span class="mono">soft_max_ext</span> 把"乘 scale、加 mask、做 softmax"<strong>融合成一个算子</strong>，
+    避免了生成多个庞大的中间张量——这是推理引擎里很常见的"算子融合"优化。</p>
+    <p>顺带把<strong>融合</strong>这件事说透一点。不融合的话，softmax 这一步要先建一个"乘了 scale 的张量"、再建一个"加了 mask 的张量"、再建一个"算了指数的张量"……每一步都要在内存里
+    实打实地写出一个和分数矩阵一样大的中间结果，既占内存又费带宽。融合算子则把这几步<strong>在一个循环里一气呵成</strong>，中间值只在寄存器/缓存里转一圈，根本不落地成大张量。
+    对注意力这种"分数矩阵随上下文长度平方增长"的算子，融合省下的内存和带宽相当可观——这也是为什么 llama.cpp 还有 flash-attention 这类更激进的融合实现。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 算子这么多，ggml 怎么管得过来？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>靠一个统一的<strong>枚举 + 派发</strong>机制。每个算子是 <span class="mono">enum ggml_op</span> 里的一个值（GGML_OP_MUL_MAT、GGML_OP_SOFT_MAX……）；
+    建图时这个值被记进 <span class="mono">tensor-&gt;op</span>。执行时，后端遍历每个节点，用一个大 <span class="mono">switch(node-&gt;op)</span> 跳到对应的 <span class="mono">ggml_compute_forward_*</span> 实现。</p>
+    <p>所以加一个新算子的工作量是<strong>可控的</strong>：① 在 enum 里加一个值；② 写一个建图构造函数（定形状、填 src）；③ 在每个你关心的后端里写一份 forward 实现，并接进那个 switch。
+    框架的其它部分（建图、内存规划、调度）<strong>完全不用动</strong>。这种"<strong>开放扩展、封闭修改</strong>"的结构，是 ggml 能持续长出几百个算子、还不乱套的原因。</p>
+    <p>这套机制也解释了为什么 ggml 能<strong>支持那么多不同架构的模型</strong>。Llama、Qwen、Mistral、Gemma…… 这些模型的差异，本质上就是"用哪些算子、按什么顺序拼"——
+    而它们用到的算子，绝大多数是<strong>共享的同一批</strong>（矩阵乘、归一化、注意力那几样）。所以新增一个模型架构，往往<strong>一个新算子都不用加</strong>，只是在建图侧换个拼法；
+    偶尔遇到某个架构有独特设计，才补一两个新算子。正是这个共享的算子库，让 llama.cpp 能跟上层出不穷的新模型，而不必每来一个就大改一遍引擎。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">mul_mat</span> 要求<strong>内维 ne[0] 相等</strong>（被消去），结果 <span class="mono">ne={a.ne[1], b.ne[1], ...}</span>，类型 F32，高维支持广播。</li>
+    <li>形状规则读起来<strong>和数学"行×列"方向相反</strong>，因为 ggml 行优先、ne[0] 最内（L05 的坑）。</li>
+    <li><span class="mono">rms_norm</span> 稳数值、<span class="mono">rope</span> 注入位置、<span class="mono">soft_max_ext</span> 融合"缩放+掩码+softmax"成注意力权重。</li>
+    <li>每个算子<strong>两处代码</strong>：建图侧（ggml.c 定形状/填 op/src）+ 计算侧（后端的 <span class="mono">ggml_compute_forward_*</span> 真算）。</li>
+    <li>执行靠 <span class="mono">enum ggml_op</span> + 大 <span class="mono">switch(op)</span> 派发；加新算子 = 加 enum + 写 forward。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把一个算子拆成"<strong>声明形状</strong>"和"<strong>各后端各自实现</strong>"两半——前者让建图轻量、还能在拼装时当场查错，后者让同一个算子在 CPU/CUDA/Metal 上各有最优实现。
+  模型逻辑只写一遍、硬件加速写多份，正是这种<strong>声明与实现解耦</strong>的红利。下一课，我们钻进这些算子真正吃下去的"料"——量化格式的字节细节。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+A compute graph is built from <strong>operators</strong>. This lesson picks the core few in a transformer - matmul <span class="mono">mul_mat</span>, normalization
+<span class="mono">rms_norm</span>, position encoding <span class="mono">rope</span>, masked <span class="mono">soft_max_ext</span> - to see what each computes, <strong>how input
+and output shapes line up</strong>, and where an operator "actually lands and computes" on the CPU. This lesson strings L04's attention math and L09/L10's graph and execution
+together with concrete operators.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">The last three lessons were all about "<strong>containers and flow</strong>" - how memory is placed (L08), how the graph is built (L09), how the graph runs (L10) - but <strong>never
+touched "what each operator actually computes"</strong>. This lesson fills that in. To be clear: we will <strong>not</strong> pore over the loop of some matmul line by line (that is Part 6's
+kernel lesson); instead, from the height of "<strong>being able to read and build networks</strong>", we nail down four things - what these operators <strong>do</strong>, how shapes
+<strong>line up</strong>, how attention is <strong>assembled</strong> from them, and where they <strong>actually land and compute</strong>. After this lesson, the graph-building code in llama.cpp
+becomes mostly readable - you can tell what each line is assembling.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Operators are like <strong>Lego bricks</strong>: each has fixed studs and sockets (input and output shapes), and only when <strong>shapes match</strong> can two bricks join.
+  Building a model is assembling these bricks into a tower by shape; if two bricks' shapes do not match, assembly (the assertion check at graph-build time) fails on the spot, telling
+  you the fit is wrong. Understand each brick's "interface shape" and you understand how to read and build a network. And of all the bricks, <strong>matmul is the biggest, most crucial base</strong>, so we start there.
+</div>
+
+<h2>The number-one operator: matmul mul_mat</h2>
+<p>In a neural network, <strong>the vast majority of compute goes into matrix multiplication</strong> - attention, feed-forward, output projection are all essentially matmuls.
+So <span class="mono">ggml_mul_mat</span> is the undisputed number-one operator. Its shape rule is the one thing this lesson is <strong>most worth memorizing</strong>:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>mul_mat shape inference</b>: the inner dim ne[0] must be equal (eliminated); the result takes each one's "other dim"</div>
+  <div class="cells"><span class="lab">a</span><span class="cell hl">k</span><span class="cell">m</span><span class="lab">ne=[k, m]</span></div>
+  <div class="cells"><span class="lab">b</span><span class="cell hl">k</span><span class="cell">n</span><span class="lab">ne=[k, n]</span></div>
+  <div class="cells"><span class="lab">result</span><span class="cell">m</span><span class="cell">n</span><span class="lab">ne=[m, n]; k eliminated</span></div>
+</div>
+<p>Look at the two highlighted <span class="mono">k</span>: <strong>a and b must be equal on ne[0] (the inner dim)</strong>, this equal dim is "eliminated" in the multiply, and the
+result's shape is formed from each one's "other dim". In source (<span class="mono">ggml_mul_mat</span> / <span class="mono">ggml_can_mul_mat</span> in <span class="mono">ggml/src/ggml.c</span>):</p>
+<pre class="code"><span class="cm">// assert: a's inner dim == b's inner dim (ne[0] equal)</span>
+GGML_ASSERT(a-&gt;ne[0] == b-&gt;ne[0]);          <span class="cm">// k must match, else graph-build errors</span>
+<span class="cm">// result shape: take a's "other dim", b's "other dim", high dims from b</span>
+ne = { a-&gt;ne[1], b-&gt;ne[1], b-&gt;ne[2], b-&gt;ne[3] };  <span class="cm">// result type is always F32</span></pre>
+<p>There is a <strong>tripping point</strong> here: ggml's shape rule reads in the <strong>opposite direction</strong> from the "rows x columns" you learned in math class. The reason
+is from L05 - ggml is <strong>row-major, ne[0] is the innermost dim</strong>, so "inner dims equal" actually corresponds to math's "left matrix's columns == right matrix's rows".
+Just keep L05's mnemonic "<strong>ne[0] is always the memory-adjacent, fastest-changing dim</strong>" and you will not mistake rows for columns. Also, the result's high dims
+(<span class="mono">ne[2]</span>, <span class="mono">ne[3]</span>) come from b and support <strong>broadcasting</strong> (a's matching dim can be an integer fraction of b's) - exactly how
+"one set of weights applied to multiple heads" is implemented in multi-head attention.</p>
+<p>Why is matmul so important it deserves its own section? Because it is <strong>both heavy and frequent</strong>. A 7B model does hundreds of matmuls per generated token, each a
+thousands-by-thousands matrix multiply - the vast majority of the model's parameters (those several GB of weights) exist as "the weight matrix in a matmul". So almost everything you have learned
+ultimately serves matmul: quantization (L06) to make weight matrices smaller and faster to move, backends (L07) to compute matmuls faster, memory reuse (L10) to make room for matmul intermediates.
+<strong>Understand mul_mat and you understand the main battlefield of inference.</strong></p>
+<p>One more word on that "<strong>elimination</strong>" in the shape. Why is the inner dim equal and then eliminated? Because matrix multiply is essentially taking a row of a and a row of b
+(under ggml's layout) and <strong>multiplying element-wise then summing</strong> - the dim eaten by that "multiply-and-sum" is the inner dim k. It is gone in the result, leaving only a's and b's
+"other dim" to form the result shape. Once you get "k is eaten by the sum", you see why two <span class="mono">[k, ...]</span> tensors multiply into <span class="mono">[m, n]</span> and nothing else
+- not a rule to memorize but the natural result of "summing collapses one dim".</p>
+<p>To wrap up the matmul-shape thread: in ggml you will repeatedly see code like <span class="mono">cur = ggml_mul_mat(ctx, model.layers[i].wq, cur)</span> - multiplying this layer's Q weight matrix by
+the current hidden state to get the Query. The whole transformer's graph build is, skeletally, a string of such mul_mats interleaved with normalization, rope, softmax. So as long as you can <strong>derive
+each mul_mat's output shape from the weight shapes</strong>, you can "walk" the entire model's data flow through the code. This is the concrete meaning of "reading and building networks" from the lesson's
+opening - and at its core is this one mul_mat shape rule.</p>
+<p>This is also a good moment to note a ggml trade-off: its operators do not "broadcast anything, auto-align any shape" like some frameworks; instead it <strong>sets shape constraints quite
+strictly</strong>, asserting failure on the spot when things do not match. Why prefer strict over "smart auto-adaptation"? Because an inference engine fears <strong>silent errors</strong> most - a shape
+error papered over by auto-broadcast could make the model output a pile of plausible-looking but wrong results, extremely hard to trace. Strict assertions <strong>block errors at graph-build, exposing
+them at the first scene</strong>, making the whole system more reliable. This is a common attitude in performance engineering: <strong>fail early and loudly rather than run sick</strong>.</p>
+
+<h2>Three regulars: rms_norm / rope / soft_max_ext</h2>
+<p>Besides matmul, three operators recur in the attention layer. Stringing L04's attention with ggml operators gives roughly this pipeline:</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>rms_norm(x)</h4><p>normalize the input first, stabilizing the numeric scale (L04's "training stability" rests on it).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, ·)</h4><p>project out the Query / Key / Value tensors.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>rope(q, k)</h4><p>inject position info into Q, K (L04's RoPE rotation).</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>soft_max_ext(scores, mask)</h4><p>compute attention scores, apply the causal mask, normalize to weights (L04's -inf mask is here).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>mul_mat(V, weights)</h4><p>weight-sum the Values by the weights to get the attention output.</p></div></div>
+</div>
+<p>Note that mul_mat appears <strong>several times</strong> in the pipeline above - projecting Q/K/V is three mul_mats, and the final weight-sum of Values is another. This confirms the earlier "matmul is
+the main battlefield": in one attention layer, almost all the real compute is these mul_mats, while rms_norm, rope, softmax are more like "seasoning" steps interspersed - each light on its own, yet
+attention is wrong without any of them. Compare this pipeline with L04's attention math and you find "<strong>the formula</strong>" and "<strong>the ggml operator sequence</strong>" map almost one-to-one -
+which is why understanding operators means understanding how a model lands as code.</p>
+<p>These three regulars have plain signatures (<span class="mono">ggml/include/ggml.h</span>):</p>
+<pre class="code"><span class="fn">ggml_rms_norm</span>(ctx, a, eps);                       <span class="cm">// RMS-normalize over the last dim, eps avoids divide-by-zero</span>
+<span class="fn">ggml_rope_ext</span>(ctx, a, pos, ff, n_dims, mode, ...); <span class="cm">// rotate by position pos, injecting relative position</span>
+<span class="fn">ggml_soft_max_ext</span>(ctx, a, mask, scale, max_bias); <span class="cm">// fused: softmax(a*scale + mask)</span></pre>
+<p>One line each: <span class="mono">rms_norm</span> scales a row vector by its root-mean-square into a stable range, cheaper than LayerNorm (no mean to compute);
+<span class="mono">rope</span> does not add an "index vector" per position but <strong>rotates</strong> Q, K by position, so attention scores carry "how far apart two tokens are";
+<span class="mono">soft_max_ext</span> is a <strong>fused operator</strong> merging "multiply scale + add mask + softmax" into one, saving memory and bandwidth. Note <span class="mono">scale</span>
+is usually <span class="mono">1/sqrt(d)</span> (to keep scores from getting too large), and <span class="mono">mask</span> holds the causal mask (future positions at -inf).</p>
+<p>Why single out these three operators? Because they <strong>exemplify two common techniques of ggml operator design</strong>. One is <strong>fusion</strong>: <span class="mono">soft_max_ext</span>
+compresses what could be three or four operators (scale, add mask, exponentiate, normalize) into one, building fewer intermediate tensors and moving data fewer times - in decode, where "bandwidth is
+tighter than compute" (from L04), fusion's payoff is especially clear. The other is <strong>specialization</strong>: transformers can hardly do without normalization and position encoding, so ggml just
+provides <strong>dedicated operators</strong> like <span class="mono">rms_norm</span> and <span class="mono">rope_ext</span> rather than making you assemble them from basic ops. Dedicated operators are both
+readable and give the backend a chance to "optimize the whole segment". These two moves - fuse what should be fused, specialize what should be specialized - run through ggml's operator library.</p>
+<p>A clarification in passing: <span class="mono">ggml_rope</span> and <span class="mono">ggml_rope_ext</span> are the same family, the latter with a string of extra parameters
+(<span class="mono">freq_base</span>, <span class="mono">freq_scale</span>, etc.) supporting long-context extension techniques like YaRN - in short, by adjusting the rotation "frequency", a model originally
+trained at 4K context can work at tens of thousands of tokens. You need not study these parameters now; just knowing "<strong>position encoding is tunable, and tuning it buys longer context</strong>" is
+enough.</p>
+<p>Put these three operators together with mul_mat and you have the "<strong>core vocabulary</strong>" needed to read any transformer's graph-build code: <span class="mono">mul_mat</span> (projection,
+attention scoring, summing), <span class="mono">rms_norm</span> (normalization before each sub-layer), <span class="mono">rope</span> (position), <span class="mono">soft_max_ext</span> (attention weights).
+Add a few basic operators like add (residual) and element-wise multiply (gating), and you can recognize <strong>ninety percent of the lines</strong> in a transformer block's graph-build code. The
+remaining ten percent are each model's little tweaks, but they never stray from this core operator set - exactly this lesson's most practical takeaway.</p>
+
+<h2>One operator, two pieces of code</h2>
+<p>Finally, dispel a common confusion: an operator in ggml actually has <strong>two</strong> pieces of code, with a clear division. One does "graph building" (define the shape, fill
+op/src, L09), the other does "actually compute" (run the numbers on some backend):</p>
+<div class="cols">
+  <div class="col"><h4>build side: ggml.c</h4><p><span class="mono">ggml_mul_mat(ctx, a, b)</span>: only <strong>defines</strong> the result tensor's shape, fills op and src, <strong>no compute</strong>. Every operator has a "constructor" here.</p></div>
+  <div class="col"><h4>compute side: ggml-cpu / ggml-cuda ...</h4><p><span class="mono">ggml_compute_forward_mul_mat(...)</span>: <strong>actually</strong> computes the matmul. CPU with SIMD, CUDA with GPU kernels, one per backend.</p></div>
+</div>
+<p>These two meet through <span class="mono">enum ggml_op</span>, the "operator number": graph-build records the number in <span class="mono">tensor-&gt;op</span>, and at execution the backend uses
+one big <span class="mono">switch(op)</span> to <strong>dispatch</strong> each node to the matching <span class="mono">ggml_compute_forward_*</span> (CPU side in <span class="mono">ggml/src/ggml-cpu/</span>).
+So "many operators" is not scary - they share one graph-build and dispatch framework, and <strong>adding a new operator is mainly adding an enum value + writing a forward
+implementation</strong>. This "declaration separated from implementation" design is the very reason the same graph can run efficiently on CPU, CUDA, and Metal each.</p>
+<p>This "two pieces of code" division, in hindsight, explains much of the earlier lessons' design. L09 said operator functions "only fill op/src, no compute" - that is because they are <strong>only the
+build side</strong>; the compute-side code is simply not there. L10 said the backend "computes node by node" - that compute is the <strong>compute side</strong> dispatching by op and calling each forward.
+So the build side and compute side correspond exactly to L09's "build" and L10's "execute" phases; one operator spans both phases, showing its face on the build side (define shape) and going all-out on
+the compute side (actually compute). Straighten this thread and ggml's whole execution flow strings into one complete chain in your head.</p>
+<p>This is also why ggml can <strong>fully separate model logic from hardware acceleration</strong>: writing a new model, you only assemble ready-made operators on the build side, touching no CPU/GPU
+compute code at all; optimizing some operator's speed on some hardware, you only change that one forward on the compute side, affecting no model. This division - "<strong>model authors and kernel
+authors each mind their own patch, without disturbing each other</strong>" - is the organizational basis for why engines like ggml can be widely reused and continuously optimized.</p>
+
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why does mul_mat's shape rule look reversed from math? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because ggml is <strong>row-major</strong> and <span class="mono">ne[0]</span> is the innermost (memory-adjacent, fastest-changing) dim. In math we write "<span class="mono">A(m x k) . B(k x n)
+    = C(m x n)</span>", requiring "A's columns k == B's rows k". But in ggml that contiguous k dim sits at <span class="mono">ne[0]</span>, so the rule is written "<span class="mono">a.ne[0] ==
+    b.ne[0]</span>".</p>
+    <p>In other words, <strong>math's "rows/columns" and ggml's ne dimension order are reversed</strong> - exactly L05's "dimension order opposite to PyTorch" trap, surfacing at the operator
+    level. Keep L05's mnemonic "ne[0] is memory-adjacent" and any ggml operator's shape constraint stops being confusing.</p>
+    <p>A practical tip: when reading ggml graph-build code, <strong>jot each tensor's ne on scratch paper</strong> and derive shapes operator by operator, checking at each mul_mat "do the two inner dims
+    match". This is the most effective debugging method in ggml programming - most graph-build bugs are a shape mismatch somewhere, caught on the spot by that <span class="mono">GGML_ASSERT</span>. Once
+    shape inference is second nature, you read even the most complex model graph-build code without panic.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What exactly do soft_max_ext's mask and scale do? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">scale</span> is a <strong>scaling factor</strong>, usually <span class="mono">1/sqrt(d)</span> (d is the per-head dimension). Attention scores are dot products of Q and K;
+    the higher the dimension, the larger dot products tend to get, making softmax too "sharp" (nearly one-sided); multiplying by <span class="mono">1/sqrt(d)</span> first pulls scores back to a
+    reasonable range, stabilizing gradients and values.</p>
+    <p><span class="mono">mask</span> adds the <strong>causal mask</strong> into the scores: future positions get <span class="mono">-inf</span>, so their weights become 0 after softmax (from L04).
+    <span class="mono">max_bias</span> controls ALiBi-style relative-position bias, 0 when unused. <span class="mono">soft_max_ext</span> <strong>fuses</strong> "multiply scale, add mask, softmax"
+    into one operator, avoiding several large intermediate tensors - a very common "operator fusion" optimization in inference engines.</p>
+    <p>Let me spell out <strong>fusion</strong> a bit more. Without fusion, the softmax step would build a "scaled tensor", then a "mask-added tensor", then an "exponentiated tensor"... each step writing
+    out, for real in memory, an intermediate as big as the score matrix - costing memory and bandwidth. A fused operator does these steps <strong>in one loop, all at once</strong>, with intermediates only
+    circling through registers/cache, never materializing as big tensors. For attention, whose "score matrix grows with the square of context length", the memory and bandwidth fusion saves are
+    considerable - which is also why llama.cpp has even more aggressive fused implementations like flash-attention.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> So many operators - how does ggml manage them all? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>With a uniform <strong>enum + dispatch</strong> mechanism. Each operator is a value in <span class="mono">enum ggml_op</span> (GGML_OP_MUL_MAT, GGML_OP_SOFT_MAX...); at graph build this
+    value is recorded in <span class="mono">tensor-&gt;op</span>. At execution the backend walks each node and a big <span class="mono">switch(node-&gt;op)</span> jumps to the matching
+    <span class="mono">ggml_compute_forward_*</span> implementation.</p>
+    <p>So adding a new operator is <strong>contained</strong> work: 1. add a value to the enum; 2. write a graph-build constructor (define the shape, fill src); 3. write a forward
+    implementation in each backend you care about and wire it into that switch. The rest of the framework (graph build, memory planning, scheduling) <strong>needs no change at all</strong>. This
+    "<strong>open for extension, closed for modification</strong>" structure is why ggml can keep growing hundreds of operators without falling apart.</p>
+    <p>This mechanism also explains why ggml can <strong>support so many different model architectures</strong>. Llama, Qwen, Mistral, Gemma... the differences among these models are essentially "which
+    operators, assembled in what order" - and the operators they use are mostly <strong>the same shared set</strong> (matmul, normalization, the attention pieces). So adding a new model architecture often
+    needs <strong>not a single new operator</strong>, just a different assembly on the build side; only occasionally, when an architecture has a unique design, do you add one or two new operators. It is
+    this shared operator library that lets llama.cpp keep up with the endless stream of new models without overhauling the engine for each one.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">mul_mat</span> requires <strong>equal inner dim ne[0]</strong> (eliminated); result <span class="mono">ne={a.ne[1], b.ne[1], ...}</span>, type F32, high dims broadcast.</li>
+    <li>The shape rule reads <strong>reversed from math's "rows x columns"</strong>, because ggml is row-major and ne[0] is innermost (L05's trap).</li>
+    <li><span class="mono">rms_norm</span> stabilizes values, <span class="mono">rope</span> injects position, <span class="mono">soft_max_ext</span> fuses "scale + mask + softmax" into attention weights.</li>
+    <li>Each operator has <strong>two pieces of code</strong>: build side (ggml.c defines shape / fills op/src) + compute side (the backend's <span class="mono">ggml_compute_forward_*</span> actually computes).</li>
+    <li>Execution dispatches via <span class="mono">enum ggml_op</span> + big <span class="mono">switch(op)</span>; adding an operator = add an enum + write a forward.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Splitting an operator into "<strong>declare the shape</strong>" and "<strong>each backend implements its own</strong>" - the former keeps graph-building light and catches errors right at
+  assembly, the latter lets the same operator have an optimal implementation on CPU/CUDA/Metal. Model logic written once, hardware acceleration written several times - exactly the dividend of this
+  <strong>declaration-implementation decoupling</strong>. Next lesson, we dig into the "material" these operators actually consume - the byte details of quantization formats.
+</div>
+""",
+}

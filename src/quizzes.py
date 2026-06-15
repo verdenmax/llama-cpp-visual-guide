@@ -710,6 +710,96 @@ QUIZZES = {
             },
         ],
     },
+    "11-core-operators.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml_mul_mat(a, b) 对形状的核心要求是？",
+                    "en": "What is the core shape requirement of ggml_mul_mat(a, b)?",
+                },
+                "opts": [
+                    {
+                        "zh": "a 和 b 的内维 ne[0] 必须相等（这一维在相乘时被消去）",
+                        "en": "a and b must have equal inner dim ne[0] (this dim is eliminated in the multiply)",
+                    },
+                    {"zh": "a 和 b 形状必须完全相同", "en": "a and b must have identical shapes"},
+                    {"zh": "b 必须是方阵", "en": "b must be square"},
+                    {"zh": "没有任何要求", "en": "There is no requirement"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "mul_mat 要求 a->ne[0]==b->ne[0]；结果 ne={a.ne[1], b.ne[1], ...}。因 ggml 行优先、ne[0] 最内，这条规则方向和数学“行×列”相反。",
+                    "en": "mul_mat requires a->ne[0]==b->ne[0]; result ne={a.ne[1], b.ne[1], ...}. Since ggml is row-major with ne[0] innermost, this reads reversed from math's rows x columns.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "soft_max_ext 里的 mask 起什么作用？",
+                    "en": "What does the mask in soft_max_ext do?",
+                },
+                "opts": [
+                    {
+                        "zh": "给分数加上掩码，例如把未来位置设为 -inf 以实现因果掩码",
+                        "en": "Adds a mask to the scores, e.g. setting future positions to -inf to implement the causal mask",
+                    },
+                    {"zh": "对输入做归一化", "en": "Normalizes the input"},
+                    {"zh": "把权重量化", "en": "Quantizes the weights"},
+                    {"zh": "缩放学习率", "en": "Scales the learning rate"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "soft_max_ext 融合 softmax(a*scale + mask)：scale 通常 1/sqrt(d) 防止分数过大，mask 加因果掩码（未来位 -inf，softmax 后权重为 0）。",
+                    "en": "soft_max_ext fuses softmax(a*scale + mask): scale is usually 1/sqrt(d) to keep scores in range, mask adds the causal mask (future at -inf, weight 0 after softmax).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么说一个 ggml 算子有“两处代码”？",
+                    "en": "Why is a ggml operator said to have \"two pieces of code\"?",
+                },
+                "opts": [
+                    {
+                        "zh": "一处在 ggml.c 建图、定 op/src 与输出形状；另一处在后端（如 ggml-cpu 的 compute_forward）真正计算",
+                        "en": "One in ggml.c builds the graph, defining op/src and output shape; the other in a backend (e.g. ggml-cpu's compute_forward) actually computes",
+                    },
+                    {"zh": "调试版和发布版", "en": "Debug and release builds"},
+                    {"zh": "前端网页和后端服务器", "en": "Frontend web page and backend server"},
+                    {"zh": "训练和推理", "en": "Training and inference"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建图侧（ggml.c）只定形状、填 op/src，不算；计算侧（各后端的 ggml_compute_forward_*）真算。两者靠 enum ggml_op + switch(op) 对接。",
+                    "en": "The build side (ggml.c) only defines the shape and fills op/src, no compute; the compute side (each backend's ggml_compute_forward_*) actually computes. They meet via enum ggml_op + switch(op).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "执行时，后端怎么知道每个节点该调哪个算子实现？",
+                    "en": "At execution, how does the backend know which operator implementation to call for each node?",
+                },
+                "opts": [
+                    {
+                        "zh": "用一个大 switch(node->op) 按算子编号派发到对应的 ggml_compute_forward_*",
+                        "en": "A big switch(node->op) dispatches by operator number to the matching ggml_compute_forward_*",
+                    },
+                    {"zh": "靠文件名匹配", "en": "By matching file names"},
+                    {"zh": "随机选一个", "en": "It picks one at random"},
+                    {"zh": "每次都重新编译", "en": "It recompiles each time"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建图时算子编号记在 tensor->op；执行时后端用 switch(op) 跳到对应实现。加新算子 = 加一个 enum 值 + 写一份 forward 并接进 switch。",
+                    "en": "The operator number is recorded in tensor->op at build; at execution the backend uses switch(op) to jump to the implementation. Adding an operator = add an enum value + write a forward wired into the switch.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "ggml 的 mul_mat 形状规则为什么读起来和你在数学课学的“行×列”方向相反？（提示：L05 的维度顺序）",
+                "en": "Why does ggml's mul_mat shape rule read reversed from the \"rows x columns\" you learned in math? (hint: L05's dimension order)",
+            },
+        ],
+    },
 }
 
 

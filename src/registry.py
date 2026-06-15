@@ -20,4 +20,5 @@ CONTENT = {
     "08-ggml-core-objects.html": part3.LESSON_08,
     "09-compute-graph.html": part3.LESSON_09,
     "10-graph-execution.html": part3.LESSON_10,
+    "11-core-operators.html": part3.LESSON_11,
 }
