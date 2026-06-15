@@ -82,6 +82,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("18-batching.html", "批处理", "Batching",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("19-kv-cache.html", "KV cache", "The KV cache",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -531,6 +533,8 @@ SUBTITLES = {
                                 "llama_context; cparams; memory/sched/logits; llama_decode"),
     "18-batching.html": ("llama_batch · pos/seq_id/logits 标志 · llama_batch_allocr -> ubatch",
                          "llama_batch; pos/seq_id/logits flags; llama_batch_allocr -> ubatch"),
+    "19-kv-cache.html": ("llama_kv_cache · cell(pos/seq_id) · 上下文移位 · 多序列 · 变体",
+                         "llama_kv_cache; cell(pos/seq_id); context shift; multi-seq; variants"),
 }
 
 

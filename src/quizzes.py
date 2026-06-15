@@ -1260,6 +1260,67 @@ QUIZZES = {
             },
         ],
     },
+    "19-kv-cache.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "KV cache 解决什么问题？",
+                    "en": "What problem does the KV cache solve?",
+                },
+                "opts": [
+                    {"zh": "缓存先前 token 的 K/V，让自回归每步只算新 token（不重算整段）", "en": "caches prior tokens' K/V so autoregression computes only the new token each step (no whole-segment recompute)"},
+                    {"zh": "压缩权重", "en": "compresses weights"},
+                    {"zh": "缓存 logits", "en": "caches logits"},
+                    {"zh": "加速模型加载", "en": "speeds up model loading"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "没缓存每步要重算前面所有 token 的 K/V（随长度平方涨）；有缓存则每步只算新 token、读历史 K/V（线性）。L04 证明二者数值等价但快一个数量级，是 decode 快的根本。",
+                    "en": "Without a cache each step recomputes all prior tokens' K/V (quadratic in length); with one, each step computes only the new token and reads historical K/V (linear). L04 proves they are numerically equivalent but an order of magnitude faster - the root of decode's speed.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个 cell 主要记录什么？",
+                    "en": "What does a cell mainly record?",
+                },
+                "opts": [
+                    {"zh": "这个位置的 pos、属于哪些 seq_id（以及对应的 K/V）", "en": "this position's pos, which seq_ids it belongs to (and the corresponding K/V)"},
+                    {"zh": "权重", "en": "weights"},
+                    {"zh": "文件偏移", "en": "a file offset"},
+                    {"zh": "采样概率", "en": "sampling probabilities"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_kv_cells 管理一格格 cell，每个 cell 记 pos（喂 rope/因果掩码）和所属 seq_id（支持多序列）；head 是滚动写指针。pos+seq_id 是 cell 的核心标识。",
+                    "en": "llama_kv_cells manages the grid of cells; each records pos (fed to rope/causal mask) and its seq_id (for multi-sequence); head is the rolling write pointer. pos+seq_id are a cell's core identity.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "公开 C API 里删除某序列的 KV 用哪个？",
+                    "en": "Which public C API removes a sequence's KV?",
+                },
+                "opts": [
+                    {"zh": "llama_memory_seq_rm（经 llama_get_memory）", "en": "llama_memory_seq_rm (via llama_get_memory)"},
+                    {"zh": "llama_kv_self_rm（已改名移除）", "en": "llama_kv_self_rm (renamed and removed)"},
+                    {"zh": "llama_free", "en": "llama_free"},
+                    {"zh": "llama_decode", "en": "llama_decode"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "序列操作的公开 API 是 llama_memory_seq_*（seq_rm/seq_cp/seq_add 等），经 llama_get_memory 拿到记忆对象；旧名 llama_kv_self_* 已改名移除，看老教程要小心。",
+                    "en": "The public sequence-op API is llama_memory_seq_* (seq_rm/seq_cp/seq_add etc.), via llama_get_memory; the old llama_kv_self_* names are renamed and removed, so beware old tutorials.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "KV cache 很吃显存。结合 L17 的 type_k/type_v 和本课的滑窗变体，说说有哪些办法控制 KV 的内存。",
+                "en": "The KV cache is VRAM-hungry. Drawing on L17's type_k/type_v and this lesson's sliding-window variant, what are the ways to control KV memory?",
+            },
+        ],
+    },
 }
 
 

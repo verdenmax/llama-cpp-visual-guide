@@ -1472,3 +1472,269 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
 </div>
 """,
 }
+
+LESSON_19 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+自回归每步只新算一个 token，全靠把先前 token 的 K/V <strong>缓存</strong>起来——这就是 KV cache（L03/L04 反复提到的那个"记忆"）。这一课钻进 <span class="mono">llama-kv-cache</span>：cell 怎么管理、上下文满了怎么<strong>移位</strong>、多条序列怎么共存，
+以及为长上下文准备的各种<strong>变体</strong>。它是第四部分的收尾，也是大模型"记得住前文"的物理基础。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">为什么 KV cache 值得收尾一讲？因为它是<strong>显存大户</strong>，也是长上下文、多并发这些实际能力的关键。前面 L17 说 context 持有它、L18 说 batch 往里写——这一课把这个"记忆"本身彻底拆开看清楚。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  KV cache 像一本<strong>会议纪要</strong>：每来一个发言（token），就把它的要点（K/V）记在新的一行（cell），标上这是第几句（<span class="mono">pos</span>）、谁说的（<span class="mono">seq_id</span>）。下次接话，只需<strong>读纪要</strong>，
+  不必把整场会重听一遍。会议太长记不下了，就滚动翻页（滑窗）或划掉某人的发言（<span class="mono">seq_rm</span>）。这本纪要，就是模型"记得住上文"的那本账。
+</div>
+
+<h2>为什么需要 KV cache</h2>
+<p>先说清它解决什么。注意力要让"当前 token"去看"之前所有 token"，需要每个历史 token 的 K（键）和 V（值）。<strong>没有缓存</strong>，每生成一个新词，都得把前面所有 token 的 K/V 重算一遍——长度每涨一点，重算量就平方级地涨。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>重算 vs 缓存</b>：缓存把"每步重算整段"降成"每步只算新 token"</div>
+  <div class="cells"><span class="lab">没缓存</span><span class="cell">每步重算 t0..tn 的 K/V</span><span class="lab">随长度平方涨</span></div>
+  <div class="cells"><span class="lab">有缓存</span><span class="cell hl">只算新 token 的 K/V</span><span class="cell">读历史 K/V</span><span class="lab">随长度线性</span></div>
+</div>
+<p><strong>有了缓存</strong>，先前每个 token 的 K/V 算过一次就存着，每步只需算<strong>新 token</strong> 的 K/V、把它追加进缓存，再读出全部历史 K/V 做注意力。于是每步的计算量从"重算整段"降成"只算一个"，这正是 L04 证明过的：缓存和重算<strong>数值上完全等价</strong>，但快了一个数量级。</p>
+<p>这也直接解释了 L03 说的"decode 为什么快"：decode 每步只新增一个 token，靠 KV cache 复用历史，所以一步只做一个 token 的前向。可以说，<strong>没有 KV cache，就没有实用的自回归生成</strong>——它是把"理论上能算"变成"实际跑得动"的那块关键拼图。</p>
+<p>先快速回忆 K/V 是什么（L04/L11）：注意力里，当前 token 用自己的 Q（查询）去和<strong>每个历史 token 的 K（键）</strong>做点积、算出"该关注谁"，再按这个权重把<strong>各历史 token 的 V（值）</strong>加权汇总。所以"看历史"这件事，需要的正是每个历史 token 的 K 和 V——把它们缓存下来，就不用每步重算。</p>
+<p>那为什么单单缓存 K/V、不缓存别的？因为历史 token 的 K/V <strong>算出来就不再变</strong>：第 3 个 token 的 K/V，不管后面又来了多少新词，它都是那个值，理应只算一次、存着复用。而当前 token 的 Q 是每步新算的（针对"此刻要预测谁"），没必要缓存。这种"<strong>不变的就缓存、每步变的就现算</strong>"的划分，是 KV cache 高效的根本。</p>
+<p>prefill 阶段（L03）正是<strong>一次性把整段 prompt 的 K/V 填进缓存</strong>：把 prompt 的几十上百个 token 一批喂进去（L18），并行算出它们各自的 K/V、全部写进 cell。填完，缓存里就有了整段 prompt 的记忆，之后 decode 逐字生成时，每个新词都能直接读到这份历史，不必回头重算 prompt。</p>
+<p>顺带把"K/V"这俩字母的来历也点一下：它们来自数据库式的"键-值"（key-value）类比——K 像索引（拿 Q 去和它匹配、找相关的位置），V 像被取出的内容（按匹配权重汇总）。这个类比不必抠太死，但它能帮你记住：缓存 K/V，就是缓存"每个历史位置的可被检索的内容"。</p>
+<p>把"平方 vs 线性"的差距再具体感受一下：生成第 1000 个 token 时，没缓存的话要把前 999 个的 K/V 全重算一遍，越往后每步越慢、整体是平方级；有缓存则第 1000 步和第 10 步一样，都只算一个新 token，整体线性。对动辄几千 token 的长对话，这个差距就是"跑得动"和"卡死"的分界。</p>
+
+<h2>cell 怎么管：pos 与 seq_id</h2>
+<p>KV cache 内部是一格格的 <strong>cell</strong>，每个 cell 存一个位置的 K/V。管理这些 cell 的是 <span class="mono">llama_kv_cells</span>：它记着每个 cell 的位置 <span class="mono">pos</span> 和所属的序列 <span class="mono">seq_id</span>；缓存还有个滚动写指针 <span class="mono">head</span>，标记下一个该往哪写。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>cells：每格记 pos + seq_id</b>，head 是滚动写指针</div>
+  <div class="cells"><span class="lab">cell</span><span class="cell">pos0/seqA</span><span class="cell">pos1/seqA</span><span class="cell">pos2/seqB</span><span class="cell hl">head -&gt; 空</span></div>
+</div>
+<pre class="code"><span class="cm">// 简化自 src/llama-kv-cells.h / src/llama-kv-cache.h</span>
+<span class="kw">class</span> llama_kv_cells {            <span class="cm">// 管理一格格 cell</span>
+    std::vector&lt;llama_pos&gt; pos;    <span class="cm">// 每个 cell 的位置</span>
+    <span class="cm">// 每个 cell 还记: 属于哪些 seq_id</span>
+};
+<span class="kw">class</span> llama_kv_cache : llama_memory_i {  <span class="cm">// src/llama-kv-cache.h</span>
+    llama_kv_cells_vec v_cells;   <span class="cm">// 实际存储(可多序列)</span>
+    <span class="cm">// head(): 滚动写指针</span>
+};</pre>
+<p>注意 <span class="mono">llama_kv_cache</span> 派生自 <span class="mono">llama_memory_i</span>——这个基接口很重要，后面讲变体时会回到它。每个 cell 带 <span class="mono">pos</span>，是因为注意力的 rope（L16）和因果掩码都要知道"这个 K/V 是第几位的"；每个 cell 带 <span class="mono">seq_id</span>，是为了支持多序列（下面讲）。</p>
+<p>每步 decode，<span class="mono">build_attn</span>（L16）算出新 token 的 K/V 后，就写进 <span class="mono">head</span> 指的那个 cell、把 head 往后挪一格；做注意力时，再从所有属于本序列的 cell 里读出历史 K/V。所以 KV cache 不是被动的存储，而是<strong>每步都在增长、每步都被读取</strong>的活动记忆。</p>
+<p>cell 和 token 是<strong>一一对应</strong>的：序列里第 i 个 token，就占缓存里某个 cell，存着它（其实是每一层都有一份）的 K 和 V。所以"缓存有多大"约等于"能记多少个 token 的 K/V"，这也是 <span class="mono">n_ctx</span>（上下文长度，L17）的含义——它就是缓存能容纳的 cell 数上限。</p>
+<p><span class="mono">head</span> 这个滚动写指针还有个作用：当某些 cell 被释放（比如某条序列结束、被 <span class="mono">seq_rm</span> 删掉），它们就空出来了，新 token 可以<strong>复用</strong>这些空位，而不必一味往后涨。所以缓存不是只进不出的，而是像一块可回收的"记忆田"：用过的格子腾出来，又能种新的。这让多序列来来去去时，缓存能被反复利用。</p>
+<p>做注意力时"只读本序列的 cell"也值得说清：缓存里可能混着好几条序列的 cell，但当前 token 只该看<strong>自己这条序列</strong>、且<strong>位置在自己之前</strong>的 K/V。前者靠 <span class="mono">seq_id</span> 过滤、后者靠因果掩码（L11 的 <span class="mono">soft_max_ext</span>）。两道过滤一叠加，就保证了"各序列互不串味、每个 token 只看得到过去"。</p>
+<p>再强调一句"每一层都有一份"：一个 transformer 有几十层，每一层都有自己的注意力、各自要缓存一套 K/V。所以一个 token 的"记忆"其实是<strong>几十份</strong>（每层一份）K/V 的集合。这也是为什么深一点的模型 KV cache 特别大——层数直接乘进了缓存大小里（深挖 1 的乘式里那个"层数"就是它）。</p>
+
+<h2>序列操作与上下文移位</h2>
+<p>KV cache 不只是"往里写"，还能被<strong>编辑</strong>。一组序列操作让你删、复制、保留、平移某条序列的 K/V，对应公开 C API 的 <span class="mono">llama_memory_seq_*</span>（经 <span class="mono">llama_get_memory</span> 拿到记忆对象）。</p>
+<div class="flow">
+  <div class="node"><div class="nt">seq_rm</div><div class="nd">删一段 KV</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">seq_cp / seq_keep</div><div class="nd">复制 / 只留某序列</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">seq_add</div><div class="nd">上下文移位<br>pos 平移</div></div>
+</div>
+<pre class="code"><span class="cm"># 伪代码: 序列操作(公开 C API)</span>
+mem = <span class="fn">llama_get_memory</span>(ctx)
+<span class="fn">llama_memory_seq_rm</span> (mem, seq, p0, p1)      <span class="cm"># 删 [p0,p1) 这段 KV</span>
+<span class="fn">llama_memory_seq_add</span>(mem, seq, p0, p1, d)   <span class="cm"># 上下文移位: 把 pos 平移 d</span></pre>
+<p>注意这套公开 API 的名字是 <span class="mono">llama_memory_seq_*</span>——旧版本叫 <span class="mono">llama_kv_self_seq_*</span>，已经改名移除了。看老教程时容易踩这个坑。改名本身也透露了演进方向：从"KV cache"这个具体概念，抽象成了更一般的"memory"。</p>
+<p>这里最值得理解的是<strong>上下文移位</strong>（context shift）。当对话长到超过 <span class="mono">n_ctx</span>，缓存满了怎么办？一种办法就是：丢掉最旧的一段 K/V，把剩下那些 token 的 <span class="mono">pos</span> 整体往前挪（<span class="mono">seq_add</span> 一个负的位移），腾出尾部空间继续生成。这样既不用"满了就停"，也不必重算整段——只是把记忆的窗口往前滑了一下。</p>
+<p><span class="mono">seq_cp</span>（复制序列）有个巧妙用途：<strong>共享前缀</strong>。比如一个很长的 system prompt，要同时生成好几个不同回答，可以先把它算一遍、存进序列 0，再 <span class="mono">seq_cp</span> 复制给序列 1、2、3……于是几条序列共享同一段前缀的 KV，不用各算一遍。这是服务器省算力的常用招数。</p>
+<p><span class="mono">seq_keep</span>（只保留某序列）则常用于<strong>清场</strong>：服务器处理完一批请求，想只留下某一条、把其余的 KV 全清掉，一句 <span class="mono">seq_keep</span> 就行。这些序列操作合起来，让 KV cache 不是一块只能整体清空的死内存，而是可以<strong>按序列精细增删</strong>的活内存——这正是高并发服务调度的底层支撑。</p>
+<p>再回到那次改名：从 <span class="mono">llama_kv_self_*</span> 到 <span class="mono">llama_memory_seq_*</span>，不只是换个名字，而是概念的<strong>抽象升级</strong>。早期只有一种"KV cache"，所以 API 就叫 kv；后来出现了 recurrent 这种"不是 KV、但也是记忆"的东西，于是把名字提升到更一般的 memory。一次改名，记录的是这个引擎从"只支持 transformer"到"也能容纳别的架构"的成长。</p>
+<p>那几个序列操作里常见的 <span class="mono">p0</span>、<span class="mono">p1</span> 是<strong>位置范围</strong>：很多操作不是对整条序列、而是对"第 p0 到 p1 位"这一段做。比如只删一段、只移一段。这种"按位置区间操作"的精细度，让引擎能做很多花活——比如只回滚最近几个 token（撤销）、只移动中间一段。把记忆做成可按区间编辑的，灵活性就出来了。</p>
+
+<h2>多序列与变体</h2>
+<p>因为每个 cell 都带 <span class="mono">seq_id</span>，<strong>一个 KV cache 能同时装多条序列</strong>：它们的 cell 混在同一块缓存里、靠 seq_id 区分，各做各的注意力（只看自己序列的 cell）。这就是 L18 多序列、服务器多并发的内存基础。</p>
+<table class="t">
+  <tr><th>变体</th><th>思路</th><th>文件</th></tr>
+  <tr><td>标准</td><td>全注意力，每个 token 都缓存</td><td><span class="mono">llama-kv-cache</span></td></tr>
+  <tr><td>iSWA 滑窗</td><td>只保留最近一窗的 K/V</td><td><span class="mono">llama-kv-cache-iswa</span></td></tr>
+  <tr><td>recurrent</td><td>固定大小状态，不随长度涨</td><td><span class="mono">llama-memory-recurrent</span></td></tr>
+  <tr><td>hybrid</td><td>混合上面几种</td><td><span class="mono">llama-memory-hybrid</span></td></tr>
+</table>
+<p>为什么需要这么多变体？因为标准全注意力的 KV cache 虽然把计算降成了线性，<strong>内存却仍随长度线性增长</strong>——上下文越长越占显存。滑窗（iSWA）只留最近一窗、recurrent 用固定状态、hybrid 混搭，都是为<strong>长上下文</strong>省内存的不同取舍。它们都实现同一个基接口 <span class="mono">llama_memory_i</span>，于是可以整体替换、引擎其余部分不变。</p>
+<p>多序列"不串味"再强调一遍，因为它是并发的关键：三条序列的 cell 虽然挤在同一块缓存里，但每条序列做注意力时，<span class="mono">seq_id</span> 过滤让它<strong>只看见自己的 cell</strong>，仿佛缓存里只有它一条。于是一块物理缓存，逻辑上被切成了互不可见的多份。这种"<strong>物理共享、逻辑隔离</strong>"，和 L17 的 context 共享权重是同一种省内存哲学。</p>
+<p>稍微展开滑窗（iSWA）：它的想法是"<strong>太远的历史就别记了</strong>"——只保留最近一个固定大小窗口内的 K/V，更旧的丢掉。这对很多任务够用（近处的上下文最重要），却能把 KV cache 的内存从"随长度涨"压成"恒定一个窗口"。有些模型是<strong>逐层混合</strong>的：一部分层用滑窗、一部分用全注意力，兼顾省内存和长程记忆。</p>
+<p>recurrent 变体则更彻底：它对应的是 Mamba 这类<strong>非 transformer</strong> 的架构，用一个<strong>固定大小的状态</strong>来概括"到目前为止的全部历史"，状态大小<strong>完全不随上下文长度变</strong>。这从根本上绕开了 KV cache 随长度涨的问题，代价是状态是"压缩过的历史"、不像全注意力那样能精确回看每个 token。把它也纳入 <span class="mono">llama_memory_i</span>，正是这套抽象的威力——连"记忆的根本机制都不同"的架构，都能接进同一个引擎。</p>
+<p>把 KV cache 放回整条推理链：L18 的 batch 把新 token 喂进来 -&gt; L16 的 <span class="mono">build_attn</span> 算出它的 K/V、写进 KV cache，又从 KV cache 读出历史 -&gt; 算完更新缓存、推进一步。KV cache 就是那块被<strong>每一步反复读写</strong>的记忆，是自回归循环里"承上启下"的状态核心。前面所有部件，最后都围着它转。</p>
+<p>最后给第四部分（上）画个句号。回头看这六课，其实是顺着"一个模型怎么活起来"走了一遍：L14 把文件加载成张量、L15 认出它是什么架构、L16 把它拼成计算图、L17 用 context 把它装进运行时、L18 用 batch 喂它该算什么、L19 用 KV cache 让它记住前文。六块拼在一起，就是一台能<strong>持续逐字生成</strong>的推理机的内部全貌。下半部分（M4b：分词、采样、聊天模板、语法、LoRA）会继续往"文本进、文本出"的两端展开。</p>
+<p>还有一点值得知道：KV cache 的内存布局，和 L11 提过的 <strong>flash attention</strong> 这类优化是配合的——把 K/V 在内存里排得规整，注意力内核才能高效地一块块读、边读边算。所以 KV cache 不只是"存得下"就行，它<strong>怎么排</strong>也直接影响注意力算得快不快。存储布局和计算内核，在这一层是互相迁就的一对。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> KV cache 为什么这么吃显存？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为它要存的东西很多：<strong>每个 token、每一层、每个 KV 头</strong>，都要存一份 K 和一份 V。把这些乘起来——上下文长度 × 层数 × KV 头数 × 每头维度 × 2（K 和 V）——就是 KV cache 的大小。上下文一长，这个乘积就很可观，常常比模型权重之外最大的那块内存还大。</p>
+    <p>所以有两条省显存的路（L17 cparams 里见过）：一是把 KV 量化存（<span class="mono">type_k</span>/<span class="mono">type_v</span> 从 16 位降到 8 位甚至更低，直接减半再减半）；二是减小 <span class="mono">n_ctx</span>（少缓存几个 token）。L15 还提过 GQA——让 KV 头数远少于 Q 头数，从源头上就把 KV cache 缩小了。</p>
+    <p>理解了"KV cache 大小 = 长度 × 层 × KV头 × ..."这个乘式，你就能从一个模型的超参，估出开多长上下文会吃多少显存——这是部署大模型时一笔最该会算的账。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 上下文移位到底是怎么回事？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>场景是这样：你和模型聊了很久，token 数眼看要超过 <span class="mono">n_ctx</span>（缓存装不下了）。最朴素的做法是停下来，但那体验很差。上下文移位提供了另一条路：<strong>丢掉最旧的一段对话</strong>（删掉那些 cell），把剩下保留部分的 <span class="mono">pos</span> 整体往前移，让位置重新从小开始排，尾部就空出了新位置。</p>
+    <p>关键是这只动<strong>位置标记</strong>、不重算 K/V 本身——<span class="mono">seq_add</span> 把一段 token 的 pos 平移一个量，缓存里的 K/V 内容不变，只是它们"对应的位置"变了。配合 rope 的相对位置性质，移位后模型还能正常往下接。所以它是一种"用很小代价续命"的手段。</p>
+    <p>当然，丢掉最旧的对话意味着模型会"忘记"开头说过的话——这是滑动窗口式记忆的固有代价。要不要移位、丢多少，是在"无限对话"和"记住全部"之间的权衡。顺带一提，更激进的整理（defrag）在新版里已被简化移除，<span class="mono">defrag_thold</span> 参数也标了弃用。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么要把"记忆"抽象成 llama_memory_i？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为"怎么记住前文"其实有很多种策略，而引擎的其余部分（建图、执行、采样）<strong>不该关心</strong>用的是哪种。把它们共同的行为（写入新 token、读出历史、删/移序列）抽象成一个基接口 <span class="mono">llama_memory_i</span>，标准 KV cache、滑窗、recurrent、hybrid 都去实现它。</p>
+    <p>于是"换一种记忆策略"就变成"换一个实现 <span class="mono">llama_memory_i</span> 的类"，<span class="mono">llama_context</span> 持有的那个 <span class="mono">memory</span>（L17）指向哪个实现，引擎照常调同一套接口。这正是 L17 说"字段名叫 memory 而非 kv_cache"的原因——它留好了容纳各种记忆策略的余地。</p>
+    <p>这又是一处熟悉的解耦：和 L12 的 <span class="mono">type_traits</span>（用接口容纳几十种量化）、L16 的 <span class="mono">build_arch_graph</span>（用虚函数容纳几十种架构）一脉相承。把"会变的策略"收进一个统一接口，把"不变的主干"留在外面——这是贯穿整个 llama.cpp 的设计母题，到 KV cache 这里又见到一次。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>KV cache 缓存历史 K/V，让自回归每步<strong>只算新 token</strong>（线性而非平方）——decode 快的根本（L03/L04）。</li>
+    <li>cell 存 <span class="mono">pos</span>+<span class="mono">seq_id</span>（由 <span class="mono">llama_kv_cells</span> 管），<span class="mono">head</span> 是滚动写指针；<span class="mono">llama_kv_cache</span> 派生自 <span class="mono">llama_memory_i</span>。</li>
+    <li>序列操作 <span class="mono">seq_rm</span>/<span class="mono">seq_cp</span>/<span class="mono">seq_keep</span>/<span class="mono">seq_add</span>（移位）；公开 API 是 <span class="mono">llama_memory_seq_*</span>（旧名 <span class="mono">llama_kv_self_*</span> 已移除）。</li>
+    <li><strong>上下文移位</strong>：丢旧段、平移 <span class="mono">pos</span>，腾空间继续生成，不重算。</li>
+    <li>每 cell 带 seq_id =&gt; <strong>多序列共享</strong>一块缓存；变体 iswa/recurrent/hybrid 为长上下文省内存，均实现 <span class="mono">llama_memory_i</span>。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"算过的别再算"做成一块带 cell 管理的缓存——自回归从"每步重算整段"降到"每步增量更新"，这是大模型能逐字流式输出的根本。而把这块记忆抽象成 <span class="mono">llama_memory_i</span> 接口，又让"<strong>怎么记忆</strong>"（全注意力/滑窗/recurrent/hybrid）能整体替换、引擎其余不变——
+  正是 L12、L16 那条"统一接口容纳多种策略"的母题，在"记忆"层的又一次回响。第四部分（上）到此结束：从加载（L14）、架构（L15）、建图（L16）、上下文（L17）、批处理（L18）到 KV cache（L19），你已经看清了一个 GGUF 模型如何变成一台能持续生成的推理机。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Autoregression computes only one new token per step, all thanks to <strong>caching</strong> prior tokens' K/V - that is the KV cache (the "memory" L03/L04 kept mentioning). This lesson digs into <span class="mono">llama-kv-cache</span>: how cells are managed, how to <strong>shift</strong> when the context fills,
+how multiple sequences coexist, and the various <strong>variants</strong> for long context. It closes Part 4 and is the physical basis for a large model "remembering the earlier text".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Why close with the KV cache? Because it is a <strong>VRAM heavyweight</strong> and the key to real capabilities like long context and concurrency. L17 said the context holds it, L18 said the batch writes into it - this lesson takes that "memory" itself fully apart.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  The KV cache is like <strong>meeting minutes</strong>: each speaker (token) gets their points (K/V) written on a new line (cell), tagged with which utterance (<span class="mono">pos</span>) and who spoke (<span class="mono">seq_id</span>). To continue the conversation, just <strong>read the minutes</strong>,
+  no need to re-hear the whole meeting. When the meeting runs too long to fit, scroll the pages (sliding window) or strike out someone's remarks (<span class="mono">seq_rm</span>). These minutes are the ledger by which the model "remembers the earlier text".
+</div>
+
+<h2>Why a KV cache is needed</h2>
+<p>First, what it solves. Attention has "the current token" look at "all earlier tokens", needing each historical token's K (key) and V (value). <strong>Without a cache</strong>, generating each new word recomputes all prior tokens' K/V - and as length grows a bit, the recompute grows quadratically.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>recompute vs cache</b>: caching turns "recompute the whole segment each step" into "compute only the new token each step"</div>
+  <div class="cells"><span class="lab">no cache</span><span class="cell">recompute t0..tn K/V each step</span><span class="lab">grows quadratically</span></div>
+  <div class="cells"><span class="lab">with cache</span><span class="cell hl">compute only the new token's K/V</span><span class="cell">read historical K/V</span><span class="lab">grows linearly</span></div>
+</div>
+<p><strong>With a cache</strong>, each prior token's K/V is computed once and stored, and each step only computes the <strong>new token's</strong> K/V, appends it to the cache, and reads all historical K/V for attention. So per-step compute drops from "recompute the whole segment" to "compute one" - exactly what L04 proved: caching and recompute are <strong>numerically identical</strong>, but an order of magnitude faster.</p>
+<p>This also directly explains L03's "why decode is fast": decode adds only one token per step, reusing history via the KV cache, so a step does just one token's forward. In short, <strong>without the KV cache there is no practical autoregressive generation</strong> - it is the key piece turning "computable in theory" into "actually runnable".</p>
+<p>A quick recap of what K/V are (L04/L11): in attention, the current token uses its own Q (query) to dot-product with <strong>each historical token's K (key)</strong>, computing "who to attend to", then weight-sums <strong>each historical token's V (value)</strong> by those weights. So "looking at history" needs exactly each historical token's K and V - cache them and you avoid recomputing each step.</p>
+<p>Why cache only K/V and nothing else? Because a historical token's K/V <strong>do not change once computed</strong>: the 3rd token's K/V, no matter how many new words follow, stay that value, deserving to be computed once and reused. The current token's Q is recomputed each step (for "who to predict right now"), no need to cache. This "<strong>cache the unchanging, compute the per-step-changing fresh</strong>" division is the root of the KV cache's efficiency.</p>
+<p>The prefill phase (L03) is exactly <strong>filling the cache with the whole prompt's K/V at once</strong>: feed the prompt's tens-to-hundreds of tokens as a batch (L18), compute their K/V in parallel, and write them all into cells. Once filled, the cache holds the whole prompt's memory, and later when decode generates word by word, each new word reads this history directly without recomputing the prompt.</p>
+<p>A note on where the letters "K/V" come from: a database-style "key-value" analogy - K is like an index (Q matches against it to find relevant positions), V like the retrieved content (summed by match weights). Do not press the analogy too hard, but it helps you remember: caching K/V is caching "each historical position's retrievable content".</p>
+<p>Feel the "quadratic vs linear" gap concretely: generating the 1000th token, without a cache you would recompute all prior 999 tokens' K/V, each step slower than the last, quadratic overall; with a cache, step 1000 is like step 10, both computing just one new token, linear overall. For long conversations of thousands of tokens, this gap is the line between "runnable" and "frozen".</p>
+
+<h2>How cells are managed: pos and seq_id</h2>
+<p>Inside, the KV cache is a grid of <strong>cells</strong>, each storing one position's K/V. Managing them is <span class="mono">llama_kv_cells</span>: it records each cell's position <span class="mono">pos</span> and the sequence <span class="mono">seq_id</span> it belongs to; the cache also has a rolling write pointer <span class="mono">head</span>, marking where to write next.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>cells: each records pos + seq_id</b>, head is the rolling write pointer</div>
+  <div class="cells"><span class="lab">cell</span><span class="cell">pos0/seqA</span><span class="cell">pos1/seqA</span><span class="cell">pos2/seqB</span><span class="cell hl">head -&gt; empty</span></div>
+</div>
+<pre class="code"><span class="cm">// simplified from src/llama-kv-cells.h / src/llama-kv-cache.h</span>
+<span class="kw">class</span> llama_kv_cells {            <span class="cm">// manages the grid of cells</span>
+    std::vector&lt;llama_pos&gt; pos;    <span class="cm">// each cell's position</span>
+    <span class="cm">// each cell also records: which seq_ids it belongs to</span>
+};
+<span class="kw">class</span> llama_kv_cache : llama_memory_i {  <span class="cm">// src/llama-kv-cache.h</span>
+    llama_kv_cells_vec v_cells;   <span class="cm">// actual storage(multi-sequence capable)</span>
+    <span class="cm">// head(): rolling write pointer</span>
+};</pre>
+<p>Note <span class="mono">llama_kv_cache</span> derives from <span class="mono">llama_memory_i</span> - this base interface matters, and we return to it for the variants. Each cell carries <span class="mono">pos</span> because attention's rope (L16) and causal mask both need to know "which position this K/V is"; each cell carries <span class="mono">seq_id</span> to support multiple sequences (below).</p>
+<p>Each decode step, after <span class="mono">build_attn</span> (L16) computes the new token's K/V, it writes them into the cell <span class="mono">head</span> points to and advances head by one; for attention, it reads historical K/V from all cells belonging to this sequence. So the KV cache is not passive storage but an active memory that <strong>grows every step and is read every step</strong>.</p>
+<p>Cells and tokens are <strong>one-to-one</strong>: the i-th token in a sequence occupies some cell in the cache, storing its (one per layer, actually) K and V. So "how big the cache is" roughly equals "how many tokens' K/V it can remember" - which is the meaning of <span class="mono">n_ctx</span> (context length, L17): the upper bound on cells the cache can hold.</p>
+<p>The <span class="mono">head</span> rolling write pointer has another role: when some cells are freed (e.g. a sequence ends and is removed by <span class="mono">seq_rm</span>), they become empty, and new tokens can <strong>reuse</strong> these slots rather than only growing forward. So the cache is not write-only but like a recyclable "memory field": used cells are freed and can be sown anew. This lets the cache be reused as sequences come and go.</p>
+<p>"Reading only this sequence's cells" during attention is worth clarifying: the cache may mix several sequences' cells, but the current token should see only <strong>its own sequence</strong>'s K/V at <strong>positions before itself</strong>. The former is filtered by <span class="mono">seq_id</span>, the latter by the causal mask (L11's <span class="mono">soft_max_ext</span>). The two filters together ensure "sequences do not mix flavors, and each token sees only the past".</p>
+<p>Emphasize "one per layer": a transformer has dozens of layers, each with its own attention, each caching its own set of K/V. So a token's "memory" is actually a collection of <strong>dozens</strong> of K/V (one per layer). This is why a deeper model's KV cache is especially big - layer count multiplies straight into the cache size (the "layer count" in Dig-deeper 1's product is exactly this).</p>
+
+<h2>Sequence operations and context shift</h2>
+<p>The KV cache is not just "write into" - it can be <strong>edited</strong>. A set of sequence operations lets you remove, copy, keep, or shift a sequence's K/V, corresponding to the public C API <span class="mono">llama_memory_seq_*</span> (obtaining the memory object via <span class="mono">llama_get_memory</span>).</p>
+<div class="flow">
+  <div class="node"><div class="nt">seq_rm</div><div class="nd">remove a span of KV</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">seq_cp / seq_keep</div><div class="nd">copy / keep only one sequence</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">seq_add</div><div class="nd">context shift<br>pos shifted</div></div>
+</div>
+<pre class="code"><span class="cm"># pseudocode: sequence operations (public C API)</span>
+mem = <span class="fn">llama_get_memory</span>(ctx)
+<span class="fn">llama_memory_seq_rm</span> (mem, seq, p0, p1)      <span class="cm"># remove the [p0,p1) span of KV</span>
+<span class="fn">llama_memory_seq_add</span>(mem, seq, p0, p1, d)   <span class="cm"># context shift: shift pos by d</span></pre>
+<p>Note the public API names are <span class="mono">llama_memory_seq_*</span> - older versions called them <span class="mono">llama_kv_self_seq_*</span>, now renamed and removed. Old tutorials trip on this. The rename also reveals the direction: from the concrete "KV cache" concept to a more general "memory".</p>
+<p>The most worthwhile thing here is <strong>context shift</strong>. When a conversation grows past <span class="mono">n_ctx</span> and the cache fills, what then? One way: drop the oldest span of K/V, shift the remaining tokens' <span class="mono">pos</span> forward as a whole (a negative <span class="mono">seq_add</span>), and free tail space to keep generating. This avoids "stop when full" without recomputing the whole segment - it just slides the memory window forward a bit.</p>
+<p><span class="mono">seq_cp</span> (copy a sequence) has a clever use: <strong>shared prefix</strong>. Say a long system prompt must generate several different answers at once - compute it once into sequence 0, then <span class="mono">seq_cp</span> it to sequences 1, 2, 3... so several sequences share the same prefix's KV without each recomputing it. A common server compute-saving trick.</p>
+<p><span class="mono">seq_keep</span> (keep only one sequence) is often used to <strong>clear the field</strong>: a server, done with a batch of requests, wanting to keep only one and clear all others' KV, does it with one <span class="mono">seq_keep</span>. These sequence operations together make the KV cache not a dead memory clearable only wholesale, but a live memory that can be <strong>finely added to and removed by sequence</strong> - the underlying support for high-concurrency service scheduling.</p>
+<p>Back to that rename: from <span class="mono">llama_kv_self_*</span> to <span class="mono">llama_memory_seq_*</span> is not just a name change but a conceptual <strong>abstraction upgrade</strong>. Early on there was only one "KV cache", so the API was called kv; later came recurrent, a "not-KV but still memory" thing, so the name was lifted to the more general memory. One rename records this engine's growth from "supporting only transformers" to "also accommodating other architectures".</p>
+<p>The <span class="mono">p0</span>, <span class="mono">p1</span> common in those sequence operations are a <strong>position range</strong>: many operations act not on a whole sequence but on the "positions p0 to p1" span - removing only a span, shifting only a span. This "operate by position interval" granularity lets the engine do many tricks - rolling back only the last few tokens (undo), shifting only a middle span. Making memory editable by interval is where the flexibility comes from.</p>
+
+<h2>Multiple sequences and variants</h2>
+<p>Because each cell carries <span class="mono">seq_id</span>, <strong>one KV cache can hold multiple sequences at once</strong>: their cells mix in the same cache, distinguished by seq_id, each doing its own attention (seeing only its own sequence's cells). This is the memory basis for L18's multi-sequence and a server's concurrency.</p>
+<table class="t">
+  <tr><th>variant</th><th>idea</th><th>file</th></tr>
+  <tr><td>standard</td><td>full attention, cache every token</td><td><span class="mono">llama-kv-cache</span></td></tr>
+  <tr><td>iSWA sliding window</td><td>keep only the most recent window's K/V</td><td><span class="mono">llama-kv-cache-iswa</span></td></tr>
+  <tr><td>recurrent</td><td>fixed-size state, not growing with length</td><td><span class="mono">llama-memory-recurrent</span></td></tr>
+  <tr><td>hybrid</td><td>a mix of the above</td><td><span class="mono">llama-memory-hybrid</span></td></tr>
+</table>
+<p>Why so many variants? Because while standard full-attention's KV cache makes compute linear, its <strong>memory still grows linearly with length</strong> - the longer the context, the more VRAM. Sliding window (iSWA) keeps only a recent window, recurrent uses fixed state, hybrid mixes - all different trade-offs to save memory for <strong>long context</strong>. They all implement the same base interface <span class="mono">llama_memory_i</span>, so they can be swapped wholesale with the rest of the engine unchanged.</p>
+<p>Emphasize multi-sequence "no mixing" once more, as it is the key to concurrency: three sequences' cells crowd into the same cache, but when each sequence does attention, the <span class="mono">seq_id</span> filter lets it <strong>see only its own cells</strong>, as if the cache held only it. So one physical cache is logically split into mutually-invisible portions. This "<strong>physically shared, logically isolated</strong>" is the same memory-saving philosophy as L17's context sharing weights.</p>
+<p>Expand on the sliding window (iSWA) a bit: its idea is "<strong>do not remember history too far back</strong>" - keep only the K/V within a recent fixed-size window, dropping older ones. This suffices for many tasks (nearby context matters most) yet compresses the KV cache memory from "growing with length" to "a constant window". Some models are <strong>layer-mixed</strong>: some layers use a sliding window, some full attention, balancing memory savings and long-range memory.</p>
+<p>The recurrent variant goes further: it corresponds to <strong>non-transformer</strong> architectures like Mamba, using a <strong>fixed-size state</strong> to summarize "all history so far", the state size <strong>not changing with context length at all</strong>. This fundamentally sidesteps the KV cache's growth-with-length problem, at the cost of the state being "compressed history" - not able to look back precisely at each token as full attention can. Folding it too into <span class="mono">llama_memory_i</span> is exactly this abstraction's power - even architectures whose "fundamental memory mechanism differs" can plug into the same engine.</p>
+<p>Put the KV cache back into the whole inference chain: L18's batch feeds a new token in -&gt; L16's <span class="mono">build_attn</span> computes its K/V, writes them into the KV cache, and reads history back out -&gt; after computing, updates the cache and advances one step. The KV cache is that memory <strong>read and written every step</strong>, the state core that "links past and future" in the autoregressive loop. All the earlier components, in the end, revolve around it.</p>
+<p>Finally, a full stop for Part 4a. Looking back at these six lessons, they walk through "how a model comes alive": L14 loads the file into tensors, L15 recognizes which architecture it is, L16 assembles it into a compute graph, L17 packs it into a runtime via the context, L18 feeds it what to compute via the batch, L19 lets it remember the earlier text via the KV cache. The six together are the full internal picture of an inference machine that <strong>keeps generating word by word</strong>. The second half (M4b: tokenizer, sampling, chat template, grammar, LoRA) continues out toward the "text in, text out" ends.</p>
+<p>One more thing worth knowing: the KV cache's memory layout works together with optimizations like <strong>flash attention</strong> (mentioned in L11) - laying K/V tidily in memory is what lets the attention kernel read block by block and compute as it reads efficiently. So the KV cache is not just about "fitting"; <strong>how it is laid out</strong> also directly affects how fast attention computes. Storage layout and compute kernel are a mutually-accommodating pair at this layer.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why does the KV cache eat so much VRAM? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because it stores a lot: <strong>every token, every layer, every KV head</strong> needs one K and one V. Multiply these - context length x layer count x KV head count x per-head dim x 2 (K and V) - and that is the KV cache size. As context grows long, this product is considerable, often the biggest memory block aside from the model weights.</p>
+    <p>So there are two routes to save VRAM (seen in L17's cparams): one, store KV quantized (<span class="mono">type_k</span>/<span class="mono">type_v</span> from 16-bit to 8-bit or lower, halving and halving again); two, reduce <span class="mono">n_ctx</span> (cache fewer tokens). L15 also mentioned GQA - making KV heads far fewer than Q heads, shrinking the KV cache at the source.</p>
+    <p>Understand "KV cache size = length x layers x KV heads x ..." and you can estimate from a model's hyperparameters how much VRAM a given context length eats - the most worth-knowing account when deploying a large model.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What exactly is context shift? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>The scenario: you have chatted with the model for a while, and the token count is about to exceed <span class="mono">n_ctx</span> (the cache cannot hold more). The naive move is to stop, but that is a poor experience. Context shift offers another way: <strong>drop the oldest span of conversation</strong> (remove those cells), shift the remaining part's <span class="mono">pos</span> forward as a whole so positions restart from small, freeing new positions at the tail.</p>
+    <p>The key is this only moves <strong>position tags</strong>, not recomputing the K/V themselves - <span class="mono">seq_add</span> shifts a span of tokens' pos by an amount, the cached K/V content unchanged, only their "corresponding positions" changing. With rope's relative-position nature, the model continues normally after the shift. So it is a "buy more life at small cost" technique.</p>
+    <p>Of course, dropping the oldest conversation means the model "forgets" what was said at the start - the inherent cost of sliding-window memory. Whether to shift and how much to drop is a trade-off between "endless conversation" and "remember everything". By the way, more aggressive compaction (defrag) has been simplified away in newer versions, and the <span class="mono">defrag_thold</span> parameter is marked deprecated.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why abstract "memory" into llama_memory_i? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because "how to remember the earlier text" actually has many strategies, and the rest of the engine (graph-building, execution, sampling) <strong>should not care</strong> which is used. Abstracting their common behavior (write a new token, read history, remove/shift a sequence) into a base interface <span class="mono">llama_memory_i</span>, the standard KV cache, sliding window, recurrent, and hybrid all implement it.</p>
+    <p>So "switch memory strategies" becomes "switch the class implementing <span class="mono">llama_memory_i</span>", and whichever implementation the <span class="mono">memory</span> held by <span class="mono">llama_context</span> (L17) points to, the engine calls the same interface as usual. This is exactly why L17 said "the field is named memory not kv_cache" - it left room to hold various memory strategies.</p>
+    <p>This is another familiar decoupling: of a piece with L12's <span class="mono">type_traits</span> (one interface holding dozens of quantizations) and L16's <span class="mono">build_arch_graph</span> (a virtual function holding dozens of architectures). Folding "the varying strategy" into a unified interface and keeping "the invariant trunk" outside - a design motif running through all of llama.cpp, seen once more at the KV cache.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>The KV cache caches historical K/V so autoregression <strong>computes only the new token</strong> each step (linear, not quadratic) - the root of decode's speed (L03/L04).</li>
+    <li>Cells store <span class="mono">pos</span>+<span class="mono">seq_id</span> (managed by <span class="mono">llama_kv_cells</span>), <span class="mono">head</span> is the rolling write pointer; <span class="mono">llama_kv_cache</span> derives from <span class="mono">llama_memory_i</span>.</li>
+    <li>Sequence ops <span class="mono">seq_rm</span>/<span class="mono">seq_cp</span>/<span class="mono">seq_keep</span>/<span class="mono">seq_add</span> (shift); the public API is <span class="mono">llama_memory_seq_*</span> (the old <span class="mono">llama_kv_self_*</span> is removed).</li>
+    <li><strong>Context shift</strong>: drop the old span, shift <span class="mono">pos</span>, free space to keep generating, no recompute.</li>
+    <li>Each cell carrying seq_id =&gt; <strong>multiple sequences share</strong> one cache; variants iswa/recurrent/hybrid save memory for long context, all implementing <span class="mono">llama_memory_i</span>.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Making "do not recompute what was computed" into a cell-managed cache - autoregression drops from "recompute the whole segment each step" to "incremental update each step", the root of a large model's word-by-word streaming. And abstracting this memory into the <span class="mono">llama_memory_i</span> interface lets "<strong>how to remember</strong>" (full attention / sliding window / recurrent / hybrid) be swapped wholesale with the rest of the engine unchanged -
+  exactly L12's and L16's "one interface holding many strategies" motif, echoing once more at the memory layer. Part 4a ends here: from loading (L14), architecture (L15), graph-building (L16), context (L17), batching (L18), to the KV cache (L19), you have seen how a GGUF model becomes a machine that keeps generating.
+</div>
+""",
+}
+
