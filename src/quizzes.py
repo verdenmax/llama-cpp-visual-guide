@@ -800,6 +800,76 @@ QUIZZES = {
             },
         ],
     },
+    "12-quant-formats.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "q4_0 的一块 18 字节是怎么构成的？",
+                    "en": "How are the 18 bytes of a q4_0 block made up?",
+                },
+                "opts": [
+                    {
+                        "zh": "2 字节的 half scale + 16 字节装 32 个 4-bit 量化值",
+                        "en": "a 2-byte half scale + 16 bytes holding 32 4-bit quantized values",
+                    },
+                    {"zh": "18 个权重，每个 1 字节", "en": "18 weights, one byte each"},
+                    {"zh": "16 字节 scale + 2 字节量化值", "en": "16 bytes of scale + 2 bytes of values"},
+                    {"zh": "全是 int8，没有 scale", "en": "all int8, no scale"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "block_q4_0 = {ggml_half d; uint8_t qs[16]}：2 字节 scale + 16 字节装 32 个 4-bit 值（每字节两个 nibble），共 18 字节、平均每权重 4.5 bit。",
+                    "en": "block_q4_0 = {ggml_half d; uint8_t qs[16]}: a 2-byte scale + 16 bytes holding 32 4-bit values (two nibbles per byte), 18 bytes total, 4.5 bits per weight on average.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "K-quant（如 q4_K）为什么在相同位宽下比 q4_0 更准？",
+                    "en": "Why is K-quant (e.g. q4_K) more accurate than q4_0 at the same bit width?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 256 的超块：整体 d/dmin 之外，每个子块还有更细的 scale，局部更贴合",
+                        "en": "It uses a 256 super-block: beyond the overall d/dmin, each sub-block has a finer scale, fitting locally better",
+                    },
+                    {"zh": "它其实用了更多的 bit", "en": "It actually uses more bits"},
+                    {"zh": "它的量化值不打包", "en": "Its quantized values are not packed"},
+                    {"zh": "它完全不丢失任何信息", "en": "It loses no information at all"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "q4_K 是两层 scale：超块 d/dmin 定大范围、8 个子块各有 6-bit scale/min 做局部微调，加上 dmin 的偏移量化，同样 4.5 bit 却比 q4_0 单层 scale 更准。",
+                    "en": "q4_K has a two-level scale: super-block d/dmin set the broad range, 8 sub-blocks each carry a 6-bit scale/min for local fine-tuning, plus dmin's offset - the same 4.5 bits but more accurate than q4_0's single scale.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 怎么让算子统一处理几十种量化类型？",
+                    "en": "How does ggml let operators handle dozens of quantization types uniformly?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 ggml_type_traits 表 + to_float/from_float_ref 函数指针，算子按 traits 解量化，无需为每种类型各写一遍",
+                        "en": "A ggml_type_traits table + to_float/from_float_ref function pointers; operators dequantize per traits, no need to rewrite per type",
+                    },
+                    {"zh": "为每种量化类型写一个专门的算子", "en": "Write a dedicated operator for each quantization type"},
+                    {"zh": "运行时为每种类型即时编译代码", "en": "JIT-compile code for each type at runtime"},
+                    {"zh": "把所有权重都转成 F32 存盘", "en": "Convert all weights to F32 on disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_type_traits 为每种 type 登记一行（blck_size、type_size、to_float、from_float_ref 等）；算子查表、调函数指针解量化，加新类型只需填一行 + 写解/量化函数。",
+                    "en": "ggml_type_traits registers one row per type (blck_size, type_size, to_float, from_float_ref, ...); operators look it up and call the function pointers, so a new type needs only one row + its dequant/quant functions.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "q4_K 和 q4_0 都是约 4-bit，但内存布局差别很大。试着说出至少两点结构上的不同。（提示：超块/两层 scale/dmin/字节数）",
+                "en": "q4_K and q4_0 are both ~4-bit, yet their memory layouts differ a lot. Name at least two structural differences. (hint: super-block / two-level scale / dmin / byte count)",
+            },
+        ],
+    },
 }
 
 

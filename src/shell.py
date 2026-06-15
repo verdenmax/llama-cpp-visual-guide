@@ -68,6 +68,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("11-core-operators.html", "核心算子", "Core operators",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("12-quant-formats.html", "量化格式细节", "Quantization formats in detail",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -503,6 +505,8 @@ SUBTITLES = {
                                 "backend compute; multi-backend sched; ggml-alloc memory reuse"),
     "11-core-operators.html": ("mul_mat 形状推导 · rms_norm/rope/soft_max_ext · CPU 计算",
                                "mul_mat shapes; rms_norm/rope/soft_max_ext; CPU compute"),
+    "12-quant-formats.html": ("block 字节布局 · super-block K-quant · 解量化 · type_traits",
+                              "block byte layout; super-block K-quant; dequant; type_traits"),
 }
 
 

@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>12 · 量化格式细节 / Quantization formats in detail - llama.cpp 图解教程</title>
+<meta name="description" content="第三部分 · ggml 引擎｜量化格式细节 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="12 · 量化格式细节 / Quantization formats in detail - llama.cpp 图解教程">
+<meta property="og:description" content="第三部分 · ggml 引擎｜量化格式细节 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="12 · 量化格式细节 / Quantization formats in detail - llama.cpp 图解教程">
+<meta name="twitter:description" content="第三部分 · ggml 引擎｜量化格式细节 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第三部分 · ggml 引擎</span><span class="lang-en">Part 3 · The ggml engine</span></span>
+    <span class="pill">12 / 12</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第三部分 · ggml 引擎</span><span class="lang-en">Part 3 · The ggml engine</span></div>
+    <h1><span class="lang-zh">量化格式细节</span><span class="lang-en">Quantization formats in detail</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+课 06 我们建立了量化的<strong>直觉</strong>——"每一小块权重共享一个 scale，块内只存相对差"。这一课我们<strong>钻进字节级</strong>：打开 <span class="mono">ggml/src/ggml-common.h</span>，
+看 <span class="mono">block_q4_0</span>、<span class="mono">block_q4_K</span> 这些块在内存里<strong>到底每个字节装了什么</strong>，再看解量化函数怎么把这堆字节还原成浮点，
+最后看 <span class="mono">ggml_type_traits</span> 怎么把几十种量化类型<strong>统一接进引擎</strong>。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">L06 回答的是"<strong>为什么能压、压完省多少</strong>"，这一课回答的是"<strong>压完在内存里长什么样、源码怎么把它读回来</strong>"——
+两课正好是同一件事的"直觉面"与"实现面"。如果 L06 的块量化直觉你还有点模糊，建议先回头扫一眼；这一课会直接落到结构体的每一个字段上。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  一个量化 block 很像一个<strong>压缩包</strong>：开头几个字节是"解压参数"（scale、min），告诉你怎么把后面的数据放大还原；后面一长串是"压缩数据"（一个个挤在一起的低位量化值）。
+  解量化，就是照着开头的参数，把后面每个小整数<strong>乘回它该有的大小</strong>。不同的量化格式，无非是"解压参数怎么记、数据怎么打包"的不同约定——读懂了字节布局，你就读懂了一种格式。
+</div>
+
+<h2>打开一个 block：q4_0 与 q8_0</h2>
+<p>先看最经典的两个块。<span class="mono">q4_0</span> 把 <strong>32 个权重</strong>打成一块：开头 2 字节是一个 <span class="mono">half</span>（FP16 精度）的 scale，紧跟着 16 字节装下 32 个 4-bit 量化值
+（每字节塞两个 nibble）。算下来一块 <strong>18 字节</strong>。<span class="mono">q8_0</span> 同样 32 个权重一块，但每个权重用一整字节的 <span class="mono">int8</span> 存、<strong>不打包</strong>——一块 <strong>34 字节</strong>
+（2 字节 scale + 32 字节量化值），更准也更大。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>q4_0 / q8_0 字节布局</b>：开头是 scale，后面是量化值；q4_0 把 4-bit 打包，q8_0 用 int8 不打包</div>
+  <div class="cells"><span class="lab">q4_0</span><span class="cell hl">d : 2B</span><span class="cell">qs : 16B（32 个 4-bit）</span><span class="lab">= 18 B / 32 权重</span></div>
+  <div class="cells"><span class="lab">q8_0</span><span class="cell hl">d : 2B</span><span class="cell">qs : 32B（32 个 int8）</span><span class="lab">= 34 B / 32 权重</span></div>
+</div>
+<p>这些 block 在文件和内存里是<strong>一块紧挨着一块、连续排放</strong>的：一个权重矩阵就是一长串 block。知道了"一块多少字节"，就能算出"第 n 块在哪"——这正是后面解量化时能<strong>随机定位、并行处理</strong>的基础。
+布局规整带来的好处，远不止省空间——它让"按需取一小块来解量化"成为可能，这也是后面"边算边解"能做到的前提。</p>
+<p>对应到源码，结构体几乎和上图一一对应（<span class="mono">ggml/src/ggml-common.h</span>）：</p>
+<pre class="code"><span class="cm">// 简化自 ggml/src/ggml-common.h</span>
+<span class="kw">#define</span> QK4_0 32
+<span class="kw">typedef struct</span> { ggml_half d; uint8_t qs[QK4_0/2]; } block_q4_0;  <span class="cm">// 2 + 16 = 18 B</span>
+<span class="kw">typedef struct</span> { ggml_half d; int8_t  qs[QK8_0];   } block_q8_0;  <span class="cm">// 2 + 32 = 34 B</span></pre>
+<p>逐个字段看：<span class="mono">d</span> 是那个块共享的 scale，<span class="mono">ggml_half</span> 就是 2 字节的半精度浮点（L06 说的"基准"）；<span class="mono">qs</span> 是量化值数组。
+q4_0 的 <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span>——32 个值只占 16 字节，因为每个值才 4 bit，<strong>两个挤进一个字节</strong>（一个放高 nibble、一个放低 nibble）。
+q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>——32 个值占满 32 字节，<strong>一个值独占一字节</strong>，不用拆位。</p>
+<p>有人会问：那个 scale 为什么用 2 字节的 <span class="mono">half</span>，而不是更精确的 4 字节 float？因为 scale <strong>每块才一个</strong>，它的精度对最终结果影响有限，却要乘进整块的体积里——
+用 half 省下的这 2 字节，摊到 32 个权重上虽小，乘以一个模型里成千上万个块，省下来的就很可观了。这是一个典型的工程取舍：在"几乎不影响精度"的地方<strong>能省则省</strong>，把字节预算留给真正重要的量化值。</p>
+<p>为什么 q8_0 更准也更大？因为 4-bit 只能表示 16 个档位、8-bit 能表示 256 个档位，<strong>同一个权重，8-bit 能贴得更近</strong>，量化误差更小。代价是体积翻倍：每权重从 0.5 字节涨到 1 字节。
+这正是 L06 那张"显存对照表"背后的字节级真相——你在命令行里选 <span class="mono">Q4_0</span> 还是 <span class="mono">Q8_0</span>，本质就是在这两种 block 布局之间二选一。</p>
+<p>这里值得停下来想一个问题：为什么要<strong>分块</strong>，不干脆整个权重矩阵共享一个 scale？因为一个几千乘几千的大矩阵里，权重的大小范围差异很大——某些行很大、某些行很小。
+若全矩阵共用一个 scale，就得迁就那个最大值，小权重会被压得几乎只剩 0、精度全丢。分成 32 个一块后，<strong>每块各自找自己的 scale</strong>，大块用大 scale、小块用小 scale，量化误差立刻小一大截。
+这就是"块量化"四个字的全部用意：用"每块一个 scale"的少量开销，换回"局部精度"的大幅提升。</p>
+<p>还有个常被忽略的细节：q4_0 一块 18 字节、装 32 个权重，平均每权重 <strong>4.5 bit</strong>，而不是正好 4 bit。多出来的 0.5 bit，就是那 2 字节 scale 摊到 32 个权重头上的开销。
+块越大，这份"管理开销"摊得越薄——这也为下一节 K-quant 用 256 的大超块埋下了伏笔。</p>
+
+<h2>super-block：K-quant 的两层 scale</h2>
+<p>q4_0 每 32 个权重配一个 scale，已经不错了，但还能更准。K-quant（带 K 的格式，如 <span class="mono">q4_K</span>、<span class="mono">q6_K</span>）的思路是：用一个 <strong>256 个权重的"超块"</strong>，
+里面再切成若干个小子块，做成<strong>两层 scale</strong>——超块给一个"整体基准"，每个子块再各自记一个"细调 scale"。这样既摊薄了基准开销，又保住了局部精度。</p>
+<p>以 <span class="mono">q4_K</span> 为例：256 个权重切成 8 个子块（每子块 32 个权重）。超块层有 <span class="mono">d</span> 和 <span class="mono">dmin</span> 两个 half；子块层有 8 组 6-bit 的 scale/min，
+打包进 12 字节的 <span class="mono">scales[]</span>；再加 128 字节装 256 个 4-bit 量化值。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">超块</span><span class="name">d, dmin（各 1 个 half）</span></div><div class="ld">整个 256 权重共享的"整体 scale / 整体 min"</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">子块</span><span class="name">scales[12]：8 组 6-bit scale/min</span></div><div class="ld">每 32 个权重一组，各自细调，比单层 scale 贴得更准</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">数据</span><span class="name">qs[128]：256 个 4-bit 量化值</span></div><div class="ld">真正的权重量化值，打包存放</div></div>
+</div>
+<p>那 12 字节的 <span class="mono">scales[]</span> 是怎么来的？8 个子块、每块要存一个 scale 和一个 min，本可以各用一字节、共 16 字节；但 K-quant 把它们再压成 <strong>6-bit</strong>，
+8×(6+6)=96 bit=12 字节，又省下 4 字节。<strong>连"管理用的 scale"本身都要量化</strong>——这种把每一处冗余都榨干的抠门劲，正是量化格式设计的日常。</p>
+<p>两层 scale 是 K-quant 的灵魂。<strong>第一层</strong>（超块的 d/dmin）定个大致范围；<strong>第二层</strong>（子块的 6-bit scale/min）在这个范围里做局部微调——
+哪一小段权重偏大偏小，子块 scale 立刻跟上。这就是 L06 spark 说的"同样的 bit 数，K-quant 往往更准"的<strong>字节级来源</strong>：精度不是靠多花 bit，而是靠<strong>更聪明地分配 scale</strong>。</p>
+<pre class="code"><span class="cm">// 简化自 ggml/src/ggml-common.h（QK_K = 256, K_SCALE_SIZE = 12）</span>
+<span class="kw">typedef struct</span> {
+    ggml_half d;                   <span class="cm">// 超块整体 scale</span>
+    ggml_half dmin;                <span class="cm">// 超块整体 min</span>
+    uint8_t   scales[K_SCALE_SIZE];<span class="cm">// 8 个子块的 6-bit scale/min（无 qh）</span>
+    uint8_t   qs[QK_K/2];          <span class="cm">// 256 个 4-bit 量化值</span>
+} block_q4_K;</pre>
+<p>把 q4_K 的字节数也算一下：2（d）+ 2（dmin）+ 12（scales）+ 128（qs）= <strong>144 字节</strong>装 256 个权重，平均每权重 144×8/256 = <strong>4.5 bit</strong>——和 q4_0 一样的位宽，精度却更高。
+这就是"两层 scale"最直接的回报：没多花一个 bit，纯靠结构更精巧把误差压了下去。</p>
+<p>注意 <span class="mono">q4_K</span> 里<strong>没有 qh</strong>——只有 d、dmin、scales、qs 四个字段，这点很容易记错（见深挖 2）。而 <span class="mono">q6_K</span> 就<strong>有 qh</strong>：6-bit 的量化值被拆成"低 4 位"放 <span class="mono">ql</span>、
+"高 2 位"放 <span class="mono">qh</span>，再配 16 个 8-bit 的子块 scale 和一个超块 d。不同 K-quant 的字段并不统一，<strong>别想当然套用</strong>。</p>
+<p>顺带认识一下整个 K-quant 家族：从 <span class="mono">q2_K</span>、<span class="mono">q3_K</span> 一直到 <span class="mono">q6_K</span>，名字里的数字是大致的位宽，<strong>K</strong> 则代表都用"超块 + 两层 scale"这套结构。
+位宽越低（如 q2_K）压得越狠、精度越险，往往只敢用在不那么敏感的层上；位宽越高（如 q6_K）越接近原始精度。这也是为什么实际下载模型时，你会看到 <span class="mono">Q4_K_M</span>、<span class="mono">Q5_K_S</span> 这种带后缀的名字——
+它们是把<strong>不同层用不同 K-quant 档位</strong>混搭出来的方案，在体积和质量之间取不同的平衡点。</p>
+<p>多说一句那个 <span class="mono">dmin</span>。q4_0 只有一个 scale，量化是<strong>对称</strong>的（围绕 0）；而 q4_K 多了一个 min，做的是<strong>带偏移</strong>的量化——还原公式更像 <span class="mono">x = scale · q + min</span>
+（源码注释写的就是 "weight is represented as x = a·q + b"）。为什么要这个偏移？因为很多权重的分布并不以 0 为中心，有了 min 就能让量化区间<strong>整体平移</strong>去贴合真实分布，进一步压低误差。
+这是 K-quant 比 q4_0 更准的另一半原因：不只 scale 更细，连"零点"都能调。</p>
+<p>为什么超块要选 256 这么大？因为超块越大，"整体 d/dmin"这份固定开销摊到的权重越多、每权重的开销越小；而局部精度由更细的子块 scale 兜底，不会因为块大而变糊。
+大块负责"高压缩"、子块负责"高精度"，两者兼得——这就是 K-quant 在相同位宽下能比 q4_0 更准的设计动机（详见深挖 1）。</p>
+
+<h2>解量化：把字节还原成浮点</h2>
+<p>权重以量化字节存着，可真要参与计算（比如喂进 L11 的 mul_mat），得先<strong>还原成浮点</strong>。这一步叫<strong>解量化</strong>（dequantize），由每种格式各自的 <span class="mono">dequantize_row_*</span> 函数负责
+（在 <span class="mono">ggml/src/ggml-quants.c</span>）。以 q4_0 为例，逻辑出奇地简单：</p>
+<pre class="code"><span class="cm">// 伪代码, 对应 ggml/src/ggml-quants.c 的 dequantize_row_q4_0</span>
+<span class="kw">for</span> each block:
+    d = half_to_float(block.d)          <span class="cm">// 取回这块的 scale</span>
+    <span class="kw">for</span> j <span class="kw">in</span> 0..15:                     <span class="cm">// 每字节两个 nibble</span>
+        q0 = (block.qs[j] &amp; 0x0F) - 8   <span class="cm">// 低 4 位, 减 8 回到有符号</span>
+        q1 = (block.qs[j] &gt;&gt; 4)   - 8   <span class="cm">// 高 4 位, 减 8 回到有符号</span>
+        y[j]      = q0 * d              <span class="cm">// x = (q - 8) * d</span>
+        y[j + 16] = q1 * d</pre>
+<p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数（让 0 附近的权重对称分布），再乘上这块的 scale <span class="mono">d</span>，
+就还原出近似的原始浮点。q8_0 更直接：<span class="mono">x = q * d</span>，因为 int8 本身就是有符号的，不用减偏移。</p>
+<p>那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。
+这样正负权重都能表示，且 0 附近分布得最密（量化最准），恰好契合"大多数权重都集中在 0 附近"的事实。一个小小的减法，背后是对权重分布的理解。</p>
+<p>反过来，<strong>量化</strong>（把浮点压成字节）就是解量化的逆运算。q4_0 的参考实现 <span class="mono">quantize_row_q4_0_ref</span> 里，scale 取 <span class="mono">d = max / -8</span>——找出这块绝对值最大的权重，
+让它对应到量化区间的端点（-8），其余权重按比例缩放取整。<strong>除以 -8 而不是 8</strong> 是个容易看走眼的细节：它和解量化时的"减 8"配套，保证一来一回数值对得上。</p>
+<p>顺势说清一件事：解量化是<strong>有损</strong>的——还原出来的浮点和原始权重并不完全相等，差的那一点就是量化误差。但为什么模型还能照常工作？因为深度网络对权重的微小扰动相当<strong>宽容</strong>：
+单个权重差一点点，经过成百上千次累加和非线性，整体输出几乎察觉不到。量化格式的全部艺术，就是在"压得更狠"和"误差还能被模型容忍"之间找平衡——这也是为什么会有 q4_0、q4_K、q6_K 这么多档位，
+让你按对精度的需求挑一个合适的折中点。</p>
+<p>还有一点值得记住：解量化不一定<strong>提前一次性</strong>把整个权重张量铺开成浮点（那会占很多内存）。在矩阵乘这种热点里，ggml 常常是<strong>边算边解</strong>——在内层循环里即时把用到的那一小块还原成浮点、立刻参与点积，
+算完就丢。所以量化省的不只是显存，连"解压后的浮点"也大多不落地，带宽和缓存都跟着受益（呼应 L06 说的"省显存又提速"）。</p>
+
+<h2>接进引擎：ggml_type_traits</h2>
+<p>问题来了：q4_0、q8_0、q4_K、q6_K…… 几十种量化格式，字节布局各不相同，难道每种都要在 mul_mat、解量化里写一遍特判？当然不。ggml 用一张 <strong>类型特征表</strong>（<span class="mono">ggml_type_traits</span>）
+把每种类型的"基本参数 + 怎么转 float"<strong>登记成一行</strong>，算子只管查表，不关心具体是哪种量化。</p>
+<div class="flow">
+  <div class="node"><div class="nt">tensor.type</div><div class="nd">= GGML_TYPE_Q4_K</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">type_traits[Q4_K]</div><div class="nd">blck_size / type_size<br>to_float = dequantize_row_q4_K</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">算子</div><div class="nd">按 traits 解量化后计算</div></div>
+</div>
+<p>张量只在 <span class="mono">type</span> 字段记着"我是 Q4_K"（L05 的 type 字段，到这里终于派上大用场）。算子要用它时，拿这个 type 去查 <span class="mono">type_traits</span> 表，就能拿到"这种类型一块多少元素、多少字节、用哪个函数转 float"，
+照着做即可——<strong>算子代码里没有一个 if 在判断量化类型</strong>。</p>
+<pre class="code"><span class="cm">// 简化自 ggml/include/ggml.h（每种 type 登记一行）</span>
+<span class="kw">struct</span> ggml_type_traits {
+    <span class="kw">const char</span> * type_name;     <span class="cm">// "q4_K"</span>
+    int64_t       blck_size;     <span class="cm">// 一块多少元素, 如 256</span>
+    size_t        type_size;     <span class="cm">// 一块多少字节, 如 144</span>
+    bool          is_quantized;
+    ggml_to_float_t   to_float;       <span class="cm">// 解量化函数指针</span>
+    ggml_from_float_t from_float_ref; <span class="cm">// 量化函数指针(参考实现)</span>
+};</pre>
+<p>关键就在那两个<strong>函数指针</strong>：<span class="mono">to_float</span> 指向这种类型的解量化函数，<span class="mono">from_float_ref</span> 指向量化（参考）函数。算子拿到张量，按 traits 调 <span class="mono">to_float</span> 解量化、再计算；
+要存盘时按 <span class="mono">from_float_ref</span> 量化。<strong>注意字段名是 <span class="mono">from_float_ref</span></strong>（带 _ref，参考实现），别记成 from_float。于是<strong>加一种新量化格式，主要工作就是填一行 traits + 写好这两个函数</strong>，
+mul_mat、解量化那些算子代码<strong>基本不用动</strong>——这正是 L05 "结构不变、类型可换"在量化上的兑现。</p>
+
+<p>退一步看，这一课其实把"量化"这件事讲全了三个层次：<strong>布局</strong>（block 里每个字节装什么）、<strong>还原</strong>（解量化怎么把字节变回浮点）、<strong>接入</strong>（traits 表怎么让算子统一处理）。
+这三层正好对应你用 llama.cpp 时会碰到的三种场景：挑量化档位（布局决定体积与精度）、跑推理（解量化在背后默默进行）、以及读懂源码（traits 是所有量化类型的总入口）。
+把这三层串起来，你就不再把 <span class="mono">Q4_K_M</span> 这种名字当成黑盒，而能说清它在内存里到底是什么、算的时候发生了什么。把一个量化名字拆解到字节这一层，你对"模型怎么落到磁盘和内存里"的理解，就又扎实了一截。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么 q4_K 用 256 的超块，而不是像 q4_0 那样 32？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>核心是<strong>摊薄固定开销 + 不牺牲局部精度</strong>。q4_0 每 32 个权重就得花 2 字节存一个 scale；超块做到 256，"整体 d/dmin"这份固定开销摊到的权重多了 8 倍，每权重的管理开销明显下降。</p>
+    <p>但只把块放大、还用单层 scale 的话，局部精度会变差——256 个权重共享一个 scale，太粗了。K-quant 的解法是<strong>再加一层子块 scale</strong>：超块定大范围、子块定细节，于是"块大带来的高压缩"和"子块带来的高精度"同时拿到。</p>
+    <p>这也解释了为什么不无脑把超块做到更大（比如 1024）：子块 scale 本身也要占空间，块太大、子块太多，第二层开销又上来了。256 + 8 子块是工程上压缩率与精度的一个甜点，经过大量实测调出来的。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> q4_K 有 qh 吗？q6_K 呢？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">q4_K</span> <strong>没有 qh</strong>。它的字段只有四个：<span class="mono">d</span>、<span class="mono">dmin</span>、<span class="mono">scales[12]</span>、<span class="mono">qs[128]</span>。4-bit 量化值正好一个 nibble，直接打包进 <span class="mono">qs</span>，不需要再拆高低位。</p>
+    <p><span class="mono">q6_K</span> 才<strong>有 qh</strong>。6-bit 一个值放不进一个 nibble，于是拆开：低 4 位存进 <span class="mono">ql</span>、高 2 位存进 <span class="mono">qh</span>，再加 16 个 8-bit 的子块 scale 和一个超块 <span class="mono">d</span>。
+    所以 q6_K 的结构和 q4_K 长得很不一样。</p>
+    <p>这是初学者最容易栽的坑之一：以为所有 K-quant 字段都一样、把 q4_K 想象成"带 qh"。读这些结构体时一定<strong>对着源码逐字段核对</strong>，别凭格式名想当然——位宽不同、打包方式就不同，字段自然不同。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 算子怎么做到不为每种量化各写一遍？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>靠 <span class="mono">type_traits</span> 里的 <span class="mono">to_float</span> / <span class="mono">from_float_ref</span> 这两个<strong>函数指针</strong>。算子拿到一个量化张量，不去判断"这是 q4_0 还是 q4_K"，而是直接调它 traits 里登记的 <span class="mono">to_float</span> 解量化，再算。</p>
+    <p>在 mul_mat 这种热点里更讲究：往往不是先整块解量化、再乘，而是在内层循环里<strong>即时解一小段、立刻点积</strong>，甚至为某些量化类型配了专门的高速点积内核。但对外暴露的接口是统一的——都是"按 traits 拿到怎么转 float"。</p>
+    <p>结果就是：加一种新量化类型，<strong>算子代码一行都不用改</strong>，只要在 traits 表里填一行、写好解/量化函数。这种"用函数指针把差异收进一张表"的做法，正是 ggml 能容纳几十种量化格式还不臃肿的关键，和 L11 "switch(op) 派发算子"是同一种解耦思路。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">q4_0</span> = [d 2B][qs 16B] = <strong>18 B / 32 权重</strong>（4-bit 打包）；<span class="mono">q8_0</span> 每权重一个 int8，一块 34 B，更准更大。</li>
+    <li>K-quant 用 <strong>256 的超块 + 两层 scale</strong>（超块 d/dmin + 子块 6-bit），同位宽下比 q4_0 更准。</li>
+    <li><span class="mono">q4_K</span> <strong>无 qh</strong>（只有 d/dmin/scales/qs）；<span class="mono">q6_K</span> 才有 ql+qh。别想当然套用。</li>
+    <li>解量化核心一行：<span class="mono">x = (q - 8) * d</span>；量化方向 <span class="mono">d = max / -8</span>。</li>
+    <li><span class="mono">ggml_type_traits</span> 用 <span class="mono">to_float</span> / <span class="mono">from_float_ref</span> 函数指针把每种类型接进引擎，算子<strong>无需为每种量化各写一遍</strong>。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"<strong>每种量化类型长什么样、怎么转 float</strong>"全收进一张 traits 表、用函数指针暴露出来——于是几十种量化格式能共用同一套张量结构和同一批算子。L05 说"结构不变、类型可换"，
+  到这里你看到了它在字节级的兑现：换格式只是换一行表项，引擎的主干<strong>纹丝不动</strong>。下一课，我们把视线从"一个张量怎么存"抬到"整个模型文件怎么存"——GGUF 格式。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. q4_0 的一块 18 字节是怎么构成的？</div>
+  <ol class="opts">
+    <li>2 字节的 half scale + 16 字节装 32 个 4-bit 量化值</li>
+    <li>全是 int8，没有 scale</li>
+    <li>18 个权重，每个 1 字节</li>
+    <li>16 字节 scale + 2 字节量化值</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。block_q4_0 = {ggml_half d; uint8_t qs[16]}：2 字节 scale + 16 字节装 32 个 4-bit 值（每字节两个 nibble），共 18 字节、平均每权重 4.5 bit。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. K-quant（如 q4_K）为什么在相同位宽下比 q4_0 更准？</div>
+  <ol class="opts">
+    <li>它完全不丢失任何信息</li>
+    <li>用 256 的超块：整体 d/dmin 之外，每个子块还有更细的 scale，局部更贴合</li>
+    <li>它的量化值不打包</li>
+    <li>它其实用了更多的 bit</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。q4_K 是两层 scale：超块 d/dmin 定大范围、8 个子块各有 6-bit scale/min 做局部微调，加上 dmin 的偏移量化，同样 4.5 bit 却比 q4_0 单层 scale 更准。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. ggml 怎么让算子统一处理几十种量化类型？</div>
+  <ol class="opts">
+    <li>运行时为每种类型即时编译代码</li>
+    <li>为每种量化类型写一个专门的算子</li>
+    <li>把所有权重都转成 F32 存盘</li>
+    <li>用 ggml_type_traits 表 + to_float/from_float_ref 函数指针，算子按 traits 解量化，无需为每种类型各写一遍</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。ggml_type_traits 为每种 type 登记一行（blck_size、type_size、to_float、from_float_ref 等）；算子查表、调函数指针解量化，加新类型只需填一行 + 写解/量化函数。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>q4_K 和 q4_0 都是约 4-bit，但内存布局差别很大。试着说出至少两点结构上的不同。（提示：超块/两层 scale/dmin/字节数）</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Lesson 06 built the <strong>intuition</strong> of quantization - "each small block of weights shares one scale, and stores only relative offsets inside the block". This lesson goes
+<strong>down to the byte level</strong>: we open <span class="mono">ggml/src/ggml-common.h</span> to see what every byte of blocks like <span class="mono">block_q4_0</span> and <span class="mono">block_q4_K</span>
+<strong>actually holds</strong>, then how the dequantize functions restore those bytes back to floats, and finally how <span class="mono">ggml_type_traits</span> wires dozens of quantization types
+<strong>uniformly into the engine</strong>.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">L06 answered "<strong>why we can compress, and how much it saves</strong>"; this lesson answers "<strong>what it looks like in memory afterward, and how the source reads it back</strong>" -
+the two are the "intuition side" and the "implementation side" of one thing. If L06's block-quantization intuition is still fuzzy, glance back first; this lesson lands directly on every struct field.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A quantization block is much like a <strong>zip archive</strong>: the first few bytes are the "decompression parameters" (scale, min) that tell you how to scale the following data back up; the long run
+  after is the "compressed data" (low-bit quantized values packed together). Dequantizing means following those leading parameters to <strong>multiply each small integer back to its true size</strong>.
+  Different quantization formats are just different conventions for "how the parameters are recorded and how the data is packed" - read the byte layout and you have read the format.
+</div>
+
+<h2>Open one block: q4_0 and q8_0</h2>
+<p>Start with the two most classic blocks. <span class="mono">q4_0</span> packs <strong>32 weights</strong> into a block: the first 2 bytes are a <span class="mono">half</span> (FP16) scale, followed by 16 bytes
+holding 32 4-bit quantized values (two nibbles per byte). That is <strong>18 bytes</strong> a block. <span class="mono">q8_0</span> also groups 32 weights, but stores each as a full byte of <span class="mono">int8</span>,
+<strong>unpacked</strong> - <strong>34 bytes</strong> a block (2-byte scale + 32-byte values), more accurate and larger.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>q4_0 / q8_0 byte layout</b>: scale up front, values after; q4_0 packs 4-bit, q8_0 keeps int8 unpacked</div>
+  <div class="cells"><span class="lab">q4_0</span><span class="cell hl">d : 2B</span><span class="cell">qs : 16B (32 x 4-bit)</span><span class="lab">= 18 B / 32 weights</span></div>
+  <div class="cells"><span class="lab">q8_0</span><span class="cell hl">d : 2B</span><span class="cell">qs : 32B (32 x int8)</span><span class="lab">= 34 B / 32 weights</span></div>
+</div>
+<p>These blocks are laid out <strong>one right after another, contiguously</strong> in file and memory: a weight matrix is just a long run of blocks. Knowing "how many bytes per block" lets you compute "where block n is" - exactly the
+basis for <strong>random addressing and parallel processing</strong> during dequantization later. A regular layout brings benefits far beyond saving space - it makes "fetch one small block on demand and dequantize it" possible, the very
+precondition for the "dequantize on the fly" mentioned earlier.</p>
+<p>In source, the struct matches the figure almost one-to-one (<span class="mono">ggml/src/ggml-common.h</span>):</p>
+<pre class="code"><span class="cm">// simplified from ggml/src/ggml-common.h</span>
+<span class="kw">#define</span> QK4_0 32
+<span class="kw">typedef struct</span> { ggml_half d; uint8_t qs[QK4_0/2]; } block_q4_0;  <span class="cm">// 2 + 16 = 18 B</span>
+<span class="kw">typedef struct</span> { ggml_half d; int8_t  qs[QK8_0];   } block_q8_0;  <span class="cm">// 2 + 32 = 34 B</span></pre>
+<p>Field by field: <span class="mono">d</span> is the block's shared scale, and <span class="mono">ggml_half</span> is exactly a 2-byte half-precision float (L06's "baseline"); <span class="mono">qs</span> is the array of quantized
+values. q4_0's <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span> - 32 values in only 16 bytes, because each value is just 4 bits, <strong>two squeezed into one byte</strong> (one high nibble, one low). q8_0's
+<span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span> - 32 values filling 32 bytes, <strong>one value per byte</strong>, no bit-splitting.</p>
+<p>One might ask: why is that scale a 2-byte <span class="mono">half</span> rather than a more precise 4-byte float? Because there is <strong>only one scale per block</strong>, its precision has limited impact on the final result, yet it
+counts against the whole block's size - the 2 bytes saved by using half, small per 32 weights, multiplied by the tens of thousands of blocks in a model, add up to a lot. This is a classic engineering trade-off: <strong>save wherever you
+can</strong> in places that "barely affect precision", leaving the byte budget for the quantized values that truly matter.</p>
+<p>Why is q8_0 both more accurate and larger? Because 4 bits can represent only 16 levels while 8 bits represent 256 levels, so for the same weight <strong>8-bit can sit much closer</strong>, with smaller
+quantization error. The cost is double the size: from 0.5 byte per weight to 1 byte. This is the byte-level truth behind L06's "VRAM table" - choosing <span class="mono">Q4_0</span> vs <span class="mono">Q8_0</span>
+on the command line is, in essence, picking between these two block layouts.</p>
+<p>It is worth pausing on one question here: why <strong>block</strong> at all, instead of sharing one scale across the whole weight matrix? Because in a matrix of thousands by thousands, weight magnitudes vary widely - some rows
+large, some small. With one scale for the whole matrix you must accommodate the largest value, and small weights get crushed almost to 0, losing all precision. Split into blocks of 32, <strong>each block finds its own scale</strong> -
+big blocks use a big scale, small blocks a small one - and quantization error drops sharply at once. That is the entire point of "block quantization": spend the small overhead of "one scale per block" to buy a large gain in local precision.</p>
+<p>One often-missed detail: a q4_0 block is 18 bytes for 32 weights, averaging <strong>4.5 bits</strong> per weight, not exactly 4. The extra 0.5 bit is the 2-byte scale amortized across 32 weights. The bigger the
+block, the thinner this "management overhead" spreads - which already foreshadows why the next section's K-quant uses a big 256-weight super-block.</p>
+
+<h2>Super-block: the two-level scale of K-quant</h2>
+<p>q4_0's one scale per 32 weights is already decent, but it can be more accurate. The idea of K-quant (the K formats, such as <span class="mono">q4_K</span> and <span class="mono">q6_K</span>) is to use a
+<strong>256-weight "super-block"</strong>, sliced into several sub-blocks, with a <strong>two-level scale</strong> - the super-block gives an "overall baseline", and each sub-block records its own "fine-tuning scale".
+This both thins the baseline overhead and preserves local precision.</p>
+<p>Take <span class="mono">q4_K</span>: 256 weights split into 8 sub-blocks (32 weights each). The super-block level has two halves, <span class="mono">d</span> and <span class="mono">dmin</span>; the sub-block level has 8 groups
+of 6-bit scale/min packed into a 12-byte <span class="mono">scales[]</span>; plus 128 bytes holding 256 4-bit quantized values.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">super</span><span class="name">d, dmin (one half each)</span></div><div class="ld">the "overall scale / overall min" shared by all 256 weights</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">sub</span><span class="name">scales[12]: 8 groups of 6-bit scale/min</span></div><div class="ld">one group per 32 weights, each fine-tuned, sitting closer than a single-level scale</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">data</span><span class="name">qs[128]: 256 4-bit quantized values</span></div><div class="ld">the actual quantized weight values, packed</div></div>
+</div>
+<p>Where does the 12-byte <span class="mono">scales[]</span> come from? 8 sub-blocks, each needing a scale and a min, could use one byte each for 16 bytes total; but K-quant squeezes them to <strong>6 bits</strong>, 8x(6+6)=96 bits=12 bytes,
+saving another 4 bytes. <strong>Even the "management" scales themselves are quantized</strong> - this squeezing of every last bit of redundancy is the daily business of quantization-format design.</p>
+<p>The two-level scale is the soul of K-quant. The <strong>first level</strong> (the super-block's d/dmin) sets a rough range; the <strong>second level</strong> (the sub-block's 6-bit scale/min) fine-tunes locally within
+that range - wherever a small run of weights skews high or low, the sub-block scale follows immediately. This is the <strong>byte-level source</strong> of L06's spark "for the same bit count, K-quant is usually more
+accurate": precision comes not from spending more bits, but from <strong>allocating scale more cleverly</strong>.</p>
+<pre class="code"><span class="cm">// simplified from ggml/src/ggml-common.h (QK_K = 256, K_SCALE_SIZE = 12)</span>
+<span class="kw">typedef struct</span> {
+    ggml_half d;                   <span class="cm">// super-block overall scale</span>
+    ggml_half dmin;                <span class="cm">// super-block overall min</span>
+    uint8_t   scales[K_SCALE_SIZE];<span class="cm">// 8 sub-blocks' 6-bit scale/min (no qh)</span>
+    uint8_t   qs[QK_K/2];          <span class="cm">// 256 4-bit quantized values</span>
+} block_q4_K;</pre>
+<p>Compute q4_K's byte count too: 2 (d) + 2 (dmin) + 12 (scales) + 128 (qs) = <strong>144 bytes</strong> for 256 weights, averaging 144*8/256 = <strong>4.5 bits</strong> per weight - the same bit width as q4_0, yet higher precision. That is
+the most direct payoff of the "two-level scale": not one extra bit spent, error pushed down purely by a smarter structure.</p>
+<p>Note that <span class="mono">q4_K</span> has <strong>no qh</strong> - only the four fields d, dmin, scales, qs, which is easy to misremember (see Dig deeper 2). <span class="mono">q6_K</span>, by contrast, <strong>does have qh</strong>:
+its 6-bit values are split into "low 4 bits" in <span class="mono">ql</span> and "high 2 bits" in <span class="mono">qh</span>, plus 16 8-bit sub-block scales and one super-block d. Fields differ across K-quants, so <strong>do not assume</strong>.</p>
+<p>Worth meeting the whole K-quant family: from <span class="mono">q2_K</span> and <span class="mono">q3_K</span> up to <span class="mono">q6_K</span>, the number in the name is the rough bit width, while <strong>K</strong> means they all use this
+"super-block + two-level scale" structure. The lower the bit width (like q2_K) the harder the compression and the riskier the precision, so it is often used only on less sensitive layers; the higher (like q6_K) the closer to original
+precision. This is why, downloading real models, you see suffixed names like <span class="mono">Q4_K_M</span> and <span class="mono">Q5_K_S</span> - schemes that <strong>mix different K-quant levels across different layers</strong>, striking
+different balances between size and quality.</p>
+<p>A word on that <span class="mono">dmin</span>. q4_0 has only a scale, so its quantization is <strong>symmetric</strong> (around 0); q4_K adds a min, doing <strong>offset</strong> quantization - the restore formula is more like
+<span class="mono">x = scale * q + min</span> (the source comment reads "weight is represented as x = a*q + b"). Why the offset? Because many weight distributions are not centered on 0, and a min lets the quantization range <strong>shift as a
+whole</strong> to fit the real distribution, pushing error down further. This is the other half of why K-quant beats q4_0: not only finer scale, but even the "zero point" is adjustable.</p>
+<p>Why pick a super-block as big as 256? Because the bigger the super-block, the more weights the fixed "overall d/dmin" overhead spreads across, and the smaller the per-weight overhead; meanwhile local precision is
+backstopped by the finer sub-block scales, so a big block does not get blurry. The big block handles "high compression", the sub-blocks handle "high precision", and you get both - this is the design motive for K-quant
+being more accurate than q4_0 at the same bit width (see Dig deeper 1).</p>
+
+<h2>Dequantize: restoring bytes to floats</h2>
+<p>Weights sit in memory as quantized bytes, but to actually take part in computation (say, fed into L11's mul_mat) they must first be <strong>restored to floats</strong>. That step is <strong>dequantization</strong>,
+handled by each format's own <span class="mono">dequantize_row_*</span> function (in <span class="mono">ggml/src/ggml-quants.c</span>). For q4_0 the logic is surprisingly simple:</p>
+<pre class="code"><span class="cm">// pseudocode, mirrors dequantize_row_q4_0 in ggml/src/ggml-quants.c</span>
+<span class="kw">for</span> each block:
+    d = half_to_float(block.d)          <span class="cm">// fetch this block's scale</span>
+    <span class="kw">for</span> j <span class="kw">in</span> 0..15:                     <span class="cm">// two nibbles per byte</span>
+        q0 = (block.qs[j] &amp; 0x0F) - 8   <span class="cm">// low 4 bits, minus 8 back to signed</span>
+        q1 = (block.qs[j] &gt;&gt; 4)   - 8   <span class="cm">// high 4 bits, minus 8 back to signed</span>
+        y[j]      = q0 * d              <span class="cm">// x = (q - 8) * d</span>
+        y[j + 16] = q1 * d</pre>
+<p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7 (so weights near zero sit symmetrically), then
+multiplying by this block's scale <span class="mono">d</span> restores the approximate original float. q8_0 is even more direct: <span class="mono">x = q * d</span>, since int8 is already signed and needs no offset.</p>
+<p>That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts
+0..15 into the <strong>roughly symmetric</strong> range -8..7. This represents both signs, and is densest (most accurate) near 0, matching the fact that "most weights cluster near 0". A tiny subtraction encodes an understanding of the weight
+distribution.</p>
+<p>In reverse, <strong>quantization</strong> (compressing floats to bytes) is the inverse. In q4_0's reference implementation <span class="mono">quantize_row_q4_0_ref</span>, the scale is <span class="mono">d = max / -8</span> - find the
+weight with the largest magnitude in the block, map it to the endpoint of the quantization range (-8), and scale-and-round the rest proportionally. <strong>Dividing by -8 rather than 8</strong> is an easy-to-misread detail:
+it pairs with the "minus 8" at dequantize time, ensuring the round trip lines up numerically.</p>
+<p>To make one thing explicit: dequantization is <strong>lossy</strong> - the restored floats are not exactly equal to the original weights, and that small gap is the quantization error. So why does the model still work? Because deep
+networks are quite <strong>tolerant</strong> of tiny perturbations to weights: a single weight off by a hair, after hundreds or thousands of accumulations and nonlinearities, is almost imperceptible in the overall output. The whole art
+of a quantization format is balancing "compress harder" against "error the model can still tolerate" - which is exactly why there are so many levels like q4_0, q4_K, q6_K, letting you pick a suitable trade-off for your precision needs.</p>
+<p>One more thing worth remembering: dequantization does not necessarily <strong>expand the whole weight tensor to floats up front</strong> (that would cost a lot of memory). In hotspots like matmul, ggml often
+<strong>dequantizes on the fly</strong> - restoring just the small block it needs in the inner loop, feeding it into the dot product immediately, and discarding it. So quantization saves not only VRAM; even the "decompressed
+floats" mostly never land, benefiting bandwidth and cache too (echoing L06's "saves VRAM and speeds up").</p>
+
+<h2>Wiring into the engine: ggml_type_traits</h2>
+<p>Here is the problem: q4_0, q8_0, q4_K, q6_K... dozens of quantization formats, each with a different byte layout - must every one be special-cased inside mul_mat and dequantize? Of course not. ggml uses a
+<strong>type-traits table</strong> (<span class="mono">ggml_type_traits</span>) to <strong>register each type as one row</strong> of "basic parameters + how to convert to float", and operators just look it up, never caring which
+quantization it actually is.</p>
+<div class="flow">
+  <div class="node"><div class="nt">tensor.type</div><div class="nd">= GGML_TYPE_Q4_K</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">type_traits[Q4_K]</div><div class="nd">blck_size / type_size<br>to_float = dequantize_row_q4_K</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">operator</div><div class="nd">dequantize per traits, then compute</div></div>
+</div>
+<p>A tensor only records "I am Q4_K" in its <span class="mono">type</span> field (L05's type field finally earns its keep here). When an operator needs it, it looks that type up in the <span class="mono">type_traits</span> table to get
+"how many elements per block, how many bytes, which function converts to float" and just follows it - <strong>there is not a single if in the operator code branching on quantization type</strong>.</p>
+<pre class="code"><span class="cm">// simplified from ggml/include/ggml.h (one row per type)</span>
+<span class="kw">struct</span> ggml_type_traits {
+    <span class="kw">const char</span> * type_name;     <span class="cm">// "q4_K"</span>
+    int64_t       blck_size;     <span class="cm">// elements per block, e.g. 256</span>
+    size_t        type_size;     <span class="cm">// bytes per block, e.g. 144</span>
+    bool          is_quantized;
+    ggml_to_float_t   to_float;       <span class="cm">// dequantize function pointer</span>
+    ggml_from_float_t from_float_ref; <span class="cm">// quantize function pointer (reference)</span>
+};</pre>
+<p>The key lies in those two <strong>function pointers</strong>: <span class="mono">to_float</span> points to this type's dequantize function, <span class="mono">from_float_ref</span> to its (reference) quantize function. An operator takes a
+tensor, calls <span class="mono">to_float</span> per its traits to dequantize, then computes; when saving, it quantizes via <span class="mono">from_float_ref</span>. <strong>Note the field name is <span class="mono">from_float_ref</span></strong>
+(with _ref, the reference implementation), not from_float. So <strong>adding a new quantization format is mainly filling one traits row + writing these two functions</strong>, while mul_mat and the dequantize operators
+<strong>need almost no change</strong> - exactly L05's "structure fixed, type swappable" cashed out for quantization.</p>
+
+<p>Stepping back, this lesson actually covers "quantization" at three levels: <strong>layout</strong> (what each byte in a block holds), <strong>restoration</strong> (how dequantize turns bytes back into floats), and
+<strong>wiring</strong> (how the traits table lets operators handle everything uniformly). These three map neatly onto the three situations you meet using llama.cpp: picking a quantization level (layout decides size and precision),
+running inference (dequantization happens quietly behind the scenes), and reading the source (traits is the single entry point for all quantization types). String the three together and you stop treating a name like
+<span class="mono">Q4_K_M</span> as a black box - you can say exactly what it is in memory and what happens when it computes. Breaking a quantization name down to the byte level makes your grasp of "how a model lands on disk and in memory"
+that much more solid.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why does q4_K use a 256 super-block instead of q4_0's 32? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>The core is <strong>amortizing fixed overhead without sacrificing local precision</strong>. q4_0 spends 2 bytes on a scale for every 32 weights; bringing the super-block to 256 spreads the fixed "overall d/dmin"
+    overhead over 8x as many weights, clearly lowering per-weight management cost.</p>
+    <p>But simply enlarging the block with a single-level scale would hurt local precision - 256 weights sharing one scale is too coarse. K-quant's answer is to <strong>add a second sub-block scale</strong>: the super-block
+    sets the broad range, the sub-blocks set details, so you get both "high compression from the big block" and "high precision from the sub-blocks".</p>
+    <p>This also explains why we do not blindly make the super-block even bigger (say 1024): sub-block scales themselves take space, and too big a block with too many sub-blocks raises the second-level overhead again. 256 + 8
+    sub-blocks is an engineering sweet spot between compression ratio and precision, tuned through extensive measurement.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Does q4_K have qh? What about q6_K? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">q4_K</span> has <strong>no qh</strong>. It has only four fields: <span class="mono">d</span>, <span class="mono">dmin</span>, <span class="mono">scales[12]</span>, <span class="mono">qs[128]</span>. A 4-bit value is exactly one nibble, packed
+    straight into <span class="mono">qs</span>, with no need to split high and low bits.</p>
+    <p><span class="mono">q6_K</span> is the one that <strong>has qh</strong>. A 6-bit value does not fit in one nibble, so it is split: the low 4 bits go into <span class="mono">ql</span>, the high 2 bits into <span class="mono">qh</span>, plus 16
+    8-bit sub-block scales and one super-block <span class="mono">d</span>. So q6_K's struct looks quite different from q4_K's.</p>
+    <p>This is one of the most common beginner traps: assuming all K-quant fields are identical and imagining q4_K "with a qh". When reading these structs, always <strong>check field by field against the source</strong>, never
+    guessing from the format name - different bit widths mean different packing, and thus different fields.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> How do operators avoid being rewritten for each quantization? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Through the two <strong>function pointers</strong> <span class="mono">to_float</span> / <span class="mono">from_float_ref</span> in <span class="mono">type_traits</span>. Given a quantized tensor, an operator does not test "is this q4_0 or
+    q4_K"; it directly calls the <span class="mono">to_float</span> registered in its traits to dequantize, then computes.</p>
+    <p>In hotspots like mul_mat it is subtler: rather than dequantizing the whole block first and then multiplying, it often <strong>dequantizes a small run on the fly and dot-products immediately</strong>, even with dedicated
+    fast dot-product kernels for certain quantization types. But the exposed interface is uniform - all "get how to convert to float from traits".</p>
+    <p>The result: adding a new quantization type needs <strong>not a single line changed in operator code</strong>, only one traits row plus the dequant/quant functions. This "fold the differences into a table of function
+    pointers" approach is the key to ggml hosting dozens of quantization formats without bloat - the same decoupling idea as L11's "switch(op) dispatch".</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">q4_0</span> = [d 2B][qs 16B] = <strong>18 B / 32 weights</strong> (4-bit packed); <span class="mono">q8_0</span> is one int8 per weight, 34 B a block, more accurate and larger.</li>
+    <li>K-quant uses a <strong>256 super-block + two-level scale</strong> (super-block d/dmin + sub-block 6-bit), more accurate than q4_0 at the same bit width.</li>
+    <li><span class="mono">q4_K</span> has <strong>no qh</strong> (only d/dmin/scales/qs); <span class="mono">q6_K</span> is the one with ql+qh. Do not assume.</li>
+    <li>Dequant core, one line: <span class="mono">x = (q - 8) * d</span>; quantize direction <span class="mono">d = max / -8</span>.</li>
+    <li><span class="mono">ggml_type_traits</span> wires each type into the engine via <span class="mono">to_float</span> / <span class="mono">from_float_ref</span> function pointers, so operators <strong>need not be rewritten per quantization</strong>.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Folding "<strong>what each quantization type looks like and how to convert it to float</strong>" into one traits table, exposed via function pointers - so dozens of quantization formats can share the same tensor structure and
+  the same operators. L05 said "structure fixed, type swappable"; here you see it cashed out at the byte level: switching format is just switching a table row, while the engine's trunk <strong>does not move at all</strong>. Next
+  lesson, we lift our gaze from "how one tensor is stored" to "how a whole model file is stored" - the GGUF format.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. How are the 18 bytes of a q4_0 block made up?</div>
+  <ol class="opts">
+    <li>a 2-byte half scale + 16 bytes holding 32 4-bit quantized values</li>
+    <li>all int8, no scale</li>
+    <li>18 weights, one byte each</li>
+    <li>16 bytes of scale + 2 bytes of values</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. block_q4_0 = {ggml_half d; uint8_t qs[16]}: a 2-byte scale + 16 bytes holding 32 4-bit values (two nibbles per byte), 18 bytes total, 4.5 bits per weight on average.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why is K-quant (e.g. q4_K) more accurate than q4_0 at the same bit width?</div>
+  <ol class="opts">
+    <li>It loses no information at all</li>
+    <li>It uses a 256 super-block: beyond the overall d/dmin, each sub-block has a finer scale, fitting locally better</li>
+    <li>Its quantized values are not packed</li>
+    <li>It actually uses more bits</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. q4_K has a two-level scale: super-block d/dmin set the broad range, 8 sub-blocks each carry a 6-bit scale/min for local fine-tuning, plus dmin's offset - the same 4.5 bits but more accurate than q4_0's single scale.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does ggml let operators handle dozens of quantization types uniformly?</div>
+  <ol class="opts">
+    <li>JIT-compile code for each type at runtime</li>
+    <li>Write a dedicated operator for each quantization type</li>
+    <li>Convert all weights to F32 on disk</li>
+    <li>A ggml_type_traits table + to_float/from_float_ref function pointers; operators dequantize per traits, no need to rewrite per type</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. ggml_type_traits registers one row per type (blck_size, type_size, to_float, from_float_ref, ...); operators look it up and call the function pointers, so a new type needs only one row + its dequant/quant functions.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>q4_K and q4_0 are both ~4-bit, yet their memory layouts differ a lot. Name at least two structural differences. (hint: super-block / two-level scale / dmin / byte count)</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="11-core-operators.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">核心算子</span><span class="lang-en">Core operators</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
