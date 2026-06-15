@@ -570,6 +570,76 @@ QUIZZES = {
             },
         ],
     },
+    "09-compute-graph.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "调用 c = ggml_mul_mat(a, b) 时发生了什么？",
+                    "en": "What happens when you call c = ggml_mul_mat(a, b)?",
+                },
+                "opts": [
+                    {
+                        "zh": "新建一个结果张量并记下 op=MUL_MAT、src=[a, b]，但不做任何乘法",
+                        "en": "It builds a result tensor and records op=MUL_MAT, src=[a, b], but does no multiplication",
+                    },
+                    {"zh": "立刻算出矩阵乘的结果数字", "en": "It immediately computes the matmul result numbers"},
+                    {"zh": "修改了 a 的内容", "en": "It modifies the contents of a"},
+                    {"zh": "把结果写到磁盘", "en": "It writes the result to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml 是惰性建图：算子函数只建结果张量、填 op/src 反向指针，真正的运算留到执行阶段（下一课）。",
+                    "en": "ggml builds graphs lazily: an operator function only builds the result tensor and fills op/src back-pointers; the real math waits for execution (next lesson).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "计算图里 leafs 和 nodes 的区别是？",
+                    "en": "What is the difference between leafs and nodes in the compute graph?",
+                },
+                "opts": [
+                    {
+                        "zh": "leafs 是输入/权重/常量（op==NONE），nodes 是算子结果（按拓扑序计算）",
+                        "en": "leafs are inputs/weights/constants (op==NONE); nodes are operator results (computed in topological order)",
+                    },
+                    {"zh": "leafs 是输出，nodes 是输入", "en": "leafs are outputs, nodes are inputs"},
+                    {"zh": "两者没有区别", "en": "There is no difference"},
+                    {"zh": "nodes 是叶子，leafs 是树枝", "en": "nodes are leaves, leafs are branches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "判据是有没有“来历”：op==NONE 的是叶子（输入/常量，直接用其数据），有 op 的是节点（要按依赖顺序算出来）。",
+                    "en": "The criterion is whether it has an origin: op==NONE means a leaf (input/constant, used directly); having an op means a node (computed in dependency order).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_build_forward_expand 从输出张量出发做了什么？",
+                    "en": "What does ggml_build_forward_expand do, starting from the output tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "沿 src 指针递归回溯，把所有依赖按拓扑序收进图，保证执行时输入先于输出算好",
+                        "en": "It recurses back along src pointers, collecting all dependencies in topological order so inputs are computed before outputs at execution",
+                    },
+                    {"zh": "立刻执行整张图", "en": "It immediately executes the whole graph"},
+                    {"zh": "把图保存成 GGUF 文件", "en": "It saves the graph to a GGUF file"},
+                    {"zh": "随机打乱节点顺序", "en": "It randomly shuffles the node order"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "“先递归收集依赖、再放自己”天然产生拓扑序：排在前面的不依赖后面的，执行时从头算到尾即可。",
+                    "en": "\"Recurse to collect dependencies first, then add itself\" naturally yields topological order: earlier never depends on later, so execution just goes front to back.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 ggml 要“先建图、后执行”，而不是边调用边算？至少说出两个好处。",
+                "en": "Why does ggml \"build the graph first, execute later\" instead of computing as it goes? Name at least two benefits.",
+            },
+        ],
+    },
 }
 
 

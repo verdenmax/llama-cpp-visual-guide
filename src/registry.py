@@ -18,4 +18,5 @@ CONTENT = {
     "06-quantization-intro.html": part2.LESSON_06,
     "07-build-and-backends.html": part2.LESSON_07,
     "08-ggml-core-objects.html": part3.LESSON_08,
+    "09-compute-graph.html": part3.LESSON_09,
 }

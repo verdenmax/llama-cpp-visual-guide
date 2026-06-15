@@ -62,6 +62,8 @@ PAGES = [
      "第二部分 · 前置基础", "Part 2 · Foundations"),
     ("08-ggml-core-objects.html", "ggml 核心对象", "ggml core objects",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("09-compute-graph.html", "计算图：惰性构建", "The compute graph: lazy build",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -491,6 +493,8 @@ SUBTITLES = {
                                    "two-step CMake; backend options; build/bin outputs; -ngl"),
     "08-ggml-core-objects.html": ("ggml_context · 内存池 arena · no-malloc bump 分配",
                                   "ggml_context; the memory-pool arena; no-malloc bump allocation"),
+    "09-compute-graph.html": ("先建图后执行 · op/src 反向指针 · nodes vs leafs",
+                              "build-then-run; op/src back-pointers; nodes vs leafs"),
 }
 
 
