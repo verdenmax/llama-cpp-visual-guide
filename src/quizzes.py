@@ -319,6 +319,73 @@ QUIZZES = {
             },
         ],
     },
+    "05-tensors.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 ggml 里把一个张量“转置”，主要改变了什么？",
+                    "en": "Transposing a ggml tensor mainly changes what?",
+                },
+                "opts": [
+                    {
+                        "zh": "只交换 ne[]/nb[]（步长），复用同一块 data，不搬数据",
+                        "en": "Only swaps ne[]/nb[] (strides), reusing the same data - no data is moved",
+                    },
+                    {"zh": "复制出一块新内存", "en": "Copies out a new block of memory"},
+                    {"zh": "改变了 type", "en": "Changes the type"},
+                    {"zh": "重新量化了权重", "en": "Re-quantizes the weights"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "转置是改元数据的视图操作：交换 ne/nb、用 view_src 指回原张量，data 一个字节都不动，所以零拷贝。",
+                    "en": "Transpose is a metadata-only view: swap ne/nb, point view_src back to the original, and data is untouched - hence zero-copy.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 张量里哪一维是“最内/连续（步长最小）”的维？",
+                    "en": "Which dimension of a ggml tensor is the innermost/contiguous (smallest stride) one?",
+                },
+                "opts": [
+                    {"zh": "ne[0]", "en": "ne[0]"},
+                    {"zh": "ne[3]", "en": "ne[3]"},
+                    {"zh": "由 type 决定", "en": "Decided by the type"},
+                    {"zh": "都一样", "en": "All the same"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml 行优先，nb[0]=ggml_type_size(type) 最小，ne[0] 在内存里连续摆放；这和 numpy/PyTorch 的约定相反。",
+                    "en": "ggml is row-major: nb[0]=ggml_type_size(type) is smallest and ne[0] is laid out contiguously - the opposite of numpy/PyTorch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么量化类型（如 Q4_0）的张量不能像普通数组那样按单个元素下标随便取？",
+                    "en": "Why can't a quantized-type tensor (e.g. Q4_0) be indexed element-by-element like a plain array?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为它按“块”打包存储，单个权重无法独立寻址，要按块解量化",
+                        "en": "Because it packs values by block, so a single weight is not independently addressable - you dequantize by block",
+                    },
+                    {"zh": "因为它没有 ne 字段", "en": "Because it has no ne field"},
+                    {"zh": "因为它的 data 是空的", "en": "Because its data is empty"},
+                    {"zh": "因为它只能有一维", "en": "Because it can only be one-dimensional"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "量化类型把一整块（如 32 个权重）压成定长字节，nb 公式里的 ne[0]/ggml_blck_size(type) 正是“一排有多少块”。",
+                    "en": "A quantized type packs a whole block (e.g. 32 weights) into fixed bytes; the ne[0]/ggml_blck_size(type) in the nb formula is exactly 'blocks per row'.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "给一个 ne=[4,3]（ne[0]=4）的 F32 张量，nb[0] 与 nb[1] 各是多少字节？（F32 = 4 字节）",
+                "en": "For an F32 tensor with ne=[4,3] (ne[0]=4), what are nb[0] and nb[1] in bytes? (F32 = 4 bytes)",
+            },
+        ],
+    },
 }
 
 

@@ -54,6 +54,8 @@ PAGES = [
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
     ("04-llm-inference-basics.html", "大模型推理基础", "LLM inference fundamentals",
      "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("05-tensors.html", "张量是什么", "What is a tensor",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -475,6 +477,8 @@ SUBTITLES = {
                                     "prompt -> tokenize -> graph -> logits -> sample -> token"),
     "04-llm-inference-basics.html": ("decoder-only · 因果掩码 · 自回归 · KV cache 为何精确",
                                      "decoder-only; causal mask; autoregression; why the KV cache is exact"),
+    "05-tensors.html": ("shape/stride/行优先 · ggml_tensor 字段 · view 零拷贝",
+                        "shape/stride/row-major; ggml_tensor fields; zero-copy views"),
 }
 
 
