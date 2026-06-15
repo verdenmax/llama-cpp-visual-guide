@@ -411,6 +411,13 @@ ctx = <span class="fn">gguf_init_from_file</span>(path)        <span class="cm">
 mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm">// 整文件只读映射, 不拷贝</span>
 <span class="kw">for</span> t <span class="kw">in</span> tensors:
     t.data = mapping + data_off + t.offset  <span class="cm">// 张量数据直接指进映射</span></pre>
+<div class="flow">
+  <div class="node"><div class="nt">.gguf 磁盘文件</div><div class="nd">header | tensor data<br>(几 GB)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">mmap(PROT_READ)</div><div class="nd">只读映射, 不拷贝<br>用到的页才载入</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">张量 data 指针</div><div class="nd">直接指进映射<br>= 文件对应页</div></div>
+</div>
 <p>mmap 的妙处在于：它<strong>不把几 GB 权重先读进内存、再拷一遍</strong>，而是把文件"映射"进进程的地址空间——张量 <span class="mono">data</span> 指针看起来像普通内存指针，实际指向的是磁盘文件的对应页。
 真正读到哪一页，操作系统才把那一页从磁盘载入。于是启动时几乎不花时间在"搬数据"上，这就是大模型能<strong>秒加载</strong>的原因（实现见 <span class="mono">src/llama-mmap.cpp</span> 与 <span class="mono">src/llama-model-loader.cpp</span>）。</p>
 <p>再串一遍整条加载链路，把第三部分前几课都接起来：<span class="mono">gguf_init_from_file</span> 读出超参（metadata）-> 按超参建出 L08 的 ggml_context 和张量结构 -> 张量的 data 指针指进 mmap 映射（权重零拷贝就位）->
@@ -628,6 +635,13 @@ ctx = <span class="fn">gguf_init_from_file</span>(path)        <span class="cm">
 mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm">// whole-file read-only map, no copy</span>
 <span class="kw">for</span> t <span class="kw">in</span> tensors:
     t.data = mapping + data_off + t.offset  <span class="cm">// tensor data points straight into the map</span></pre>
+<div class="flow">
+  <div class="node"><div class="nt">.gguf file on disk</div><div class="nd">header | tensor data<br>(several GB)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">mmap(PROT_READ)</div><div class="nd">read-only map, no copy<br>pages load on demand</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">tensor data pointer</div><div class="nd">points into the map<br>= file's page</div></div>
+</div>
 <p>The beauty of mmap is that it <strong>does not read several GB of weights into memory and copy them once more</strong>; it "maps" the file into the process's address space - a tensor's <span class="mono">data</span> pointer looks like an
 ordinary memory pointer but actually points at the corresponding page of the disk file. Only when a page is actually read does the OS load that page from disk. So startup spends almost no time "moving data" - that is why a large model
 can <strong>load instantly</strong> (implementation in <span class="mono">src/llama-mmap.cpp</span> and <span class="mono">src/llama-model-loader.cpp</span>).</p>

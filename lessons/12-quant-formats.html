@@ -396,6 +396,15 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
         q1 = (block.qs[j] &gt;&gt; 4)   - 8   <span class="cm">// 高 4 位, 减 8 回到有符号</span>
         y[j]      = q0 * d              <span class="cm">// x = (q - 8) * d</span>
         y[j + 16] = q1 * d</pre>
+<div class="flow">
+  <div class="node"><div class="nt">qs 取一个 nibble</div><div class="nd">q = 0..15</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">q - 8</div><div class="nd">平移成 -8..7<br>(有符号)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">× d</div><div class="nd">乘这块的 scale</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) · d</div></div>
+</div>
 <p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数（让 0 附近的权重对称分布），再乘上这块的 scale <span class="mono">d</span>，
 就还原出近似的原始浮点。q8_0 更直接：<span class="mono">x = q * d</span>，因为 int8 本身就是有符号的，不用减偏移。</p>
 <p>那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。
@@ -627,6 +636,15 @@ handled by each format's own <span class="mono">dequantize_row_*</span> function
         q1 = (block.qs[j] &gt;&gt; 4)   - 8   <span class="cm">// high 4 bits, minus 8 back to signed</span>
         y[j]      = q0 * d              <span class="cm">// x = (q - 8) * d</span>
         y[j + 16] = q1 * d</pre>
+<div class="flow">
+  <div class="node"><div class="nt">take a nibble from qs</div><div class="nd">q = 0..15</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">q - 8</div><div class="nd">shift to -8..7<br>(signed)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">x d</div><div class="nd">times this block's scale</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) * d</div></div>
+</div>
 <p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7 (so weights near zero sit symmetrically), then
 multiplying by this block's scale <span class="mono">d</span> restores the approximate original float. q8_0 is even more direct: <span class="mono">x = q * d</span>, since int8 is already signed and needs no offset.</p>
 <p>That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts
