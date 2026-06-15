@@ -654,8 +654,8 @@ LESSON_02 = {
 <p>这条边界很关键：转换脚本只在<strong>准备</strong>阶段跑一次，产出 <span class="inline">.gguf</span> 后就退场；运行时<strong>完全不碰 Python</strong>，只认这一个文件。所以同一个 <span class="inline">.gguf</span>，既能喂给 <span class="mono">llama-cli</span>，也能喂给 <span class="mono">llama-server</span> 或 <span class="mono">examples/simple</span>——它们共享同一套加载与推理代码。</p>
 <p>把这条流水线落到<strong>真实命令</strong>上，最常见的就是"<strong>转换 -&gt; 量化 -&gt; 运行</strong>"三步。下面这段是最小可跑的骨架——左边 Python 准备、右边 C++ 运行，中间仍旧靠那个 <span class="inline">.gguf</span> 交接：</p>
 <pre class="code"><span class="cm"># 模型从准备到运行的完整管道</span>
-<span class="cm"># 1) 转换：HuggingFace 模型 -> GGUF（Python 侧）</span>
-python convert_hf_to_gguf.py ./my-model            <span class="cm"># 产出 my-model.gguf（FP16）</span>
+<span class="cm"># 1) 转换：HuggingFace 模型 -> GGUF（Python 侧，--outfile 指定输出名）</span>
+python convert_hf_to_gguf.py ./my-model --outfile my-model.gguf   <span class="cm"># 16 位浮点（默认 auto）</span>
 <span class="cm"># 2) 量化（可选，压小）</span>
 llama-quantize my-model.gguf my-model-Q4.gguf Q4_0
 <span class="cm"># 3) 运行（C++ 侧）</span>
@@ -834,8 +834,8 @@ directory actually do</strong>". The table below is the map's legend:</p>
 <p>That boundary matters: the conversion script runs <strong>once</strong> during prep, emits the <span class="inline">.gguf</span>, and then bows out; the runtime <strong>never touches Python</strong> and knows only this one file. So the same <span class="inline">.gguf</span> can feed <span class="mono">llama-cli</span>, <span class="mono">llama-server</span>, or <span class="mono">examples/simple</span> alike - they share the same loading and inference code.</p>
 <p>Put this pipeline onto <strong>real commands</strong> and the common case is the three steps "<strong>convert -&gt; quantize -&gt; run</strong>". The block below is the minimal runnable skeleton - Python prepares on the left, C++ runs on the right, and the handover is still that <span class="inline">.gguf</span> in the middle:</p>
 <pre class="code"><span class="cm"># the full pipeline, from prep to run</span>
-<span class="cm"># 1) convert: HuggingFace model -> GGUF (Python side)</span>
-python convert_hf_to_gguf.py ./my-model            <span class="cm"># emits my-model.gguf (FP16)</span>
+<span class="cm"># 1) convert: HuggingFace model -> GGUF (Python; --outfile sets the name)</span>
+python convert_hf_to_gguf.py ./my-model --outfile my-model.gguf   <span class="cm"># 16-bit float (auto by default)</span>
 <span class="cm"># 2) quantize (optional, to shrink)</span>
 llama-quantize my-model.gguf my-model-Q4.gguf Q4_0
 <span class="cm"># 3) run (C++ side)</span>
