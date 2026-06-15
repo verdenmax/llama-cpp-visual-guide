@@ -1071,6 +1071,70 @@ QUIZZES = {
             },
         ],
     },
+    "16-build-graph.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama 层怎么为不同架构建出不同的前向图？",
+                    "en": "How does the llama layer build different forward graphs for different architectures?",
+                },
+                "opts": [
+                    {
+                        "zh": "llama_model::build_graph 派发到每架构自己的 build_arch_graph（src/models/&lt;arch&gt;.cpp），复用 llm_graph_context 的 build_* 积木",
+                        "en": "llama_model::build_graph dispatches to each architecture's build_arch_graph (src/models/&lt;arch&gt;.cpp), reusing llm_graph_context's build_* blocks",
+                    },
+                    {"zh": "一个巨型 if-else", "en": "one giant if-else"},
+                    {"zh": "每个架构一个独立引擎", "en": "a separate engine per architecture"},
+                    {"zh": "运行时编译整个模型", "en": "compiling the whole model at runtime"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "build_graph 是稳定入口，调虚函数 build_arch_graph 派发到各架构的 src/models/&lt;arch&gt;.cpp；真正干活的 build_attn/build_ffn/build_norm 是基类 llm_graph_context 的共享积木。",
+                    "en": "build_graph is the stable entry; it calls the virtual build_arch_graph, dispatching to each architecture's src/models/&lt;arch&gt;.cpp, while the real workers build_attn/build_ffn/build_norm are shared blocks on the base llm_graph_context.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "build_graph 产出什么、交给谁？",
+                    "en": "What does build_graph produce, and hand to whom?",
+                },
+                "opts": [
+                    {"zh": "一张 ggml_cgraph（只建不算），交给后端执行（L10）", "en": "a ggml_cgraph (built, not computed), handed to the backend to execute (L10)"},
+                    {"zh": "直接产出文本", "en": "text output directly"},
+                    {"zh": "立即算出结果", "en": "the computed result immediately"},
+                    {"zh": "一个 .gguf 文件", "en": "a .gguf file"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "build_* 只填算子的 op/src（L09 惰性建图），get_gf() 交出一张 ggml_cgraph；真正逐节点执行是 L10 后端的事。所以同一张图能换后端跑。",
+                    "en": "build_* only fills operators' op/src (L09 lazy build); get_gf() hands out a ggml_cgraph; actual node-by-node execution is the L10 backend's job. So the same graph runs on any backend.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一层 transformer 在图里大致是什么顺序？",
+                    "en": "Roughly what order is one transformer layer in the graph?",
+                },
+                "opts": [
+                    {"zh": "norm -> attn（QKV+rope+KV+softmax）-> 残差 -> norm -> ffn -> 残差", "en": "norm -> attn (QKV+rope+KV+softmax) -> residual -> norm -> ffn -> residual"},
+                    {"zh": "只有一个 mul_mat", "en": "just one mul_mat"},
+                    {"zh": "完全随机", "en": "completely random"},
+                    {"zh": "先 ffn 后 attn 且无 norm", "en": "ffn before attn, with no norm"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "一个 block 的骨架固定：build_norm -> build_attn -> 残差 -> build_norm -> build_ffn -> 残差；循环 n_layer() 层，每层按名字取权重（L15）。",
+                    "en": "A block's skeleton is fixed: build_norm -> build_attn -> residual -> build_norm -> build_ffn -> residual; looped n_layer() times, fetching weights by name per layer (L15).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "build_attn 这种积木被复用、加新架构只写一份 src/models/&lt;arch&gt;.cpp——这种结构对“支持很多模型”有什么好处？",
+                "en": "build_attn-style blocks are reused, and a new architecture only writes one src/models/&lt;arch&gt;.cpp - what are the benefits of this structure for 'supporting many models'?",
+            },
+        ],
+    },
 }
 
 

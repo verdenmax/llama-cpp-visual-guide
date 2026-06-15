@@ -26,4 +26,5 @@ CONTENT = {
     "13-gguf-format.html": part3.LESSON_13,
     "14-model-loading.html": part4.LESSON_14,
     "15-architecture-hparams.html": part4.LESSON_15,
+    "16-build-graph.html": part4.LESSON_16,
 }

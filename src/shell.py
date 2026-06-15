@@ -76,6 +76,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("15-architecture-hparams.html", "架构与超参", "Architecture & hyperparameters",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("16-build-graph.html", "构建计算图", "Building the compute graph",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -519,6 +521,8 @@ SUBTITLES = {
                               "llama_model_loader; GGUF metadata/tensor map; mmap; splits"),
     "15-architecture-hparams.html": ("llm_arch · llama_hparams · LLM_TENSOR_NAMES 命名约定",
                                      "llm_arch; llama_hparams; LLM_TENSOR_NAMES naming"),
+    "16-build-graph.html": ("build_graph 派发 · build_attn/build_ffn 积木 · src/models · ggml_cgraph",
+                            "build_graph dispatch; build_attn/build_ffn blocks; src/models; ggml_cgraph"),
 }
 
 

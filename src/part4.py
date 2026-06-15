@@ -604,3 +604,299 @@ one step short: actually assembling these parts by the blueprint into a runnable
 """,
 }
 
+LESSON_16 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+有了加载好的权重（L14）和架构超参（L15），终于可以<strong>把它们接成一张真正能算的前向计算图</strong>了。这一课讲 <span class="mono">llama-graph</span>：它提供 <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>
+这些"标准件"，每个架构在 <span class="mono">src/models/&lt;arch&gt;.cpp</span> 里决定"按什么顺序把它们拼起来"，最终产出一张第三部分讲过的 <span class="mono">ggml_cgraph</span>（L09）。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这一课是<strong>承上启下的枢纽</strong>：上面（L14/L15）把模型整理成了"有名有姓、有形有状"的张量集合，下面（L09/L10/L11）是 ggml 怎么建图、怎么执行、怎么算每个算子。这一课正是把两端接起来的那道桥——
+它把"一个具体模型"翻译成"一张 ggml 计算图"。读懂它，你就看清了 llama.cpp 是怎么把一堆权重变成"能跑"的。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  建图像照着图纸（L15 架构）用<strong>标准件搭模型</strong>：<span class="mono">build_attn</span>（搭一套注意力）、<span class="mono">build_ffn</span>（搭一套前馈）、<span class="mono">build_norm</span>（搭一层归一化）就是预制好的标准件；
+  <span class="mono">src/models/&lt;arch&gt;.cpp</span> 是"这种楼的拼装说明书"，告诉你这些件按什么顺序、用哪些权重拼。而且拼出来的<strong>不是结果，而是一张待执行的图</strong>——就像搭好的不是已通电的电路，而是一张电路图，真正通电（计算）是 L10 的事。
+</div>
+
+<h2>谁来建图：从 build_graph 说起</h2>
+<p>建图的总入口是 <span class="mono">llama_model::build_graph</span>。它本身很薄，主要做一件事：<strong>把活派发给当前架构</strong>。因为不同架构（llama、qwen2…）的前向流程不一样，所以真正的建图逻辑放在每个架构<strong>各自的文件</strong> <span class="mono">src/models/&lt;arch&gt;.cpp</span> 里。</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_model::build_graph</div><div class="nd">总入口(薄)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">build_arch_graph</div><div class="nd">虚函数 -&gt; src/models/&lt;arch&gt;.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llm_graph_context 的积木</div><div class="nd">build_attn / build_ffn ...</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">get_gf()</div><div class="nd">= ggml_cgraph(L09)</div></div>
+</div>
+<p>落到源码（简化自 <span class="mono">src/llama-model.cpp</span>）：</p>
+<pre class="code"><span class="cm">// 简化自 src/llama-model.cpp</span>
+ggml_cgraph * llama_model::<span class="fn">build_graph</span>(<span class="kw">const</span> llm_graph_params &amp; p) <span class="kw">const</span> {
+    <span class="kw">auto</span> llm = <span class="fn">build_arch_graph</span>(p);   <span class="cm">// 虚: 派发到 src/models/&lt;arch&gt;.cpp</span>
+    <span class="cm">// ... build_pooling / build_dense_out ...</span>
+    <span class="kw">return</span> llm-&gt;res-&gt;<span class="fn">get_gf</span>();        <span class="cm">// ggml_cgraph(L09)</span>
+}</pre>
+<p>这里有两层抽象要分清：<span class="mono">build_graph</span> 是<strong>稳定的总入口</strong>（不管什么架构，外面都调它）；<span class="mono">build_arch_graph</span> 是<strong>虚函数</strong>，每个架构重写自己那一份。这正是 L15 表驱动思路的延续——
+"哪种架构"决定调哪份建图代码。而所有架构的建图，都基于一个共同的基类 <span class="mono">llm_graph_context</span>，它身上挂着 <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span> 这些人人可用的积木方法。</p>
+<p>为什么把建图按架构拆成一个个文件，而不是写成一个巨大的 <span class="mono">switch</span>？因为每种架构的前向多少有点不同，分开写各自清爽、互不干扰；而<strong>共性</strong>（注意力、前馈、归一化怎么搭）则抽到基类的积木里复用。
+这种"差异分文件、共性进基类"的组织，让加一个新架构基本只用新写一个 <span class="mono">src/models/&lt;arch&gt;.cpp</span>，不必碰别人。</p>
+<p>这里也顺势澄清 <span class="mono">build_graph</span> 和 ggml 的关系：它<strong>不是</strong> ggml 的一部分，而是 llama 层站在 ggml 之上写的"组装逻辑"。ggml（L08-L11）提供张量、算子、建图原语；<span class="mono">build_graph</span> 用这些原语，按 transformer 的结构拼出一张具体的图。
+所以这一课本质是在讲"<strong>怎么用 ggml 这套积木，搭出一个真正的大模型</strong>"。</p>
+<p>那 <span class="mono">build_graph</span> 什么时候被调用？答案是<strong>每一步推理都调一次</strong>——下一课会讲的 <span class="mono">llama_decode</span>，内部第一件事就是为这一步搭出计算图。听起来很费：每生成一个 token 都要重搭一次图？
+其实不然，图的"结构"很轻（只是一串算子的声明、不含计算），搭起来很快；而且对形状相同的步骤，这张图还能被复用，不必每次从头来。</p>
+<p>传给 <span class="mono">build_graph</span> 的 <span class="mono">llm_graph_params</span> 里，装着搭这一步图所需的上下文：这一步要处理哪些 token（来自 L18 的 batch）、KV cache 当前状态、用哪个后端等等。换句话说，<span class="mono">build_graph</span> 不是凭空搭图，而是<strong>针对"这一步要算什么"</strong>搭出恰好够用的图。
+这也是为什么 prefill（一次算整段 prompt）和 decode（一次算一个 token）虽然用同一套建图代码，搭出的图大小却不同。</p>
+<p>代码里那行 <span class="mono">build_pooling / build_dense_out</span> 注释也值得一提：除了主体的 N 层 block，建图还会按需接上一些"收尾"步骤——比如做 embedding 任务时的池化、某些模型额外的输出层。这些是<strong>可选的尾巴</strong>，普通文本生成多半用不到，但它们和主体共用同一套建图框架，按架构和任务接进同一张图。</p>
+
+<h2>一层 transformer 怎么搭</h2>
+<p>模型的主体是 N 个一模一样的 transformer block 叠起来。看清<strong>一层</strong>怎么搭，就看懂了整个前向。一层的骨架很固定：归一化 -&gt; 注意力 -&gt; 残差 -&gt; 归一化 -&gt; 前馈 -&gt; 残差。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>build_norm</h4><p>对输入做 RMSNorm，把数值稳到合理范围（L11 的归一化算子）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>build_attn</h4><p>一整套注意力：Q/K/V 投影 + rope 注入位置 + 读写 KV cache + softmax + 输出投影（L11/L04/L19）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>残差相加</h4><p>把注意力输出加回输入（残差连接），让信息和梯度都好流动。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>build_norm + build_ffn</h4><p>再归一化一次，然后前馈网络（gate/up/down 三个矩阵乘，L11）。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>残差相加</h4><p>把前馈输出加回去，得到这一层的输出，喂给下一层。</p></div></div>
+</div>
+<p>把这套骨架写成伪代码，几乎就是 <span class="mono">src/models/llama.cpp</span> 里循环体的样子：</p>
+<pre class="code"><span class="cm"># 伪代码: 一层的拼法(对应 src/models/llama.cpp 的循环体)</span>
+cur  = <span class="fn">build_norm</span>(inpL, attn_norm_w)            <span class="cm"># RMSNorm(L11)</span>
+cur  = <span class="fn">build_attn</span>(inp_attn, cur, wq,wk,wv,wo)    <span class="cm"># Q/K/V + rope + KV + softmax(L11/L04/L19)</span>
+inpL = cur + inpL                              <span class="cm"># 残差</span>
+cur  = <span class="fn">build_norm</span>(inpL, ffn_norm_w)
+cur  = <span class="fn">build_ffn</span>(cur, w_gate, w_up, w_down)      <span class="cm"># 前馈(L11 mul_mat)</span>
+inpL = cur + inpL                              <span class="cm"># 残差 -> 下一层</span></pre>
+<p>循环 0 到 <span class="mono">n_layer()</span>（L15 那个访问器方法），每层都拼这么一套，权重就用 L15 的命名约定按名字取（<span class="mono">blk.il.attn_q.weight</span> 等）。可以看到，"建图"在这一层非常机械——就是把固定的积木按固定顺序、喂以每层各自的权重，连成一长串算子。</p>
+<p>这也把前面三课漂亮地收束了：L14 按名字备好张量、L15 给出每层该取哪些权重和多少层，L16 在这里把它们按 transformer 的结构真正拼起来。三课合起来，回答的就是"<strong>一个模型怎么从一堆权重变成一张能算的图</strong>"。</p>
+<p>那两处<strong>残差相加</strong>（cur + inpL）别看简单，却是深层 transformer 能训练、能工作的关键之一：它让每一层在"原始输入"的基础上只学一个"增量"，信息和梯度都能顺着这条捷径直通到底，不至于在几十层里衰减殆尽。建图时它就是一个普通的 ggml 加法算子，但其意义远不止一次加法。</p>
+<p>整个前向并非只有重复的层。<strong>开头</strong>有一步把 token id 查成词向量（<span class="mono">token_embd</span> 那张表，图输入之一）；<strong>结尾</strong>在最后一层之后，还有一次 <span class="mono">output_norm</span> 归一化、和一次投影到词表大小的 <span class="mono">output</span>（算出 logits，L17）。
+所以完整的图是"输入嵌入 -&gt; N 层 block -&gt; 输出归一 -&gt; 投影出 logits"，中间那 N 层才是我们重点拆的对象。</p>
+<p>值得点明 prefill 和 decode 在建图上的关系：两者用<strong>同一套</strong>建图代码，区别只在喂进去的 batch（L18）——prefill 一次喂整段 prompt 的多个 token、decode 一次只喂一个新 token。图的"形状"随 token 数变，但"结构"（每层怎么拼）完全一样。
+这正是统一建图的好处：一套逻辑，既管"首次把 prompt 过一遍"，又管"之后逐字生成"。</p>
+<p>还要留意一点：建图代码里<strong>看不到具体的数值</strong>。<span class="mono">build_attn</span>、<span class="mono">build_ffn</span> 操作的全是"还没算的张量"——它们只是在说"把这个权重和那个输入做矩阵乘，结果叫 cur"。真正的浮点数要等 L10 执行时才填进去。
+所以读建图代码，你读到的是<strong>数据流的形状</strong>，而不是数据本身——这也是 L09 惰性建图最直观的体感。</p>
+<p>退一步看，这一整张前向图其实就是一个<strong>有向无环图</strong>（DAG）：token 向量从输入叶子流入，经过一层层 block 的算子变换，最后流到 logits。每个算子是图上一个节点、箭头表示"谁喂给谁"。
+L09 已经讲过这种图的本质，这一课只是让你看到：原来一个真实大模型的前向，落到图上就是这么一张结构清晰、层层堆叠的 DAG。</p>
+
+<h2>复用积木与图输入</h2>
+<p>支撑这套拼装的，是 <span class="mono">llm_graph_context</span> 上的一批<strong>复用积木</strong>和<strong>图输入</strong>。积木是 <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span> 这些方法；图输入是把"外部数据"接进图的入口。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">图输入</span><span class="name">llm_graph_input_*</span></div><div class="ld">把外部数据接进图：embd（词向量）· pos（位置）· attn_kv（KV cache）</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">积木</span><span class="name">build_attn / build_ffn / build_norm</span></div><div class="ld">把权重 + 输入拼成一段子图，内部都是 L11 的算子</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">产物</span><span class="name">llm_graph_result -&gt; ggml_cgraph</span></div><div class="ld">所有积木串起来，get_gf() 交出最终的图(L09)</div></div>
+</div>
+<p>图输入（<span class="mono">llm_graph_input_*</span>）是个容易被忽略却很关键的概念。一张计算图光有"算子"还不够，还得有"入口"——token 的词向量从哪进来、每个 token 的位置从哪来、KV cache 接在哪。
+这些就是各种 <span class="mono">build_inp_embd</span>/<span class="mono">build_inp_pos</span> 建出来的输入节点。它们是图的"叶子"（L09 讲过的 leafs），每步推理把新数据填进去，图就能算出新结果。</p>
+<p>而所有积木产出的，都是 L11 讲的 ggml 张量（<span class="mono">mul_mat</span>、<span class="mono">soft_max_ext</span> 等算子的输出）。一个 <span class="mono">build_attn</span> 调用，内部就是十几个 ggml 算子按注意力数学（L04）串成的一小段子图。
+把许多这样的子图首尾相连，就长成了整个模型的前向图——这正是 L09 说的"算子串成图"，只不过这里是站在 llama 层、按 transformer 结构有组织地串。</p>
+<p>顺带看一眼 <span class="mono">build_ffn</span> 内部：现代 llama 类模型的前馈不是简单的"一升一降"，而是 <strong>SwiGLU</strong> 式的——<span class="mono">gate</span> 和 <span class="mono">up</span> 两个矩阵各把输入投影一次，<span class="mono">gate</span> 那路过一个激活函数后与 <span class="mono">up</span> 逐元素相乘，再由 <span class="mono">down</span> 投影回去。
+这就是为什么一层 FFN 有 gate/up/down 三个权重矩阵（L15 命名约定里见过）。<span class="mono">build_ffn</span> 把这套固定套路封好，建图时一句话搞定。</p>
+<p>再说说图输入和"叶子"的关系。L09 讲过，图里分两类节点：算出来的<strong>节点</strong>和不计算、只被读取的<strong>叶子</strong>。权重是叶子（加载时就备好了，L14），而图输入（词向量、位置）也是叶子——只不过它们的数据是<strong>每步填新的</strong>。
+建图时把这些叶子的位置占好，执行时把当前这一步的数据填进去，同一张图就能算出不同的结果。</p>
+<p>你会注意到 <span class="mono">build_attn</span> 有<strong>好几个重载</strong>。为什么？因为注意力有不少变体：要不要用 KV cache（prefill 的某些路径不用、decode 必用）、是标准多头还是 GQA、用不用滑动窗口……与其每种各写一遍完整注意力，
+不如把"公共骨架 + 可选差异"做成几个重载，让各架构按需挑用。这又是一处"把差异收进可选项、把共性沉淀成积木"的体现。</p>
+<p>图输入被做成一族类（<span class="mono">llm_graph_input_*</span> 都派生自一个共同接口）也有讲究：不同的输入有不同的"填法"——词向量要按 token id 查表、位置要按当前进度生成、KV 掩码要按因果规则算。
+把每种输入的"怎么填"封进各自的类，执行前统一调一遍，图就准备好了。这让"图里需要哪些外部输入"变得可扩展、可组合。</p>
+
+<h2>建图与执行，泾渭分明</h2>
+<p>最后强调这一课最重要的一点：<span class="mono">build_graph</span> 只<strong>建</strong>、不<strong>算</strong>。它把算子的 op 和 src 填好（L09 的惰性建图），最后 <span class="mono">get_gf()</span> 交出一张 <span class="mono">ggml_cgraph</span>，至于真正逐节点执行，是 L10 后端的事。</p>
+<p>这种"建图归建图、执行归执行"的分离，回报是巨大的：同一张图，能原封不动地跑在 CPU、CUDA、Metal 等天差地别的硬件上（L10 的后端调度），上层的模型逻辑只写一遍。也正因为建图不碰具体计算，
+换一个后端、加一种新硬件，都<strong>不用动建图代码</strong>。L16 负责"拼出正确的图"，L10 负责"在某种硬件上把图算快"，两者各司其职，合起来才是完整的推理。</p>
+<p>正因为建图只产出"结构"、不含数据，这张图在很多情况下还能被<strong>缓存复用</strong>：连续的 decode 步骤，每步都是"一个新 token"，图的结构一模一样，于是引擎可以复用上一张图的骨架、只换喂进去的输入，省下反复搭图的开销。这是"惰性建图 + 结构与数据分离"带来的又一个红利。</p>
+<p>把这一课放回整个推理循环里看：每生成一个 token，<span class="mono">llama_decode</span>（L17）大致就是"<strong>建图（L16）-&gt; 后端执行（L10）-&gt; 得到 logits -&gt; 采样（L21）出下一个 token</strong>"这么一圈。L16 是这圈里"把模型变成可算的图"那一环。
+理解了它，你就把"加载好的模型"和"真正跑起来的推理"接上了。下一课，我们就进到 <span class="mono">llama_context</span>，看这一圈是怎么转起来的。</p>
+<p>所以这一课真正要带走的，是一个<strong>心智模型</strong>：模型推理 = 按架构把权重拼成一张计算图（L16）+ 在某后端上执行这张图（L10）。拼图的逻辑写一遍、能跑遍所有硬件；这就是 llama.cpp 既轻便又通用的根。把这句话记牢，第四部分后面几课其实都是在它的脉络上继续展开。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么每个架构要单独一个 src/models/&lt;arch&gt;.cpp？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>为了<strong>差异隔离</strong>。各架构的前向流程多少有别：有的注意力带偏置、有的 FFN 用不同激活、有的层间还插了别的东西。把每种架构的"拼法"放进各自的文件，改一个不会波及另一个，读起来也清爽——一个文件就是一种模型的完整前向。</p>
+    <p>而真正干活的积木（<span class="mono">build_attn</span> 等）是<strong>共享</strong>的，住在基类 <span class="mono">llm_graph_context</span> 里。所以这些架构文件大多很短：无非是"按这个架构的顺序，调几次共享积木、喂上对的权重"。共性进基类、差异进文件，是这套设计能容纳几十种架构还不乱的关键。</p>
+    <p>这也呼应了 L15：加一个新架构，建图这步往往就是<strong>新写一个不长的 <span class="mono">src/models/&lt;arch&gt;.cpp</span></strong>，复用现成积木。只有遇到真正新颖的结构，才需要往基类加一两个新积木、甚至往 ggml 加一两个新算子（L11）。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> build_attn 内部到底做了什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>它把 L04 的注意力数学，翻译成 L11 的一串算子。大致是：先用三次 <span class="mono">mul_mat</span> 把输入投影成 Q、K、V；给 Q、K 施加 <span class="mono">rope</span> 注入位置；把这一步的 K、V <strong>写进 KV cache</strong>、再把历史的 K、V <strong>读回来</strong>（L19）。</p>
+    <p>接着算注意力分数（Q 和 K 的矩阵乘）、用 <span class="mono">soft_max_ext</span> 加因果掩码并归一成权重、再用一次 <span class="mono">mul_mat</span> 按权重把 V 汇总；最后一次输出投影。一个 <span class="mono">build_attn</span> 调用，就这样把<strong>一整套注意力</strong>拼成了一段子图。</p>
+    <p>所以你之前学的东西在这里全用上了：L04 的数学是蓝本、L11 的算子是砖块、L19 的 KV cache 是让它每步只算新 token 的关键。<span class="mono">build_attn</span> 就是把这三者按正确顺序焊到一起的那个"组装工"。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 建图和执行是怎么彻底分开的？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>靠 L09 的惰性建图。<span class="mono">build_*</span> 这些积木<strong>不计算</strong>，只创建张量、填好它的 <span class="mono">op</span>（我是哪种算子）和 <span class="mono">src</span>（我的输入是谁）。一圈拼下来，得到的是一张<strong>只描述了"算什么、依赖谁"的图</strong>，里面一个数都还没算。</p>
+    <p>然后 <span class="mono">get_gf()</span> 把这张 <span class="mono">ggml_cgraph</span> 交出去，由 L10 的后端按拓扑序逐节点真正计算。建图侧只关心"逻辑结构对不对"，执行侧只关心"在这块硬件上怎么算得快"——两边的关注点完全分开。</p>
+    <p>好处是<strong>解耦带来的自由</strong>：模型逻辑（建图）写一遍，就能跑在所有后端上；要支持新硬件，只在执行侧加一个后端，建图代码一行不改。这正是 ggml/llama 这套分层最值钱的地方，也是它能同时跑在你的笔记本 CPU 和数据中心 GPU 上的根本原因。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama_model::build_graph</span> 派发到每架构自己的 <span class="mono">build_arch_graph</span>（<span class="mono">src/models/&lt;arch&gt;.cpp</span>），返回一张 <span class="mono">ggml_cgraph</span>（经 <span class="mono">res-&gt;get_gf()</span>）。</li>
+    <li>积木 <span class="mono">build_norm</span>/<span class="mono">build_attn</span>/<span class="mono">build_ffn</span> 是基类 <span class="mono">llm_graph_context</span> 的方法，被各架构复用。</li>
+    <li>一层 = norm -&gt; attn（QKV+rope+KV+softmax）-&gt; 残差 -&gt; norm -&gt; ffn -&gt; 残差；循环 <span class="mono">n_layer()</span> 层，按名字取权重（L15）。</li>
+    <li>图输入 <span class="mono">llm_graph_input_*</span> 把词向量/位置/KV 接进图，是图的"叶子"（L09）。</li>
+    <li><strong>只建不算</strong>（L09 惰性）：<span class="mono">build_graph</span> 拼出图，L10 后端才执行；同一图可换后端跑。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"每种架构怎么前向"写成一份 <span class="mono">src/models/&lt;arch&gt;.cpp</span>，把"怎么算注意力/前馈"沉淀成 <span class="mono">llm_graph_context</span> 的可复用积木——于是新架构只是"用标准件换个拼法"。更妙的是，底层 ggml（L08-L12）<strong>根本不知道</strong>上面跑的是 llama 还是 qwen，
+  它只看到一张普通的计算图、照样执行（L10）。模型的多样性收在建图层、计算的通用性留在 ggml 层——这道干净的分界，正是 llama.cpp 既能海纳百川、又能一套引擎跑天下的底层秘密。下一课，我们看这张图被装进 <span class="mono">llama_context</span> 后，怎么真正跑起一步推理。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+With the loaded weights (L14) and the architecture hyperparameters (L15), we can finally <strong>wire them into a forward compute graph that actually computes</strong>. This lesson covers <span class="mono">llama-graph</span>: it provides "standard parts" like <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>,
+each architecture decides "in what order to assemble them" in <span class="mono">src/models/&lt;arch&gt;.cpp</span>, and the result is a <span class="mono">ggml_cgraph</span> from Part 3 (L09).
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This lesson is the <strong>pivot connecting both sides</strong>: above (L14/L15) the model became a set of tensors "with names, shapes, and sizes"; below (L09/L10/L11) is how ggml builds graphs, executes, and computes each operator. This lesson is the bridge joining the two -
+it translates "a concrete model" into "a ggml compute graph". Read it and you see how llama.cpp turns a pile of weights into something "runnable".</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Building the graph is like assembling a model from <strong>standard parts</strong> per the blueprint (L15 architecture): <span class="mono">build_attn</span> (one attention set), <span class="mono">build_ffn</span> (one feed-forward set), <span class="mono">build_norm</span> (one normalization) are the prefab parts;
+  <span class="mono">src/models/&lt;arch&gt;.cpp</span> is "the assembly manual for this kind of building", saying in what order and with which weights to assemble them. And what comes out is <strong>not a result but a graph waiting to run</strong> - like building not a powered circuit but a circuit diagram; actually powering it (computing) is L10's job.
+</div>
+
+<h2>Who builds the graph: starting from build_graph</h2>
+<p>The main entry for graph-building is <span class="mono">llama_model::build_graph</span>. It is itself thin, doing mainly one thing: <strong>dispatching the work to the current architecture</strong>. Because different architectures (llama, qwen2...) have different forward flows, the real graph-building logic lives in each architecture's <strong>own file</strong> <span class="mono">src/models/&lt;arch&gt;.cpp</span>.</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_model::build_graph</div><div class="nd">main entry (thin)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">build_arch_graph</div><div class="nd">virtual -&gt; src/models/&lt;arch&gt;.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llm_graph_context blocks</div><div class="nd">build_attn / build_ffn ...</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">get_gf()</div><div class="nd">= ggml_cgraph(L09)</div></div>
+</div>
+<p>In source (simplified from <span class="mono">src/llama-model.cpp</span>):</p>
+<pre class="code"><span class="cm">// simplified from src/llama-model.cpp</span>
+ggml_cgraph * llama_model::<span class="fn">build_graph</span>(<span class="kw">const</span> llm_graph_params &amp; p) <span class="kw">const</span> {
+    <span class="kw">auto</span> llm = <span class="fn">build_arch_graph</span>(p);   <span class="cm">// virtual: dispatch to src/models/&lt;arch&gt;.cpp</span>
+    <span class="cm">// ... build_pooling / build_dense_out ...</span>
+    <span class="kw">return</span> llm-&gt;res-&gt;<span class="fn">get_gf</span>();        <span class="cm">// ggml_cgraph(L09)</span>
+}</pre>
+<p>Two layers of abstraction to separate here: <span class="mono">build_graph</span> is the <strong>stable main entry</strong> (whatever the architecture, outside code calls it); <span class="mono">build_arch_graph</span> is a <strong>virtual function</strong> each architecture overrides. This continues L15's table-driven idea -
+"which architecture" decides which graph code runs. And every architecture's graph-building is based on a shared base class <span class="mono">llm_graph_context</span>, which carries the reusable block methods <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>.</p>
+<p>Why split graph-building into files per architecture rather than one giant <span class="mono">switch</span>? Because each architecture's forward differs somewhat; writing them separately keeps each clean and non-interfering, while the <strong>commonality</strong> (how attention/FFN/norm are built) is lifted into reusable base-class blocks.
+This "differences per file, commonality in the base" organization means adding a new architecture is basically writing one new <span class="mono">src/models/&lt;arch&gt;.cpp</span> without touching others.</p>
+<p>Let us also clarify <span class="mono">build_graph</span>'s relation to ggml: it is <strong>not</strong> part of ggml, but the "assembly logic" the llama layer writes on top of ggml. ggml (L08-L11) provides tensors, operators, and graph-building primitives; <span class="mono">build_graph</span> uses these primitives to assemble a concrete graph by the transformer structure.
+So this lesson is essentially about "<strong>how to use ggml's building blocks to assemble a real large model</strong>".</p>
+<p>When is <span class="mono">build_graph</span> called? The answer is <strong>once per inference step</strong> - <span class="mono">llama_decode</span> (next lesson) builds this step's compute graph as its first act. Sounds costly: rebuild a graph for every generated token?
+Not really - the graph's "structure" is light (just a chain of operator declarations, no computation), so it builds fast; and for steps of the same shape the graph can be reused, no need to start from scratch each time.</p>
+<p>The <span class="mono">llm_graph_params</span> passed to <span class="mono">build_graph</span> carries the context needed to build this step's graph: which tokens this step processes (from L18's batch), the KV cache's current state, which backend, and so on. In other words, <span class="mono">build_graph</span> does not build out of thin air but <strong>builds just enough graph for "what this step computes"</strong>.
+This is why prefill (computing a whole prompt at once) and decode (one token at a time), though sharing the same graph code, build graphs of different sizes.</p>
+<p>That <span class="mono">build_pooling / build_dense_out</span> comment in the code is worth a mention: beyond the main N blocks, graph-building also appends some "wrap-up" steps as needed - pooling for embedding tasks, extra output layers for certain models. These are <strong>optional tails</strong>, usually unused in plain text generation, but they share the same graph framework, attached to the same graph by architecture and task.</p>
+
+<h2>How one transformer layer is built</h2>
+<p>The model's body is N identical transformer blocks stacked. See clearly how <strong>one layer</strong> is built and you understand the whole forward. A layer's skeleton is fixed: norm -&gt; attention -&gt; residual -&gt; norm -&gt; feed-forward -&gt; residual.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>build_norm</h4><p>RMSNorm the input, stabilizing values into a sane range (L11's normalization operator).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>build_attn</h4><p>A whole attention set: Q/K/V projection + rope position + read/write KV cache + softmax + output projection (L11/L04/L19).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>residual add</h4><p>Add the attention output back to the input (residual connection), letting information and gradients flow well.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>build_norm + build_ffn</h4><p>Normalize again, then the feed-forward network (gate/up/down, three matmuls, L11).</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>residual add</h4><p>Add the FFN output back, producing this layer's output, fed to the next layer.</p></div></div>
+</div>
+<p>Written as pseudocode, this skeleton is nearly the loop body in <span class="mono">src/models/llama.cpp</span>:</p>
+<pre class="code"><span class="cm"># pseudocode: one layer (mirrors the loop body in src/models/llama.cpp)</span>
+cur  = <span class="fn">build_norm</span>(inpL, attn_norm_w)            <span class="cm"># RMSNorm(L11)</span>
+cur  = <span class="fn">build_attn</span>(inp_attn, cur, wq,wk,wv,wo)    <span class="cm"># Q/K/V + rope + KV + softmax(L11/L04/L19)</span>
+inpL = cur + inpL                              <span class="cm"># residual</span>
+cur  = <span class="fn">build_norm</span>(inpL, ffn_norm_w)
+cur  = <span class="fn">build_ffn</span>(cur, w_gate, w_up, w_down)      <span class="cm"># feed-forward(L11 mul_mat)</span>
+inpL = cur + inpL                              <span class="cm"># residual -> next layer</span></pre>
+<p>Loop 0 to <span class="mono">n_layer()</span> (L15's accessor method), assembling this set per layer, fetching weights by L15's naming convention (<span class="mono">blk.il.attn_q.weight</span> etc.). As you can see, "building the graph" at this level is very mechanical - feeding fixed blocks in a fixed order with each layer's own weights, chaining a long run of operators.</p>
+<p>This nicely closes the last three lessons: L14 prepared tensors by name, L15 said which weights each layer takes and how many layers, and here L16 actually assembles them by the transformer structure. The three together answer "<strong>how a model goes from a pile of weights to a runnable graph</strong>".</p>
+<p>Those two <strong>residual adds</strong> (cur + inpL) look trivial but are one key to deep transformers training and working: they let each layer learn only an "increment" on top of the "original input", so information and gradients flow straight down this shortcut without decaying away across dozens of layers. At graph time it is just an ordinary ggml add operator, but its meaning is far more than one addition.</p>
+<p>The whole forward is not only repeated layers. At the <strong>start</strong>, one step looks up token ids into token vectors (the <span class="mono">token_embd</span> table, one of the graph inputs); at the <strong>end</strong>, after the last layer, there is an <span class="mono">output_norm</span> and a projection to vocab size <span class="mono">output</span> (computing logits, L17).
+So the full graph is "input embedding -&gt; N blocks -&gt; output norm -&gt; project to logits", with those N middle layers being what we focus on dissecting.</p>
+<p>Worth noting the relation between prefill and decode at graph time: both use the <strong>same</strong> graph code, differing only in the batch fed in (L18) - prefill feeds a whole prompt's many tokens at once, decode feeds one new token at a time. The graph's "shape" varies with token count, but its "structure" (how each layer is assembled) is identical.
+This is the benefit of unified graph-building: one logic handles both "passing the prompt through once" and "generating word by word afterward".</p>
+<p>One more thing: <strong>no concrete numbers appear</strong> in the graph code. <span class="mono">build_attn</span>, <span class="mono">build_ffn</span> operate entirely on "not-yet-computed tensors" - they merely say "matmul this weight with that input, call the result cur". The actual floats are filled in only when L10 executes.
+So reading graph code, what you read is <strong>the shape of the data flow</strong>, not the data itself - the most intuitive feel of L09's lazy build.</p>
+<p>Step back and this whole forward graph is really a <strong>directed acyclic graph</strong> (DAG): token vectors flow in from input leaves, transform through layer after layer of block operators, and finally flow to logits. Each operator is a node, arrows mean "who feeds whom".
+L09 covered the essence of such graphs; this lesson just lets you see that a real large model's forward, landed on a graph, is exactly such a clearly-structured, layer-stacked DAG.</p>
+
+<h2>Reusable blocks and graph inputs</h2>
+<p>Underpinning this assembly is a set of <strong>reusable blocks</strong> and <strong>graph inputs</strong> on <span class="mono">llm_graph_context</span>. The blocks are methods like <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>; the graph inputs are the entry points that wire "external data" into the graph.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) · pos (positions) · attn_kv (KV cache)</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">blocks</span><span class="name">build_attn / build_ffn / build_norm</span></div><div class="ld">assemble weights + inputs into a subgraph, internally L11 operators</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">product</span><span class="name">llm_graph_result -&gt; ggml_cgraph</span></div><div class="ld">all blocks chained; get_gf() hands out the final graph(L09)</div></div>
+</div>
+<p>Graph inputs (<span class="mono">llm_graph_input_*</span>) are an easily-overlooked but crucial concept. A compute graph needs more than "operators" - it needs "entry points": where token vectors enter, where each token's position comes from, where the KV cache attaches.
+These are the input nodes built by <span class="mono">build_inp_embd</span>/<span class="mono">build_inp_pos</span> and friends. They are the graph's "leaves" (the leafs from L09); each inference step fills new data into them, and the graph computes a new result.</p>
+<p>And everything the blocks produce are the ggml tensors from L11 (outputs of operators like <span class="mono">mul_mat</span>, <span class="mono">soft_max_ext</span>). One <span class="mono">build_attn</span> call is internally a small subgraph of a dozen-odd ggml operators chained by the attention math (L04).
+Connect many such subgraphs end to end and you grow the model's entire forward graph - exactly L09's "operators chained into a graph", only here from the llama layer, organized by the transformer structure.</p>
+<p>A glance inside <span class="mono">build_ffn</span>: modern llama-style models' feed-forward is not a simple "up then down" but <strong>SwiGLU</strong>-style - the <span class="mono">gate</span> and <span class="mono">up</span> matrices each project the input, the <span class="mono">gate</span> path passes an activation and is multiplied element-wise with <span class="mono">up</span>, then <span class="mono">down</span> projects back.
+This is why one FFN layer has three weight matrices gate/up/down (seen in L15's naming convention). <span class="mono">build_ffn</span> wraps this fixed routine, done in one line at graph time.</p>
+<p>More on graph inputs and "leaves". L09 covered two kinds of nodes: computed <strong>nodes</strong> and non-computed, only-read <strong>leaves</strong>. Weights are leaves (prepared at load, L14), and graph inputs (token vectors, positions) are leaves too - except their data is <strong>filled fresh each step</strong>.
+Graph-building reserves these leaves' positions, execution fills in this step's data, and the same graph computes different results.</p>
+<p>You will notice <span class="mono">build_attn</span> has <strong>several overloads</strong>. Why? Because attention has many variants: with or without KV cache (some prefill paths skip it, decode always uses it), standard multi-head or GQA, with or without a sliding window... Rather than write a full attention for each,
+"a common skeleton + optional differences" is made into a few overloads each architecture picks from. Another instance of "fold differences into options, distill commonality into blocks".</p>
+<p>Making graph inputs a family of classes (the <span class="mono">llm_graph_input_*</span> all derive from a common interface) is deliberate too: different inputs have different "fill methods" - token vectors look up by token id, positions are generated by current progress, the KV mask is computed by the causal rule.
+Wrapping each input's "how to fill" into its own class, called uniformly before execution, readies the graph. This makes "which external inputs the graph needs" extensible and composable.</p>
+
+<h2>Build and execute, sharply separated</h2>
+<p>Finally, this lesson's most important point: <span class="mono">build_graph</span> only <strong>builds</strong>, never <strong>computes</strong>. It fills in the operators' op and src (L09's lazy build), then <span class="mono">get_gf()</span> hands out a <span class="mono">ggml_cgraph</span>; the actual node-by-node execution is the L10 backend's job.</p>
+<p>This "build is build, execute is execute" separation pays off enormously: the same graph runs unchanged on wildly different hardware - CPU, CUDA, Metal (L10's backend scheduling) - with the upper model logic written once. And precisely because graph-building touches no concrete computation,
+switching backends or adding new hardware needs <strong>no change to graph-building code</strong>. L16 "assembles the correct graph", L10 "computes the graph fast on some hardware" - each to its job, together making complete inference.</p>
+<p>Precisely because graph-building yields only "structure", not data, this graph can in many cases be <strong>cached and reused</strong>: in consecutive decode steps each is "one new token", the graph's structure is identical, so the engine can reuse the previous graph's skeleton and only swap the inputs, saving the cost of rebuilding. Another dividend of "lazy build + structure-data separation".</p>
+<p>Put this lesson back into the whole inference loop: per generated token, <span class="mono">llama_decode</span> (L17) is roughly the round "<strong>build graph (L16) -&gt; backend execute (L10) -&gt; get logits -&gt; sample (L21) the next token</strong>". L16 is the "turn the model into a computable graph" link in that round.
+Understand it and you have joined "the loaded model" to "inference actually running". Next lesson, we enter <span class="mono">llama_context</span> to see how this round turns.</p>
+<p>So what to truly take from this lesson is a <strong>mental model</strong>: model inference = assemble weights into a compute graph by architecture (L16) + execute that graph on some backend (L10). The assembly logic, written once, runs across all hardware; that is the root of llama.cpp being both lightweight and universal. Hold onto this, and the rest of Part 4 really unfolds along its thread.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why a separate src/models/&lt;arch&gt;.cpp per architecture? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>For <strong>difference isolation</strong>. Architectures' forward flows differ somewhat: some attentions carry a bias, some FFNs use a different activation, some insert other things between layers. Putting each architecture's "assembly" in its own file means changing one does not ripple to another, and it reads cleanly - one file is one model's complete forward.</p>
+    <p>Meanwhile the blocks doing the real work (<span class="mono">build_attn</span> etc.) are <strong>shared</strong>, living in the base class <span class="mono">llm_graph_context</span>. So these architecture files are mostly short: just "in this architecture's order, call a few shared blocks and feed the right weights". Commonality in the base, differences in files, is the key to hosting dozens of architectures without chaos.</p>
+    <p>This also echoes L15: adding a new architecture, the graph-building step is usually <strong>writing one not-long <span class="mono">src/models/&lt;arch&gt;.cpp</span></strong>, reusing existing blocks. Only a truly novel structure needs one or two new blocks in the base, or even one or two new ggml operators (L11).</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What does build_attn actually do inside? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>It translates L04's attention math into a chain of L11 operators. Roughly: three <span class="mono">mul_mat</span>s project the input into Q, K, V; <span class="mono">rope</span> injects position into Q, K; this step's K, V are <strong>written into the KV cache</strong>, and the historical K, V are <strong>read back</strong> (L19).</p>
+    <p>Then compute attention scores (Q-by-K matmul), <span class="mono">soft_max_ext</span> adds the causal mask and normalizes to weights, another <span class="mono">mul_mat</span> weight-sums V; finally an output projection. One <span class="mono">build_attn</span> call thus assembles a <strong>whole attention set</strong> into a subgraph.</p>
+    <p>So everything you learned earlier is used here: L04's math is the blueprint, L11's operators are the bricks, L19's KV cache is what lets each step compute only the new token. <span class="mono">build_attn</span> is the "assembler" welding these three together in the right order.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> How are build and execute fully separated? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Via L09's lazy build. The <span class="mono">build_*</span> blocks <strong>do not compute</strong>; they only create a tensor and fill its <span class="mono">op</span> (which operator I am) and <span class="mono">src</span> (who my inputs are). One pass of assembly yields a graph that <strong>only describes "what to compute and what depends on what"</strong>, with not a number computed yet.</p>
+    <p>Then <span class="mono">get_gf()</span> hands out this <span class="mono">ggml_cgraph</span>, and the L10 backend computes it node by node in topological order. The build side cares only about "is the logical structure correct"; the execute side only about "how to compute fast on this hardware" - their concerns fully separated.</p>
+    <p>The payoff is <strong>the freedom of decoupling</strong>: write the model logic (graph) once, and it runs on all backends; to support new hardware, just add a backend on the execute side, with not one line of graph code changed. This is the most valuable part of the ggml/llama layering, and the root reason it runs on your laptop CPU and a datacenter GPU alike.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama_model::build_graph</span> dispatches to each architecture's <span class="mono">build_arch_graph</span> (<span class="mono">src/models/&lt;arch&gt;.cpp</span>), returning a <span class="mono">ggml_cgraph</span> (via <span class="mono">res-&gt;get_gf()</span>).</li>
+    <li>Blocks <span class="mono">build_norm</span>/<span class="mono">build_attn</span>/<span class="mono">build_ffn</span> are methods on the base <span class="mono">llm_graph_context</span>, reused by every architecture.</li>
+    <li>One layer = norm -&gt; attn (QKV+rope+KV+softmax) -&gt; residual -&gt; norm -&gt; ffn -&gt; residual; looped <span class="mono">n_layer()</span> times, fetching weights by name (L15).</li>
+    <li>Graph inputs <span class="mono">llm_graph_input_*</span> wire token vectors/positions/KV into the graph as its "leaves" (L09).</li>
+    <li><strong>Build only, no compute</strong> (L09 lazy): <span class="mono">build_graph</span> assembles the graph, the L10 backend executes; the same graph runs on any backend.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Writing "how each architecture does its forward" as a single <span class="mono">src/models/&lt;arch&gt;.cpp</span>, and distilling "how to compute attention/FFN" into <span class="mono">llm_graph_context</span>'s reusable blocks - so a new architecture is just "a different arrangement of standard parts". Better still, the underlying ggml (L08-L12) <strong>has no idea</strong> whether llama or qwen runs above;
+  it sees just an ordinary compute graph and executes it (L10). Model diversity gathered in the graph layer, computational generality kept in the ggml layer - this clean boundary is the underlying secret to llama.cpp taking in all rivers while one engine runs them all. Next lesson, we see how this graph, packed into a <span class="mono">llama_context</span>, actually runs one inference step.
+</div>
+""",
+}
+
+
