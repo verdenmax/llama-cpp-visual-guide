@@ -1004,6 +1004,73 @@ QUIZZES = {
             },
         ],
     },
+    "15-architecture-hparams.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GGUF 里哪个 KV 决定按哪套架构建图？",
+                    "en": "Which GGUF KV decides which architecture's graph to build?",
+                },
+                "opts": [
+                    {"zh": "general.architecture（如 \"llama\"、\"qwen2\"）", "en": "general.architecture (e.g. \"llama\", \"qwen2\")"},
+                    {"zh": "general.name", "en": "general.name"},
+                    {"zh": "general.file_type", "en": "general.file_type"},
+                    {"zh": "version", "en": "version"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "loader 读出 general.architecture 字符串，在 LLM_ARCH_NAMES 里查得 LLM_ARCH_LLAMA 等枚举；这个枚举决定后续用哪套 KV/张量约定与建图函数（L16）。",
+                    "en": "The loader reads the general.architecture string and looks it up in LLM_ARCH_NAMES to get an enum like LLM_ARCH_LLAMA; that enum decides the KV/tensor conventions and graph builder used (L16).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 hparams 把头数写成 n_head(il) 带层号？",
+                    "en": "Why does hparams write head count as n_head(il) with a layer index?",
+                },
+                "opts": [
+                    {
+                        "zh": "不同层的头数/注意力类型可能不同（GQA、滑窗），按层取最通用",
+                        "en": "different layers may have different head counts/attention types (GQA, sliding-window), so per-layer is most general",
+                    },
+                    {"zh": "写错了，应该是字段", "en": "it is a typo; it should be a field"},
+                    {"zh": "为了让推理更快", "en": "to make inference faster"},
+                    {"zh": "随机决定的", "en": "decided at random"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "现代架构里各层注意力配置可能不同（GQA 让 KV 头少于 Q 头、混合架构逐层不同），所以头数按层存进 n_head_arr，n_head(il) 是按层取值的访问器方法（不是字段）。",
+                    "en": "In modern architectures per-layer attention configs can differ (GQA gives fewer KV than Q heads; hybrids differ by layer), so head counts are stored per layer in n_head_arr, and n_head(il) is an accessor method (not a field) fetching by layer.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "加载器怎么把文件里的张量对应到模型结构？",
+                    "en": "How does the loader map a file's tensors onto the model structure?",
+                },
+                "opts": [
+                    {
+                        "zh": "靠 LLM_TENSOR_NAMES 的命名约定（token_embd / blk.N.attn_q ...）按名字在 weights_map 里查",
+                        "en": "by the LLM_TENSOR_NAMES naming convention (token_embd / blk.N.attn_q ...), looking up weights_map by name",
+                    },
+                    {"zh": "按文件里的张量顺序", "en": "by the tensor order in the file"},
+                    {"zh": "按张量大小排序", "en": "by sorting on tensor size"},
+                    {"zh": "随机匹配", "en": "by random matching"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "张量名遵循 LLM_TENSOR_NAMES 模板（blk.%d 里填层号），由 LLM_TN 的 tn() 拼出；建图按名字去 weights_map 取权重。名字是稳定契约，跨工具、跨分片都不怕。",
+                    "en": "Tensor names follow LLM_TENSOR_NAMES templates (blk.%d filled with the layer index), built by LLM_TN's tn(); graph-building fetches weights from weights_map by name. A name is a stable contract, robust across tools and splits.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "llm_arch、llama_hparams、LLM_TENSOR_NAMES 三者各管什么？它们怎么合起来把“一堆张量”变成“一个具体可建图的模型”？",
+                "en": "What do llm_arch, llama_hparams, and LLM_TENSOR_NAMES each govern? How do they combine to turn 'a pile of tensors' into 'a concrete, graph-able model'?",
+            },
+        ],
+    },
 }
 
 

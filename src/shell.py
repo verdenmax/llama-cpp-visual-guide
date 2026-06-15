@@ -74,6 +74,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("14-model-loading.html", "模型加载", "Model loading",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("15-architecture-hparams.html", "架构与超参", "Architecture & hyperparameters",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -515,6 +517,8 @@ SUBTITLES = {
                             "magic/version; metadata KV; tensor info; alignment; mmap"),
     "14-model-loading.html": ("llama_model_loader · GGUF metadata/张量清单 · mmap · 分片",
                               "llama_model_loader; GGUF metadata/tensor map; mmap; splits"),
+    "15-architecture-hparams.html": ("llm_arch · llama_hparams · LLM_TENSOR_NAMES 命名约定",
+                                     "llm_arch; llama_hparams; LLM_TENSOR_NAMES naming"),
 }
 
 
