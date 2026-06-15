@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>05 · 张量是什么 / What is a tensor - llama.cpp 图解教程</title>
+<meta name="description" content="第二部分 · 前置基础｜张量是什么 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="05 · 张量是什么 / What is a tensor - llama.cpp 图解教程">
+<meta property="og:description" content="第二部分 · 前置基础｜张量是什么 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="05 · 张量是什么 / What is a tensor - llama.cpp 图解教程">
+<meta name="twitter:description" content="第二部分 · 前置基础｜张量是什么 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第二部分 · 前置基础</span><span class="lang-en">Part 2 · Foundations</span></span>
+    <span class="pill">05 / 07</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:71%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第二部分 · 前置基础</span><span class="lang-en">Part 2 · Foundations</span></div>
+    <h1><span class="lang-zh">张量是什么</span><span class="lang-en">What is a tensor</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+ggml 是 llama.cpp 的计算引擎，而在它眼里<strong>一切数据都是"张量"</strong>——权重、激活值、KV cache，全是张量。
+这一课把 <span class="mono">ggml_tensor</span> 这个结构体讲到"摸得着"：什么是 shape、什么是 stride、为什么 ggml 用"行优先"，
+以及为什么"转置一个张量"几乎不花钱。看懂这一层，后面所有计算图和算子的示意图你都能读懂；可以说，张量是读 ggml 源码的"<strong>第一块积木</strong>"。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把张量想成一排<strong>储物柜阵列</strong>：<span class="mono">ne[]</span> 告诉你"每排几个柜、一共几排"（形状），
+  <span class="mono">nb[]</span> 告诉你"从一个柜走到下一个、或跳到下一排，各要迈多少步"（步长，单位是字节），
+  <span class="mono">data</span> 则是这排柜子的<strong>起点地址</strong>。知道这三样，你就能算出任意一个柜子在哪。
+  而"<strong>柜子里装的是什么规格</strong>"（<span class="mono">type</span>）则决定每个格子占多大、怎么读。把"形状（柜子怎么排）"和"数据（柜子里的东西）"
+  分开记——这正是后面所有省内存、零拷贝把戏的根。
+</div>
+
+<h2>张量 = 形状 + 类型 + 一块连续内存</h2>
+<p>一个张量说白了就是"<strong>一块连续内存 + 一份怎么解释它的说明书</strong>"。说明书里有：数据<strong>类型</strong>
+（<span class="mono">type</span>，比如 F32、F16、Q4_0）、每个维度有<strong>多少元素</strong>（<span class="mono">ne[]</span>，ggml 最多 4 维），
+以及一个指向那块内存的指针 <span class="mono">data</span>。先看"形状"长什么样：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>形状 ne</b>：一个 ne=[4,3] 的张量 - ne[0]=4 是"一排 4 个"（最内维），ne[1]=3 是"共 3 排"</div>
+  <div class="cells"><span class="lab">第 0 排</span><span class="cell">a00</span><span class="cell">a01</span><span class="cell">a02</span><span class="cell">a03</span></div>
+  <div class="cells"><span class="lab">第 1 排</span><span class="cell">a10</span><span class="cell">a11</span><span class="cell">a12</span><span class="cell">a13</span></div>
+  <div class="cells"><span class="lab">第 2 排</span><span class="cell">a20</span><span class="cell">a21</span><span class="cell">a22</span><span class="cell">a23</span></div>
+</div>
+<p>顺便厘清"几维"这件事：<strong>0 维</strong>是一个标量（一个数），<strong>1 维</strong>是一个向量（一串数，比如一个词向量），
+<strong>2 维</strong>是一个矩阵（比如一层的权重），<strong>3 维、4 维</strong>则常见于"带批次、带多头"的中间结果。ggml 看 <span class="mono">ne[]</span>
+里实际大于 1 的维数来判断张量是几维；没用到的高维就填 1。所以当你看到 <span class="mono">ne=[4,3,1,1]</span> 时，它其实就是个 4×3 的二维张量。</p>
+<p>注意 ggml 的约定：<span class="mono">ne[0]</span> 是<strong>最内层、变化最快</strong>的维度（在内存里挨着摆），<span class="mono">ne[1]</span> 是"下一排"，
+以此类推。这和很多人习惯的"行 × 列"写法正好<strong>相反</strong>——后面有专门的深挖讲这个坑。把 <span class="mono">ggml_tensor</span>
+的核心字段摊开看，就这么几样：</p>
+<pre class="code"><span class="kw">struct</span> <span class="fn">ggml_tensor</span> {
+    <span class="kw">enum</span> ggml_type   type;           <span class="cm">// F32 / F16 / Q4_0 ...</span>
+    int64_t          ne[4];          <span class="cm">// #elements per dim (ne[0] = innermost)</span>
+    size_t           nb[4];          <span class="cm">// byte strides</span>
+    <span class="kw">enum</span> ggml_op     op;             <span class="cm">// how it was produced (graph node)</span>
+    <span class="kw">struct</span> ggml_tensor * src[...];    <span class="cm">// inputs (back-pointers)</span>
+    <span class="kw">struct</span> ggml_tensor * view_src;     <span class="cm">// set if this tensor is a view</span>
+    <span class="kw">void</span> *           data;           <span class="cm">// the actual bytes</span>
+    <span class="kw">char</span>             name[...];
+};  <span class="cm">// 简化自 ggml/include/ggml.h, GGML_MAX_DIMS = 4</span></pre>
+<p>这里有两组字段值得记住。<span class="mono">ne</span> / <span class="mono">nb</span> / <span class="mono">type</span> / <span class="mono">data</span>
+描述"<strong>这块数据长什么样、在哪</strong>"；而 <span class="mono">op</span> / <span class="mono">src</span> 描述"<strong>它是怎么算出来的</strong>"——
+<span class="mono">op</span> 是产生它的算子（比如矩阵乘），<span class="mono">src</span> 是指向输入张量的反向指针。后面这组正是 ggml
+"<strong>先建计算图、再执行</strong>"的关键：每个张量都记得自己的来历，把它们顺着 <span class="mono">src</span> 串起来，就是一张计算图
+（课 03 提过、第三部分会展开）。另外别忽略 <span class="mono">type</span>：同样 1000 个元素，F32 占 4000 字节、Q4_0 只占 500 多字节——
+<strong>类型直接决定了这块内存有多大</strong>，这也是量化能省显存的根。</p>
+<p>抽象归抽象，张量到底用来装什么？在 llama.cpp 里，<strong>模型的每个权重矩阵</strong>是张量（比如词嵌入表是一个
+<span class="mono">[n_embd, n_vocab]</span> 的大张量、每层的注意力与 FFN 权重也都是张量），<strong>前向过程中流动的激活值</strong>是张量，
+连 <strong>KV cache</strong> 里存的那些 K 和 V 也是张量。可以说，一次推理从头到尾，就是<strong>一堆张量按计算图被算来算去</strong>。
+正因为如此，把"张量"这个抽象设计得又轻又灵活，对整个引擎的效率至关重要。</p>
+<p>再说说 <span class="mono">type</span>。ggml 支持一长串数据类型：全精度的 <span class="mono">F32</span>、半精度的 <span class="mono">F16</span> /
+<span class="mono">BF16</span>，以及一大家子<strong>量化类型</strong>（<span class="mono">Q4_0</span>、<span class="mono">Q8_0</span>、
+<span class="mono">Q4_K</span> 等等，下一课专门讲）。同一个张量结构、同一套 ne/nb 逻辑，能装下这么多种类型，靠的就是用 <span class="mono">type</span>
+这一个字段统一描述"每个元素（或每块）多少字节、怎么解释"。这种"<strong>结构不变、类型可换</strong>"的设计，让量化能<strong>无缝接进</strong>
+已有的张量与算子体系，而不必为每种精度各写一套。也正因如此，换个量化等级（比如从 <span class="mono">Q4_0</span> 换到 <span class="mono">Q5_K</span>）
+对上层代码几乎是透明的——变的只是 <span class="mono">type</span> 和每块的字节数，ne/nb 的那套逻辑原封不动。</p>
+<p>张量从哪来？在 ggml 里，你先开一个 <span class="mono">ggml_context</span>（一个内存池），再用 <span class="mono">ggml_new_tensor_2d</span>
+这类函数在池子里"<strong>登记</strong>"一个张量——它会按 type 和 ne 算好需要多少字节、把 nb 填好。值得注意的是：<strong>建张量时通常并不立刻
+搬运那一大块数据</strong>，很多时候只是先把"形状说明书"建好（这正配合了 ggml 先建图、后执行的风格），真正的内存分配与计算留到后面统一来做。
+第三部分会专门讲 <span class="mono">ggml_context</span> 与这套"先描述、后执行"的内存管理。</p>
+<p>有人可能会问：装个多维数组，直接用 C++ 的 <span class="mono">std::vector</span> 或裸数组不就行了，何必单独造一个
+<span class="mono">ggml_tensor</span>？因为 ggml 要的远不止"存一堆数"：它要能<strong>把运算描述成图</strong>（靠 op/src）、要能
+<strong>让数据躺在不同后端的内存上</strong>（靠 buffer）、要能<strong>统一容纳量化等多种类型</strong>（靠 type 和按块的 nb）、还要能
+<strong>零拷贝地变形</strong>（靠 ne/nb 与 view_src）。这些需求叠在一起，才有了这个看似简单、其实精心设计的结构体——它是整个引擎的"原子"。</p>
+
+<h2>行优先与 stride：nb[] 是怎么算的</h2>
+<p>内存其实是<strong>一维</strong>的（一长条字节），可张量是多维的，把多维"压平"到一维靠的就是 <strong>stride（步长）</strong>。
+ggml 用 <span class="mono">nb[i]</span> 记录"<strong>第 i 维每加 1，要在内存里跳过多少字节</strong>"。ggml 是<strong>行优先</strong>的：
+<span class="mono">ne[0]</span> 那一维在内存里连续摆放、步长最小。看一个 ne=[3,2]（每排 3 个、共 2 排）的 F32 张量是怎么躺在内存里的：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>行优先内存布局</b>：在内存里是一条连续字节流，先摆满第 0 排，紧接着第 1 排（数字是字节偏移）</div>
+  <div class="cells"><span class="lab">元素</span><span class="cell">a00</span><span class="cell">a01</span><span class="cell">a02</span><span class="cell hl">a10</span><span class="cell">a11</span><span class="cell">a12</span></div>
+  <div class="cells"><span class="lab">偏移</span><span class="cell dim">0</span><span class="cell dim">4</span><span class="cell dim">8</span><span class="cell dim">12</span><span class="cell dim">16</span><span class="cell dim">20</span></div>
+</div>
+<p>看这条字节流就懂了：同一排里相邻元素隔 <strong>4 字节</strong>（一个 F32），所以 <span class="mono">nb[0]=4</span>；从第 0 排跳到第 1 排
+（高亮那个 a10）要跨过<strong>整整一排 3 个元素 = 12 字节</strong>，所以 <span class="mono">nb[1]=12</span>。这套规则写成公式，就藏在
+<span class="mono">ggml.h</span> 的注释里：<span class="mono">nb[0]=ggml_type_size(type)</span>（一个元素多少字节）、
+<span class="mono">nb[1]=nb[0]*(ne[0]/ggml_blck_size(type))</span>（跨一整排的字节，普通类型就是"每元素字节 × 一排元素数"）、
+再往上 <span class="mono">nb[i]=nb[i-1]*ne[i-1]</span>（严格说公式里还有一个"对齐填充"项，连续、无填充的张量这一项为 0，这里略去）。于是给任意一个多维下标，把它和 <span class="mono">nb</span> 点乘一下，就得到字节偏移：</p>
+<div class="flow">
+  <div class="node"><div class="nt">多维下标</div><div class="nd">(i0, i1, i2, i3)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">点乘步长</div><div class="nd">Σ i_k × nb[k]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">字节偏移</div><div class="nd">offset</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">取到元素</div><div class="nd">data + offset</div></div>
+</div>
+<pre class="code"><span class="cm"># 多维下标 (i0, i1, i2, i3) -> 内存里的字节偏移</span>
+offset = i0*nb[0] + i1*nb[1] + i2*nb[2] + i3*nb[3]
+ptr    = (<span class="kw">char</span>*)tensor-&gt;data + offset   <span class="cm"># 就是这个元素的地址</span></pre>
+<p>为什么是 <strong>4 维</strong>（<span class="mono">GGML_MAX_DIMS = 4</span>）？因为推理里的张量基本不超过 4 维——典型的就像
+"批次 × 序列 × 头数 × 每头维度"这种组合，4 维足够覆盖；用一个<strong>定长</strong>的小数组存 ne/nb，既简单又快，不必动态分配。
+还有一个容易忽略的点：<span class="mono">data</span> 指向的内存<strong>不一定在 CPU 上</strong>——它可能在 GPU 显存里，张量另有一个
+<span class="mono">buffer</span> 字段记录"这块数据归哪个后端管"，这正好呼应课 07 要讲的多后端（同一个张量结构，数据可以躺在不同硬件上）。</p>
+<p>把前面的公式用一个具体例子走一遍，印象会更深。还用上面那张内存图里的 <span class="mono">ne=[3,2]</span> 的 F32 张量：每个元素 4 字节，于是
+<span class="mono">nb[0]=4</span>；跨一整排要越过 3 个元素，于是 <span class="mono">nb[1]=4×3=12</span>。想取第 1 排第 2 个元素（下标
+<span class="mono">i1=1, i0=2</span>，从 0 数起，也就是图里的 a12），它的字节偏移就是 <span class="mono">1×nb[1] + 2×nb[0] = 12 + 8 = 20</span>——
+正好是内存图里 a12 底下标的那个 20。整块张量一共 <span class="mono">3×2×4 = 24</span> 字节。你看，<strong>只要有 ne、nb 和 data，任意一个元素的地址
+都能一步算出来</strong>，这就是 stride 的全部威力；至于 <span class="mono">ne=[4,3]</span> 之类的别的形状，留给本课末尾的思考题自己算一遍。</p>
+<p>反过来，知道了字节布局，你也就明白了<strong>为什么"按行遍历"通常比"按列遍历"快</strong>：顺着 <span class="mono">ne[0]</span>（行内）走，
+访问的是内存里<strong>连续相邻</strong>的字节，对 CPU 缓存最友好；而按高维跳着走，每次都跨一大步，更容易频繁缺失缓存、拖慢速度。
+很多算子实现都刻意顺着连续维来安排循环，正是这个道理——<strong>布局决定性能</strong>，这条直觉在后面看内核实现时还会反复用到。</p>
+
+<h2>view / 转置为什么不拷贝数据</h2>
+<p>现在来看 ggml 一个非常"省"的设计。既然"<strong>形状（ne/nb）</strong>"和"<strong>数据（data）</strong>"是分开存的，那么很多"改变形状"
+的操作，<strong>根本不用动数据</strong>，只要改几个数字。最典型的就是<strong>转置</strong>：把一个 [行, 列] 的矩阵转成 [列, 行]，ggml 只是
+<strong>交换 ne[0] 与 ne[1]、同时交换 nb[0] 与 nb[1]</strong>，<span class="mono">data</span> 一个字节都不搬：</p>
+<div class="cols">
+  <div class="col"><h4>原张量</h4><p><span class="mono">ne=[3,2]</span>，<span class="mono">nb=[4,12]</span><br>data -&gt; 一块真实内存</p></div>
+  <div class="col"><h4>转置后（一个 view）</h4><p><span class="mono">ne=[2,3]</span>，<span class="mono">nb=[12,4]</span><br>view_src -&gt; 指回原张量，data 不变</p></div>
+</div>
+<p>像 reshape、转置、切片、广播这类操作，ggml 大多用<strong>视图（view）</strong>实现：新张量复用<strong>同一块 data</strong>，只是带上不同的
+<span class="mono">ne</span>/<span class="mono">nb</span> 和偏移，并用 <span class="mono">view_src</span> 记住"我是谁的视图"。好处显而易见：<strong>零拷贝、省内存、还快</strong>。
+代价是：视图常常变得<strong>不连续</strong>（<span class="mono">ggml_is_contiguous</span> 为假）——比如转置之后，沿 <span class="mono">ne[0]</span>
+方向走，在内存里就不再是挨着的了。有些算子要求输入必须连续，这时要先用 <span class="mono">ggml_cont</span> 把它"压实"成一块新的连续内存
+（注意：<strong>这一步才真的发生拷贝</strong>）。所以你会在 ggml 代码里看到不少 <span class="mono">ggml_cont</span> 的调用，它们就是在"连续性"和"零拷贝"
+之间做权衡。</p>
+<p>顺带提一个常见操作：<strong>广播（broadcast）</strong>。当两个形状不完全相同的张量要做逐元素运算（比如给每一行都加上同一个偏置向量），
+ggml 允许某些维度上"<strong>一个元素当很多元素用</strong>"——靠的还是 stride 的小把戏：把那一维的 <span class="mono">nb</span> 设成 0，下标怎么变、
+地址都不动，于是同一个值被反复读取，看起来就像"复制"了一遍，实际上<strong>一个字节都没多占</strong>。这又是一次"改 nb 而不搬 data"的典型，
+和 view、转置一脉相承。</p>
+<p>一个最常见的 reshape 例子：把形状 <span class="mono">[n_embd, n_tokens]</span> 的激活，按多头注意力的需要"摊"成
+<span class="mono">[head_dim, n_head, n_tokens]</span>——元素总数没变（<span class="mono">n_embd = head_dim × n_head</span>），数据也没搬，
+只是<strong>重新解释了 ne/nb</strong>，就把"一个大向量"看成了"若干个头各自的小向量"。课 04 说的多头注意力里，大量这种"同一块数据、换个形状看"的操作，
+靠的全是视图，几乎不产生额外拷贝。</p>
+<p>再比如<strong>切片</strong>：想从一大块张量里取出"第 k 层"或"第 h 个注意力头"那一小块，ggml 通常也不复制，而是<strong>算好一个起始偏移</strong>、
+配上裁剪过的 ne/nb，返回一个指回原数据的视图。所以在 ggml 代码里你会发现，"<strong>取一部分</strong>"和"<strong>换个形状看</strong>"在底层往往是
+同一种廉价操作——这套以视图为中心的玩法，是读懂后面计算图代码的一把钥匙。</p>
+<p>顺便说清"连续"到底指什么：一个张量<strong>连续</strong>，意思是它的元素在内存里就是<strong>紧挨着、按 ne[0]、ne[1]… 顺序一个不落地排</strong>的
+（也就是 nb 严格按前面的公式递推）。转置、某些切片会打破这种整齐：元素还是那些元素，但"走的顺序"和"内存摆放"对不上了，于是
+<span class="mono">ggml_is_contiguous</span> 返回假。多数算子能直接吃连续张量；遇到必须连续的场合，<span class="mono">ggml_cont</span>
+会按当前形状把数据重新誊抄成一块整齐的新内存。记住这条，你调试形状相关的问题时会少踩很多坑。</p>
+<p>最后回头看 <span class="mono">op</span> 和 <span class="mono">src</span> 这两个字段，它们让张量有了"<strong>双重身份</strong>"：既是<strong>一块数据</strong>，
+又是<strong>计算图里的一个节点</strong>。当你写下 <span class="mono">c = ggml_mul_mat(ctx, a, b)</span>，ggml 并不立刻算矩阵乘，而是新建一个张量
+<span class="mono">c</span>，把它的 <span class="mono">op</span> 记成"矩阵乘"、<span class="mono">src[0]/src[1]</span> 指向 <span class="mono">a</span> 和
+<span class="mono">b</span>。于是整张计算图，其实就是<strong>张量们靠 src 互相牵着手连成的一张网</strong>；等图建完，再交给后端按这张网的顺序逐个算过去。
+理解了张量这层"图节点"身份，你就握住了第三部分 ggml 引擎的钥匙。</p>
+<p>结构体里还有个不起眼但很实用的字段 <span class="mono">name</span>：每个张量可以带一个名字。这在<strong>调试</strong>时很有用（打印计算图时一眼认出
+"这是哪个权重"），而且 GGUF 文件里的每个权重张量本来就是<strong>带名字存的</strong>（像 <span class="mono">blk.0.attn_q.weight</span> 这种），
+加载时按名字对号入座。所以"名字"不只是注释，它是模型权重和代码之间的<strong>索引</strong>。你在 GGUF 工具或调试日志里看到的那一串张量名，正是来自这个字段。</p>
+<p>给个实战提示：在 ggml 里写代码，<strong>最常见的报错就是形状对不上</strong>——矩阵乘要求左右两个张量在相乘的那一维上元素数相等，
+转置、reshape 之后维度顺序变了，很容易把该对齐的维弄错。养成<strong>随手在脑子里写出每个张量 ne</strong> 的习惯（甚至用 <span class="mono">name</span>
+标注、打印出来核对），能帮你省下大量调试时间。这也是为什么这一课要把 ne/nb 讲得这么细：<strong>形状是 ggml 编程的"语法"</strong>，语法错了，后面什么都跑不起来。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> ggml 的维度顺序为什么和 PyTorch 相反？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>在 numpy / PyTorch 里，习惯把<strong>最后一维</strong>当作内存里连续的维度（行优先、C-order）：一个形状 <span class="mono">[batch, seq, dim]</span>
+    的张量，<span class="mono">dim</span> 是连续的。ggml 反过来：它把<strong>连续的那一维放在 ne[0]</strong>（最前面），所以同一个张量在 ggml 里写成
+    <span class="mono">ne = [dim, seq, batch]</span>——<strong>维度顺序整个反过来</strong>。</p>
+    <p>这不是谁对谁错，只是约定不同；但读 ggml 代码、看张量形状时一定要在脑子里切换过来，否则很容易把行当成列、把 batch 看成 dim。
+    一个好记的口诀：<strong>ggml 的 ne[0] 永远是"最贴着内存、变化最快"的那一维</strong>。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> nb 公式里为什么有个 /blck_size？量化类型的坑 <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>普通类型（F32、F16）里，<span class="mono">nb[0]</span> 就是一个元素的字节数。但<strong>量化类型</strong>（如 Q4_0）不是"一个元素一个值"，
+    而是把<strong>一整块</strong>（如 32 个权重）打包压成定长字节，单个权重<strong>没法独立寻址</strong>。</p>
+    <p>所以 ggml 用 <span class="mono">ggml_blck_size(type)</span>（一块里有几个元素）和 <span class="mono">ggml_type_size(type)</span>（一块多少字节）
+    来描述。<span class="mono">nb[1]</span> 公式里那个 <span class="mono">ne[0] / ggml_blck_size(type)</span>，意思就是"这一排里有多少<strong>块</strong>"。
+    明白这点，你就懂了为什么量化张量不能像普通数组那样随便按单元素下标去取——得<strong>按块解量化</strong>（第三部分的量化格式课会细讲）。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 怎么算一个张量占多少内存？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>直接用 <span class="mono">ggml_nbytes(tensor)</span>。直觉上，一个<strong>连续</strong>张量的字节数约等于"<strong>最高维元素数 × 最高维步长</strong>"
+    （<span class="mono">ne[k] * nb[k]</span> 取最高维），也就是把各维元素数乘起来、再乘上每元素（或每块）的字节数。</p>
+    <p>这在估算<strong>显存占用</strong>时很有用：模型权重占多少、KV cache 占多少，本质上都是这么一类张量的字节数加总。非连续张量、量化张量的算法略有不同，
+    但 <span class="mono">ggml_nbytes</span> 已经替你把这些情况都处理好了，直接调用即可。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>张量 = <strong>type</strong>（类型）+ <strong>ne[4]</strong>（形状）+ <strong>nb[4]</strong>（字节步长）+ <strong>data</strong>（内存）+ <strong>op / src</strong>（它在计算图里怎么来的）。</li>
+    <li>ggml 是<strong>行优先</strong>，<strong>ne[0] 是最内 / 连续维</strong>（步长最小），维度顺序和 numpy / PyTorch <strong>相反</strong>。</li>
+    <li>多维下标 -&gt; 内存偏移：<span class="mono">offset = Σ i_k × nb[k]</span>。</li>
+    <li>view / 转置 / reshape <strong>零拷贝</strong>：只改 ne/nb、复用 data、用 <span class="mono">view_src</span> 记来源；代价是可能<strong>非连续</strong>，必要时 <span class="mono">ggml_cont</span> 压实（这才真拷贝）。</li>
+    <li>量化类型按<strong>块</strong>存储，<span class="mono">nb</span> 公式里的 /blck_size 就是这个原因。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"<strong>形状</strong>"（ne/nb）和"<strong>数据</strong>"（data）彻底分开存——就这一个设计，让转置、切片、reshape、广播统统变成"<strong>改几个数字</strong>"
+  而非"搬一整块内存"，也让<strong>同一块权重</strong>能被计算图以不同视角反复使用。ggml 的高效，很大一部分就藏在这个朴素的拆分里。下一课讲量化，你会看到这套 ne/nb/type 的设计，如何让"把权重压成 4 bit"这件事，
+  能不动声色地接进同一套张量与算子里。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 在 ggml 里把一个张量“转置”，主要改变了什么？</div>
+  <ol class="opts">
+    <li>重新量化了权重</li>
+    <li>只交换 ne[]/nb[]（步长），复用同一块 data，不搬数据</li>
+    <li>改变了 type</li>
+    <li>复制出一块新内存</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。转置是改元数据的视图操作：交换 ne/nb、用 view_src 指回原张量，data 一个字节都不动，所以零拷贝。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml 张量里哪一维是“最内/连续（步长最小）”的维？</div>
+  <ol class="opts">
+    <li>都一样</li>
+    <li>ne[0]</li>
+    <li>由 type 决定</li>
+    <li>ne[3]</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。ggml 行优先，nb[0]=ggml_type_size(type) 最小，ne[0] 在内存里连续摆放；这和 numpy/PyTorch 的约定相反。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 为什么量化类型（如 Q4_0）的张量不能像普通数组那样按单个元素下标随便取？</div>
+  <ol class="opts">
+    <li>因为它按“块”打包存储，单个权重无法独立寻址，要按块解量化</li>
+    <li>因为它只能有一维</li>
+    <li>因为它没有 ne 字段</li>
+    <li>因为它的 data 是空的</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。量化类型把一整块（如 32 个权重）压成定长字节，nb 公式里的 ne[0]/ggml_blck_size(type) 正是“一排有多少块”。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>给一个 ne=[4,3]（ne[0]=4）的 F32 张量，nb[0] 与 nb[1] 各是多少字节？（F32 = 4 字节）</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+ggml is llama.cpp's compute engine, and in its eyes <strong>all data is "tensors"</strong> - weights, activations, the KV cache, all tensors.
+This lesson makes the <span class="mono">ggml_tensor</span> struct tangible: what shape is, what stride is, why ggml is "row-major",
+and why "transposing a tensor" costs almost nothing. Understand this layer and you can read every compute-graph and operator diagram that follows;
+tensors are, you could say, the <strong>first building block</strong> for reading ggml source.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of a tensor as a grid of <strong>lockers</strong>: <span class="mono">ne[]</span> tells you "how many lockers per row, how many rows" (shape),
+  <span class="mono">nb[]</span> tells you "how many steps to walk from one locker to the next, or to jump to the next row" (strides, in bytes),
+  and <span class="mono">data</span> is the <strong>starting address</strong> of the grid. Know those three and you can locate any locker.
+  And "<strong>what spec the lockers hold</strong>" (<span class="mono">type</span>) decides how big each cell is and how to read it. Keep "shape (how lockers
+  are arranged)" and "data (what's inside)" separate - that is the root of every memory-saving, zero-copy trick later.
+</div>
+
+<h2>A tensor = shape + type + one contiguous block of memory</h2>
+<p>A tensor is really "<strong>one contiguous block of memory + a manual for how to read it</strong>". The manual has: the data <strong>type</strong>
+(<span class="mono">type</span>, e.g. F32, F16, Q4_0), how many elements per dimension (<span class="mono">ne[]</span>, up to 4 dims in ggml),
+and a pointer <span class="mono">data</span> to that memory. First, what "shape" looks like:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>shape ne</b>: a tensor with ne=[4,3] - ne[0]=4 is "4 per row" (innermost dim), ne[1]=3 is "3 rows"</div>
+  <div class="cells"><span class="lab">row 0</span><span class="cell">a00</span><span class="cell">a01</span><span class="cell">a02</span><span class="cell">a03</span></div>
+  <div class="cells"><span class="lab">row 1</span><span class="cell">a10</span><span class="cell">a11</span><span class="cell">a12</span><span class="cell">a13</span></div>
+  <div class="cells"><span class="lab">row 2</span><span class="cell">a20</span><span class="cell">a21</span><span class="cell">a22</span><span class="cell">a23</span></div>
+</div>
+<p>A quick clarification of "how many dims": <strong>0-D</strong> is a scalar (one number), <strong>1-D</strong> a vector (e.g. one embedding),
+<strong>2-D</strong> a matrix (e.g. a layer's weights), and <strong>3-D / 4-D</strong> show up in "batched, multi-head" intermediates. ggml infers a tensor's
+rank from how many of <span class="mono">ne[]</span> are greater than 1; unused higher dims are filled with 1. So <span class="mono">ne=[4,3,1,1]</span> is really
+just a 4x3 two-dimensional tensor.</p>
+<p>Note ggml's convention: <span class="mono">ne[0]</span> is the <strong>innermost, fastest-changing</strong> dimension (laid out contiguously in memory),
+<span class="mono">ne[1]</span> is "the next row", and so on. This is the <strong>opposite</strong> of the "rows x cols" ordering many people are used to -
+a dedicated deep-dive below covers this trap. Here are the core fields of <span class="mono">ggml_tensor</span>:</p>
+<pre class="code"><span class="kw">struct</span> <span class="fn">ggml_tensor</span> {
+    <span class="kw">enum</span> ggml_type   type;           <span class="cm">// F32 / F16 / Q4_0 ...</span>
+    int64_t          ne[4];          <span class="cm">// #elements per dim (ne[0] = innermost)</span>
+    size_t           nb[4];          <span class="cm">// byte strides</span>
+    <span class="kw">enum</span> ggml_op     op;             <span class="cm">// how it was produced (graph node)</span>
+    <span class="kw">struct</span> ggml_tensor * src[...];    <span class="cm">// inputs (back-pointers)</span>
+    <span class="kw">struct</span> ggml_tensor * view_src;     <span class="cm">// set if this tensor is a view</span>
+    <span class="kw">void</span> *           data;           <span class="cm">// the actual bytes</span>
+    <span class="kw">char</span>             name[...];
+};  <span class="cm">// simplified from ggml/include/ggml.h, GGML_MAX_DIMS = 4</span></pre>
+<p>Two groups of fields are worth remembering. <span class="mono">ne</span> / <span class="mono">nb</span> / <span class="mono">type</span> / <span class="mono">data</span>
+describe "<strong>what this data looks like and where it is</strong>"; while <span class="mono">op</span> / <span class="mono">src</span> describe
+"<strong>how it was computed</strong>" - <span class="mono">op</span> is the operator that produced it (e.g. matmul), <span class="mono">src</span> are
+back-pointers to input tensors. That second group is the key to ggml's "<strong>build the graph first, then execute</strong>": every tensor remembers its
+origin, and stringing them together via <span class="mono">src</span> is a compute graph (mentioned in lesson 03, expanded in Part 3). Don't overlook
+<span class="mono">type</span> either: the same 1000 elements take 4000 bytes as F32 but only ~500 as Q4_0 - <strong>the type alone decides how big this
+memory is</strong>, which is the root of how quantization saves memory.</p>
+<p>Abstractions aside, what do tensors actually hold? In llama.cpp, <strong>every weight matrix</strong> is a tensor (the embedding table is a big
+<span class="mono">[n_embd, n_vocab]</span> tensor; each layer's attention and FFN weights are tensors too), the <strong>activations flowing through the forward
+pass</strong> are tensors, and even the K and V stored in the <strong>KV cache</strong> are tensors. An entire inference, start to finish, is just <strong>a pile
+of tensors being computed along a graph</strong>. That is why making the "tensor" abstraction light and flexible is so crucial to the whole engine's efficiency.</p>
+<p>About <span class="mono">type</span>: ggml supports a long list of data types - full-precision <span class="mono">F32</span>, half-precision
+<span class="mono">F16</span> / <span class="mono">BF16</span>, and a whole family of <strong>quantized types</strong> (<span class="mono">Q4_0</span>,
+<span class="mono">Q8_0</span>, <span class="mono">Q4_K</span>, etc. - next lesson). The same tensor struct and the same ne/nb logic hold all of them, because one
+field, <span class="mono">type</span>, uniformly describes "how many bytes per element (or per block), and how to interpret them". This "<strong>same structure,
+swappable type</strong>" design lets quantization <strong>plug seamlessly</strong> into the existing tensor and operator machinery without rewriting it per
+precision. Because of this, switching quantization levels (say <span class="mono">Q4_0</span> to <span class="mono">Q5_K</span>) is nearly transparent to higher-level
+code - only the <span class="mono">type</span> and per-block byte count change; the ne/nb logic is untouched.</p>
+<p>Where do tensors come from? In ggml you first open a <span class="mono">ggml_context</span> (a memory pool), then use functions like
+<span class="mono">ggml_new_tensor_2d</span> to "<strong>register</strong>" a tensor in the pool - it computes the needed bytes from type and ne, and fills in nb.
+Notably, <strong>creating a tensor usually does not immediately move that big block of data</strong>; often it just sets up the "shape manual" (matching ggml's
+build-graph-then-execute style), leaving the real allocation and computation for a unified later pass. Part 3 covers <span class="mono">ggml_context</span> and this
+"describe first, execute later" memory management.</p>
+<p>You might ask: to hold a multi-dim array, why not just use C++'s <span class="mono">std::vector</span> or a raw array - why a dedicated
+<span class="mono">ggml_tensor</span>? Because ggml needs far more than "store some numbers": it must <strong>describe computation as a graph</strong> (via op/src),
+<strong>let data live in different backends' memory</strong> (via buffer), <strong>uniformly hold many types including quantized ones</strong> (via type and
+per-block nb), and <strong>reshape with zero copies</strong> (via ne/nb and view_src). All these needs together produced this seemingly simple but carefully
+designed struct - the engine's "atom".</p>
+
+<h2>Row-major and stride: how nb[] is computed</h2>
+<p>Memory is actually <strong>one-dimensional</strong> (a long strip of bytes), but tensors are multi-dimensional; what flattens many dims into one is
+<strong>stride</strong>. ggml uses <span class="mono">nb[i]</span> to record "<strong>how many bytes to skip in memory when dim i increases by 1</strong>".
+ggml is <strong>row-major</strong>: the <span class="mono">ne[0]</span> dimension is laid out contiguously with the smallest stride. Here is how an
+ne=[3,2] (3 per row, 2 rows) F32 tensor lies in memory:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Row-major layout</b>: one contiguous byte stream - fill row 0, then row 1 (numbers are byte offsets)</div>
+  <div class="cells"><span class="lab">elem</span><span class="cell">a00</span><span class="cell">a01</span><span class="cell">a02</span><span class="cell hl">a10</span><span class="cell">a11</span><span class="cell">a12</span></div>
+  <div class="cells"><span class="lab">offset</span><span class="cell dim">0</span><span class="cell dim">4</span><span class="cell dim">8</span><span class="cell dim">12</span><span class="cell dim">16</span><span class="cell dim">20</span></div>
+</div>
+<p>This byte stream makes it click: adjacent elements in a row are <strong>4 bytes</strong> apart (one F32), so <span class="mono">nb[0]=4</span>; jumping from
+row 0 to row 1 (the highlighted a10) skips <strong>a whole row of 3 elements = 12 bytes</strong>, so <span class="mono">nb[1]=12</span>. As a formula -
+straight from the comments in <span class="mono">ggml.h</span>: <span class="mono">nb[0]=ggml_type_size(type)</span> (bytes per element),
+<span class="mono">nb[1]=nb[0]*(ne[0]/ggml_blck_size(type))</span> (bytes to cross one row; for plain types just "bytes-per-element x elements-per-row"),
+and above that <span class="mono">nb[i]=nb[i-1]*ne[i-1]</span> (strictly there is also an alignment "padding" term, which is 0 for contiguous unpadded tensors and is omitted here). So given any multi-dim index, dot it with <span class="mono">nb</span> to get the byte offset:</p>
+<div class="flow">
+  <div class="node"><div class="nt">multi-dim index</div><div class="nd">(i0, i1, i2, i3)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">dot with strides</div><div class="nd">sum i_k * nb[k]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">byte offset</div><div class="nd">offset</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">reach element</div><div class="nd">data + offset</div></div>
+</div>
+<pre class="code"><span class="cm"># multi-dim index (i0, i1, i2, i3) -> byte offset in memory</span>
+offset = i0*nb[0] + i1*nb[1] + i2*nb[2] + i3*nb[3]
+ptr    = (<span class="kw">char</span>*)tensor-&gt;data + offset   <span class="cm"># the address of this element</span></pre>
+<p>Why <strong>4 dims</strong> (<span class="mono">GGML_MAX_DIMS = 4</span>)? Because inference tensors rarely exceed 4 dims - a typical shape is
+"batch x sequence x heads x per-head-dim", and 4 is enough; storing ne/nb in a small <strong>fixed-size</strong> array is simple and fast, with no dynamic
+allocation. One more easily-missed point: the memory <span class="mono">data</span> points to is <strong>not necessarily on the CPU</strong> - it may live in GPU
+memory, and the tensor has a separate <span class="mono">buffer</span> field recording "which backend owns this data". That foreshadows the multi-backend story
+of lesson 07 (the same tensor struct, with data living on different hardware).</p>
+<p>Walking the formula through a concrete example makes it stick. Using the same <span class="mono">ne=[3,2]</span> F32 tensor from the memory diagram above:
+each element is 4 bytes, so <span class="mono">nb[0]=4</span>; crossing a whole row skips 3 elements, so <span class="mono">nb[1]=4x3=12</span>. To fetch row 1,
+element 2 (index <span class="mono">i1=1, i0=2</span>, zero-based - a12 in the diagram), the byte offset is <span class="mono">1*nb[1] + 2*nb[0] = 12 + 8 = 20</span> -
+exactly the 20 marked under a12. The whole tensor is <span class="mono">3x2x4 = 24</span> bytes. So with ne, nb, and data, <strong>any element's address is one step
+away</strong> - that is the full power of stride; other shapes like <span class="mono">ne=[4,3]</span> are left for this lesson's closing exercise.</p>
+<p>Conversely, knowing the byte layout explains <strong>why "row-major traversal" is usually faster than "column-major"</strong>: walking along
+<span class="mono">ne[0]</span> (within a row) touches <strong>contiguous, adjacent</strong> bytes, friendliest to the CPU cache; jumping along higher dims takes a
+big stride each time and misses the cache more often. Many operator implementations deliberately loop along the contiguous dimension for exactly this reason -
+<strong>layout decides performance</strong>, an intuition we will reuse when reading kernel implementations later.</p>
+
+<h2>Why view / transpose copy no data</h2>
+<p>Now a very "thrifty" ggml design. Since "<strong>shape (ne/nb)</strong>" and "<strong>data</strong>" are stored separately, many "reshape" operations
+<strong>need not touch the data</strong> at all - just change a few numbers. The classic is <strong>transpose</strong>: turning a [rows, cols] matrix into
+[cols, rows], ggml merely <strong>swaps ne[0] with ne[1] and nb[0] with nb[1]</strong>, moving <span class="mono">data</span> by not a single byte:</p>
+<div class="cols">
+  <div class="col"><h4>Original</h4><p><span class="mono">ne=[3,2]</span>, <span class="mono">nb=[4,12]</span><br>data -&gt; a real block of memory</p></div>
+  <div class="col"><h4>Transposed (a view)</h4><p><span class="mono">ne=[2,3]</span>, <span class="mono">nb=[12,4]</span><br>view_src -&gt; points back, data unchanged</p></div>
+</div>
+<p>Operations like reshape, transpose, slice, and broadcast are mostly implemented as <strong>views</strong> in ggml: the new tensor reuses the <strong>same
+data</strong>, just with different <span class="mono">ne</span>/<span class="mono">nb</span> and an offset, recording its origin in <span class="mono">view_src</span>.
+The upside is obvious: <strong>zero-copy, memory-saving, and fast</strong>. The cost: views often become <strong>non-contiguous</strong>
+(<span class="mono">ggml_is_contiguous</span> is false) - e.g. after a transpose, walking along <span class="mono">ne[0]</span> is no longer adjacent in memory.
+Some operators require contiguous inputs, in which case you first call <span class="mono">ggml_cont</span> to "compact" it into a fresh contiguous block
+(note: <strong>this step does copy</strong>). That is why you see many <span class="mono">ggml_cont</span> calls in ggml code - balancing "contiguity" against "zero-copy".</p>
+<p>One common operation in passing: <strong>broadcast</strong>. When two not-quite-same-shape tensors do an element-wise op (e.g. adding the same bias vector to
+every row), ggml lets some dimension use "<strong>one element as many</strong>" - again via a stride trick: set that dim's <span class="mono">nb</span> to 0, so no
+matter how the index changes the address does not, and the same value is re-read, looking "copied" while taking <strong>not one extra byte</strong>. Another
+"change nb, don't move data" classic, of a piece with views and transpose.</p>
+<p>A very common reshape: take activations of shape <span class="mono">[n_embd, n_tokens]</span> and "fan them out" for multi-head attention into
+<span class="mono">[head_dim, n_head, n_tokens]</span> - the element count is unchanged (<span class="mono">n_embd = head_dim x n_head</span>) and no data moves; only
+ne/nb are <strong>reinterpreted</strong>, turning "one big vector" into "several heads' small vectors". The multi-head attention from lesson 04 is full of these
+"same data, different shape" operations, all done with views and almost no extra copies.</p>
+<p>Or <strong>slicing</strong>: to pull out "layer k" or "head h" from a big tensor, ggml usually does not copy either - it <strong>computes a starting
+offset</strong>, pairs it with trimmed ne/nb, and returns a view pointing back at the original data. So in ggml code "<strong>take a part</strong>" and "<strong>see
+it in a different shape</strong>" are often the same cheap operation underneath - this view-centric style is a key to reading the compute-graph code later.</p>
+<p>To spell out what "contiguous" means: a tensor is <strong>contiguous</strong> when its elements sit <strong>adjacent in memory, in ne[0], ne[1], ... order
+without gaps</strong> (i.e. nb follows the formula above exactly). Transpose and some slices break this: same elements, but the "walk order" no longer matches the
+memory layout, so <span class="mono">ggml_is_contiguous</span> returns false. Most operators handle contiguous tensors directly; where contiguity is required,
+<span class="mono">ggml_cont</span> copies the data into a fresh tidy block in the current shape. Remember this and you will dodge many shape-related debugging traps.</p>
+<p>Finally, back to <span class="mono">op</span> and <span class="mono">src</span> - they give a tensor a "<strong>dual identity</strong>": both <strong>a block of
+data</strong> and <strong>a node in the compute graph</strong>. When you write <span class="mono">c = ggml_mul_mat(ctx, a, b)</span>, ggml does not compute the matmul
+immediately; it creates a new tensor <span class="mono">c</span>, records its <span class="mono">op</span> as "matmul" and points <span class="mono">src[0]/src[1]</span> at
+<span class="mono">a</span> and <span class="mono">b</span>. So the whole compute graph is just <strong>tensors holding hands via src into a web</strong>; once built, it is
+handed to the backend to compute node by node in order. Grasp this "graph node" identity of tensors and you hold the key to Part 3's ggml engine.</p>
+<p>The struct also has a humble but handy field, <span class="mono">name</span>: each tensor can carry a name. This helps when <strong>debugging</strong> (spotting
+"which weight is this" when printing the graph), and GGUF stores each weight tensor <strong>with a name</strong> (like <span class="mono">blk.0.attn_q.weight</span>),
+matched up by name at load time. So a "name" is not just a comment - it is the <strong>index</strong> between model weights and code. The tensor names you see in
+GGUF tools or debug logs come straight from this field.</p>
+<p>A practical tip: the <strong>most common error</strong> writing ggml code is a shape mismatch - matmul requires the two tensors to have equal element counts
+on the multiplied dimension, and after transpose/reshape the dim order changes, so it is easy to misalign. Get into the habit of <strong>writing out each tensor's
+ne in your head</strong> (or tagging with <span class="mono">name</span> and printing to check) - it saves a lot of debugging time. That is why this lesson belabors
+ne/nb: <strong>shape is the "grammar" of ggml programming</strong>; get the grammar wrong and nothing downstream runs.</p>
+
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why is ggml's dimension order the reverse of PyTorch? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>In numpy / PyTorch, the <strong>last</strong> dimension is the contiguous one (row-major, C-order): for a tensor of shape
+    <span class="mono">[batch, seq, dim]</span>, <span class="mono">dim</span> is contiguous. ggml flips this: it puts the <strong>contiguous</strong> dimension at
+    <span class="mono">ne[0]</span> (first), so the same tensor is written <span class="mono">ne = [dim, seq, batch]</span> - the <strong>whole order reversed</strong>.</p>
+    <p>Neither is "right"; it is just a different convention. But when reading ggml code and shapes you must mentally switch, or you will mistake rows for
+    columns and batch for dim. A handy mnemonic: <strong>ggml's ne[0] is always the "memory-adjacent, fastest-changing" dimension</strong>.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is there a /blck_size in the nb formula? The quantized-type trap <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>For plain types (F32, F16), <span class="mono">nb[0]</span> is just the bytes of one element. But <strong>quantized types</strong> (like Q4_0) are not
+    "one value per element"; they pack a <strong>whole block</strong> (e.g. 32 weights) into fixed-size bytes, so a single weight is <strong>not independently
+    addressable</strong>.</p>
+    <p>So ggml uses <span class="mono">ggml_blck_size(type)</span> (elements per block) and <span class="mono">ggml_type_size(type)</span> (bytes per block).
+    The <span class="mono">ne[0] / ggml_blck_size(type)</span> in the <span class="mono">nb[1]</span> formula means "how many <strong>blocks</strong> in a row". Once you
+    get this, you see why a quantized tensor cannot be indexed element-by-element like a plain array - you must <strong>dequantize by block</strong> (Part 3's
+    quantization-format lesson covers this in detail).</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> How do you compute a tensor's memory footprint? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Use <span class="mono">ggml_nbytes(tensor)</span> directly. Intuitively, a <strong>contiguous</strong> tensor's byte count is about "<strong>highest-dim
+    element count x highest-dim stride</strong>" (<span class="mono">ne[k] * nb[k]</span> at the top dim) - i.e. multiply all dims' element counts together, times
+    bytes per element (or per block).</p>
+    <p>This is handy for estimating <strong>memory use</strong>: how much the weights take, how much the KV cache takes, are all essentially sums of such tensor
+    byte counts. Non-contiguous and quantized tensors compute slightly differently, but <span class="mono">ggml_nbytes</span> already handles those cases - just call it.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Tensor = <strong>type</strong> + <strong>ne[4]</strong> (shape) + <strong>nb[4]</strong> (byte strides) + <strong>data</strong> (memory) + <strong>op / src</strong> (how it arose in the graph).</li>
+    <li>ggml is <strong>row-major</strong>, <strong>ne[0] is the innermost / contiguous dim</strong> (smallest stride); dimension order is the <strong>reverse</strong> of numpy / PyTorch.</li>
+    <li>Multi-dim index -&gt; byte offset: <span class="mono">offset = sum i_k * nb[k]</span>.</li>
+    <li>view / transpose / reshape are <strong>zero-copy</strong>: change ne/nb, reuse data, record origin in <span class="mono">view_src</span>; the cost is possible <strong>non-contiguity</strong>, compacted by <span class="mono">ggml_cont</span> when needed (that does copy).</li>
+    <li>Quantized types store by <strong>block</strong>; the /blck_size in the <span class="mono">nb</span> formula is exactly why.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Storing "<strong>shape</strong>" (ne/nb) and "<strong>data</strong>" separately - that single design turns transpose, slice, reshape, and broadcast all into
+  "<strong>change a few numbers</strong>" rather than "move a whole block of memory", and lets the <strong>same weights</strong> be reused by the graph from
+  different viewpoints. Much of ggml's efficiency hides in this plain split. In the next lesson on quantization, you will see how this ne/nb/type design lets
+  "compress weights to 4 bits" slot quietly into the very same tensor and operator machinery.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Transposing a ggml tensor mainly changes what?</div>
+  <ol class="opts">
+    <li>Re-quantizes the weights</li>
+    <li>Only swaps ne[]/nb[] (strides), reusing the same data - no data is moved</li>
+    <li>Changes the type</li>
+    <li>Copies out a new block of memory</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Transpose is a metadata-only view: swap ne/nb, point view_src back to the original, and data is untouched - hence zero-copy.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which dimension of a ggml tensor is the innermost/contiguous (smallest stride) one?</div>
+  <ol class="opts">
+    <li>All the same</li>
+    <li>ne[0]</li>
+    <li>Decided by the type</li>
+    <li>ne[3]</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. ggml is row-major: nb[0]=ggml_type_size(type) is smallest and ne[0] is laid out contiguously - the opposite of numpy/PyTorch.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Why can't a quantized-type tensor (e.g. Q4_0) be indexed element-by-element like a plain array?</div>
+  <ol class="opts">
+    <li>Because it packs values by block, so a single weight is not independently addressable - you dequantize by block</li>
+    <li>Because it can only be one-dimensional</li>
+    <li>Because it has no ne field</li>
+    <li>Because its data is empty</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A quantized type packs a whole block (e.g. 32 weights) into fixed bytes; the ne[0]/ggml_blck_size(type) in the nb formula is exactly 'blocks per row'.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>For an F32 tensor with ne=[4,3] (ne[0]=4), what are nb[0] and nb[1] in bytes? (F32 = 4 bytes)</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="04-llm-inference-basics.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">大模型推理基础</span><span class="lang-en">LLM inference fundamentals</span></div></a><a class="next" href="06-quantization-intro.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">量化入门</span><span class="lang-en">Quantization, intuitively</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

@@ -252,6 +252,274 @@ QUIZZES = {
             },
         ],
     },
+    "04-llm-inference-basics.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么说 KV cache 是“精确优化”而不是“近似”？",
+                    "en": "Why is the KV cache an exact optimization rather than an approximation?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为因果掩码下旧 token 看不到新 token，它们的 K/V 不随新 token 改变",
+                        "en": "Because under the causal mask, old tokens cannot see new tokens, so their K/V never change as new tokens arrive",
+                    },
+                    {"zh": "因为它把 logits 也缓存了", "en": "Because it also caches the logits"},
+                    {"zh": "因为权重被量化了", "en": "Because the weights are quantized"},
+                    {"zh": "因为只缓存了最后一层", "en": "Because it only caches the last layer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "因果掩码使旧 token 的 K/V 与未来无关，故缓存它们是精确的、与从头重算逐位相等，不是近似。",
+                    "en": "The causal mask makes old tokens' K/V independent of the future, so caching them is exact - bit for bit equal to recomputing - not approximate.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "decoder-only 模型里，token 之间“互相交流”主要发生在？",
+                    "en": "In a decoder-only model, where do tokens mainly \"talk to each other\"?",
+                },
+                "opts": [
+                    {"zh": "带因果掩码的自注意力层", "en": "The self-attention layer (with the causal mask)"},
+                    {"zh": "FFN（前馈层）", "en": "The FFN (feed-forward layer)"},
+                    {"zh": "RMSNorm", "en": "RMSNorm"},
+                    {"zh": "输出投影", "en": "The output projection"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "FFN、归一化、投影都对每个 token 独立处理，只有注意力让 token 互相看。",
+                    "en": "FFN, norm, and projection all process each token independently; only attention lets tokens see each other.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "decode 时为什么用 llama_get_logits_ith(ctx, -1) 只取最后一个位置？",
+                    "en": "During decode, why does llama_get_logits_ith(ctx, -1) read only the last position?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为预测“下一个 token”只需要最后一个位置的输出，其余位置不用算输出",
+                        "en": "Because predicting the next token needs only the last position's output; other positions need no output",
+                    },
+                    {"zh": "因为前面的位置算错了", "en": "Because the earlier positions were computed wrong"},
+                    {"zh": "因为 -1 表示取平均", "en": "Because -1 means take the average"},
+                    {"zh": "因为只有最后一层有 logits", "en": "Because only the last layer has logits"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "自回归每步只产出一个新 token，对应的就是序列最后一个位置那一行 logits。",
+                    "en": "Autoregression emits one new token per step, which corresponds to the logits row at the sequence's last position.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "如果去掉因果掩码（允许看到未来 token），自回归生成还成立吗？KV cache 还精确吗？",
+                "en": "If you removed the causal mask (letting tokens see the future), would autoregressive generation still hold? Would the KV cache still be exact?",
+            },
+        ],
+    },
+    "05-tensors.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在 ggml 里把一个张量“转置”，主要改变了什么？",
+                    "en": "Transposing a ggml tensor mainly changes what?",
+                },
+                "opts": [
+                    {
+                        "zh": "只交换 ne[]/nb[]（步长），复用同一块 data，不搬数据",
+                        "en": "Only swaps ne[]/nb[] (strides), reusing the same data - no data is moved",
+                    },
+                    {"zh": "复制出一块新内存", "en": "Copies out a new block of memory"},
+                    {"zh": "改变了 type", "en": "Changes the type"},
+                    {"zh": "重新量化了权重", "en": "Re-quantizes the weights"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "转置是改元数据的视图操作：交换 ne/nb、用 view_src 指回原张量，data 一个字节都不动，所以零拷贝。",
+                    "en": "Transpose is a metadata-only view: swap ne/nb, point view_src back to the original, and data is untouched - hence zero-copy.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 张量里哪一维是“最内/连续（步长最小）”的维？",
+                    "en": "Which dimension of a ggml tensor is the innermost/contiguous (smallest stride) one?",
+                },
+                "opts": [
+                    {"zh": "ne[0]", "en": "ne[0]"},
+                    {"zh": "ne[3]", "en": "ne[3]"},
+                    {"zh": "由 type 决定", "en": "Decided by the type"},
+                    {"zh": "都一样", "en": "All the same"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml 行优先，nb[0]=ggml_type_size(type) 最小，ne[0] 在内存里连续摆放；这和 numpy/PyTorch 的约定相反。",
+                    "en": "ggml is row-major: nb[0]=ggml_type_size(type) is smallest and ne[0] is laid out contiguously - the opposite of numpy/PyTorch.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么量化类型（如 Q4_0）的张量不能像普通数组那样按单个元素下标随便取？",
+                    "en": "Why can't a quantized-type tensor (e.g. Q4_0) be indexed element-by-element like a plain array?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为它按“块”打包存储，单个权重无法独立寻址，要按块解量化",
+                        "en": "Because it packs values by block, so a single weight is not independently addressable - you dequantize by block",
+                    },
+                    {"zh": "因为它没有 ne 字段", "en": "Because it has no ne field"},
+                    {"zh": "因为它的 data 是空的", "en": "Because its data is empty"},
+                    {"zh": "因为它只能有一维", "en": "Because it can only be one-dimensional"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "量化类型把一整块（如 32 个权重）压成定长字节，nb 公式里的 ne[0]/ggml_blck_size(type) 正是“一排有多少块”。",
+                    "en": "A quantized type packs a whole block (e.g. 32 weights) into fixed bytes; the ne[0]/ggml_blck_size(type) in the nb formula is exactly 'blocks per row'.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "给一个 ne=[4,3]（ne[0]=4）的 F32 张量，nb[0] 与 nb[1] 各是多少字节？（F32 = 4 字节）",
+                "en": "For an F32 tensor with ne=[4,3] (ne[0]=4), what are nb[0] and nb[1] in bytes? (F32 = 4 bytes)",
+            },
+        ],
+    },
+    "06-quantization-intro.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "块量化（每块一个 scale）为什么比“整个张量共用一个 scale”更准？",
+                    "en": "Why is block quantization (one scale per block) more accurate than one scale for the whole tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "每块自带 scale，块内动态范围更小，近似误差更小",
+                        "en": "Each block has its own scale, so its dynamic range is smaller and the approximation error is smaller",
+                    },
+                    {"zh": "因为用了更多 bit", "en": "Because it uses more bits"},
+                    {"zh": "因为压缩率更高", "en": "Because the compression ratio is higher"},
+                    {"zh": "因为完全不丢数据", "en": "Because it loses no data at all"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "全局一个 scale 没法兼顾大值和小值；切成小块、每块各配 scale，局部范围小、贴得准，误差自然更小。",
+                    "en": "One global scale cannot serve large and small values at once; per-block scales fit local ranges tightly, so error shrinks.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "Q4_0 每个权重平均约几 bit？（每块 32 权重 = 2 字节 scale + 16 字节量化值）",
+                    "en": "About how many bits per weight does Q4_0 use? (per 32-weight block = 2-byte scale + 16 bytes of quants)",
+                },
+                "opts": [
+                    {"zh": "约 4.5 bit", "en": "About 4.5 bit"},
+                    {"zh": "正好 4 bit", "en": "Exactly 4 bit"},
+                    {"zh": "8 bit", "en": "8 bit"},
+                    {"zh": "2 bit", "en": "2 bit"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "(2 + 16) 字节 × 8 / 32 = 4.5 bit；多出的 0.5 bit 是每块都要分摊的那个 scale。",
+                    "en": "(2 + 16) bytes x 8 / 32 = 4.5 bit; the extra 0.5 bit is the per-block scale amortized over the block.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "imatrix（重要性矩阵）在量化里起什么作用？",
+                    "en": "What role does imatrix (importance matrix) play in quantization?",
+                },
+                "opts": [
+                    {
+                        "zh": "用校准数据按权重的重要性来加权量化误差，让重要权重更准；不改变位宽分配",
+                        "en": "It uses calibration data to weight quantization error by weight importance, keeping important weights more accurate; it does not change bit-width allocation",
+                    },
+                    {"zh": "决定每个权重用几 bit", "en": "It decides how many bits each weight gets"},
+                    {"zh": "它本身是一种新的量化格式", "en": "It is itself a new quantization format"},
+                    {"zh": "它给模型增加显存占用", "en": "It increases the model's memory footprint"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "imatrix 改变的是“误差怎么分配”，让精度用在重要权重上；位宽由量化档位（如 Q4_K）决定，与 imatrix 无关。",
+                    "en": "imatrix changes how error is distributed, spending precision on important weights; bit-width is set by the quant tier (e.g. Q4_K), independent of imatrix.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "同样压到约 4bit，为什么 Q4_K 通常比 Q4_0 困惑度更低？（提示：super-block 与子块 scale）",
+                "en": "At roughly 4 bits, why does Q4_K usually have lower perplexity than Q4_0? (hint: super-block and per-sub-block scales)",
+            },
+        ],
+    },
+    "07-build-and-backends.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "想编一个支持 NVIDIA GPU 的 llama.cpp，应该怎么做？",
+                    "en": "How do you build a llama.cpp with NVIDIA GPU support?",
+                },
+                "opts": [
+                    {"zh": "配置时加 cmake -B build -DGGML_CUDA=ON", "en": "Configure with cmake -B build -DGGML_CUDA=ON"},
+                    {"zh": "pip install cuda", "en": "pip install cuda"},
+                    {"zh": "运行时加 --gpu 参数", "en": "Add a --gpu flag at runtime"},
+                    {"zh": "手动改源码里的 if", "en": "Manually edit the ifs in the source"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端是编译期的 CMake 开关：配置时用 -DGGML_CUDA=ON 把 CUDA 后端编进去，再 cmake --build。",
+                    "en": "Backends are compile-time CMake switches: configure with -DGGML_CUDA=ON to compile in the CUDA backend, then cmake --build.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 的“后端”(CPU/CUDA/Metal/...)主要解决什么问题？",
+                    "en": "What does ggml's \"backend\" layer (CPU/CUDA/Metal/...) mainly solve?",
+                },
+                "opts": [
+                    {
+                        "zh": "让同一张计算图能派发到不同硬件执行，把“算什么”和“在哪算”解耦",
+                        "en": "It lets the same compute graph dispatch to different hardware, decoupling \"what to compute\" from \"where\"",
+                    },
+                    {"zh": "决定模型的精度", "en": "It decides the model's precision"},
+                    {"zh": "负责量化权重", "en": "It quantizes the weights"},
+                    {"zh": "解析 GGUF 文件", "en": "It parses GGUF files"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端是“执行层”的统一抽象：上层只描述计算图，具体在 CPU/GPU 上怎么算交给各后端实现。",
+                    "en": "The backend is a uniform \"execution layer\": the upper layer only describes the graph; each backend implements how to compute it on CPU/GPU.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "运行时的 -ngl 参数是干什么的？",
+                    "en": "What does the runtime -ngl flag do?",
+                },
+                "opts": [
+                    {
+                        "zh": "决定把模型多少层卸载到 GPU 上算（其余留在 CPU）",
+                        "en": "It decides how many model layers to offload to the GPU (the rest stay on CPU)",
+                    },
+                    {"zh": "选择量化档位", "en": "It selects the quantization tier"},
+                    {"zh": "设置线程数", "en": "It sets the thread count"},
+                    {"zh": "设置上下文长度", "en": "It sets the context length"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "-ngl（n-gpu-layers）控制 GPU 层卸载：显存够就多放，不够就 CPU/GPU 混合跑。",
+                    "en": "-ngl (n-gpu-layers) controls GPU layer offload: put more if VRAM allows, otherwise run CPU/GPU mixed.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么“选哪些后端”是编译期开关，而不是运行时把所有后端都带上？（提示：依赖、体积、零依赖哲学）",
+                "en": "Why are backends a compile-time switch rather than bundling all of them at runtime? (hint: dependencies, size, the zero-dependency philosophy)",
+            },
+        ],
+    },
 }
 
 

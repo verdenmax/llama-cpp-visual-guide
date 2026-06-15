@@ -52,6 +52,14 @@ PAGES = [
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
     ("03-inference-lifecycle.html", "一次推理的生命周期", "Lifecycle of one inference",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("04-llm-inference-basics.html", "大模型推理基础", "LLM inference fundamentals",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("05-tensors.html", "张量是什么", "What is a tensor",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("06-quantization-intro.html", "量化入门", "Quantization, intuitively",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("07-build-and-backends.html", "构建系统与后端", "Build system & backends",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -471,6 +479,14 @@ SUBTITLES = {
                             "ggml / src·llama / common / tools / converters"),
     "03-inference-lifecycle.html": ("prompt -> 分词 -> 计算图 -> logits -> 采样 -> token",
                                     "prompt -> tokenize -> graph -> logits -> sample -> token"),
+    "04-llm-inference-basics.html": ("decoder-only · 因果掩码 · 自回归 · KV cache 为何精确",
+                                     "decoder-only; causal mask; autoregression; why the KV cache is exact"),
+    "05-tensors.html": ("shape/stride/行优先 · ggml_tensor 字段 · view 零拷贝",
+                        "shape/stride/row-major; ggml_tensor fields; zero-copy views"),
+    "06-quantization-intro.html": ("为什么量化 · 块量化 · Q4_0/Q8_0/K-quant 一览",
+                                   "why quantize; block quantization; Q4_0/Q8_0/K-quant tour"),
+    "07-build-and-backends.html": ("CMake 两步走 · 后端选项 · 产物在 build/bin · -ngl",
+                                   "two-step CMake; backend options; build/bin outputs; -ngl"),
 }
 
 
