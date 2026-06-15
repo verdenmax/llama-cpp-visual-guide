@@ -870,6 +870,73 @@ QUIZZES = {
             },
         ],
     },
+    "13-gguf-format.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GGUF 文件里的 metadata KV 主要存什么？",
+                    "en": "What does the metadata KV in a GGUF file mainly store?",
+                },
+                "opts": [
+                    {
+                        "zh": "模型的自描述信息——架构、层数/维度等超参、词表、聊天模板，让加载器无需猜测结构",
+                        "en": "the model's self-describing info - architecture, hyperparameters like layer count/dimension, vocab, chat template - so the loader need not guess the structure",
+                    },
+                    {"zh": "只有权重的原始字节", "en": "only the raw bytes of the weights"},
+                    {"zh": "只有一个版本号", "en": "only a version number"},
+                    {"zh": "模型的源代码", "en": "the model's source code"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "metadata 是一串带类型（gguf_type）的键值对，自描述地存架构、超参、词表、聊天模板等；加载器直接读 KV 就能建图，无需外部配置或猜测。",
+                    "en": "Metadata is a run of typed (gguf_type) key-value pairs that self-describe architecture, hyperparameters, vocab, chat template, etc.; the loader reads the KVs to build the graph, with no external config or guessing.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama.cpp 用 mmap 加载 GGUF 权重的好处是？",
+                    "en": "What is the benefit of llama.cpp loading GGUF weights with mmap?",
+                },
+                "opts": [
+                    {
+                        "zh": "只读映射文件、零拷贝，按需分页载入，不必把几 GB 权重先读进内存再拷一遍",
+                        "en": "read-only file mapping, zero-copy, paged in on demand - no need to read several GB of weights into memory and copy them again",
+                    },
+                    {"zh": "可以在运行时修改权重", "en": "it lets you modify the weights at runtime"},
+                    {"zh": "会自动对权重再做量化", "en": "it auto-quantizes the weights again"},
+                    {"zh": "会加密权重数据", "en": "it encrypts the weight data"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "mmap 把文件只读映射进地址空间，张量 data 指针直接指向磁盘页，用到哪页 OS 才载入；省去了把几 GB 权重整体读入再拷贝的开销，这就是“秒加载”。",
+                    "en": "mmap maps the file read-only into the address space, with tensor data pointers pointing straight at disk pages loaded only when touched; it avoids reading and copying several GB of weights wholesale - that is the 'instant load'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "GGUF 文件开头的 magic 和当前 version 是？",
+                    "en": "What are the magic and current version at the start of a GGUF file?",
+                },
+                "opts": [
+                    {"zh": "magic 是 \"GGUF\"，当前 version 是 3", "en": "the magic is \"GGUF\" and the current version is 3"},
+                    {"zh": "magic 是 \"GGML\"，version 是 1", "en": "the magic is \"GGML\", version 1"},
+                    {"zh": "magic 是 \"LLMA\"，version 是 2", "en": "the magic is \"LLMA\", version 2"},
+                    {"zh": "没有 magic，直接就是权重", "en": "there is no magic, just weights directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GGUF_MAGIC = \"GGUF\"（开头 4 字节），GGUF_VERSION = 3（见 ggml/include/gguf.h）；加载器一上来就核对它们，不对就拒绝或报错。",
+                    "en": "GGUF_MAGIC = \"GGUF\" (the first 4 bytes), GGUF_VERSION = 3 (see ggml/include/gguf.h); the loader checks them immediately and refuses or errors if they do not match.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "GGUF 把超参和词表都写进文件自描述，相比“权重文件 + 外部 config”的老办法有什么好处？（提示：可移植/可扩展/加载）",
+                "en": "GGUF writes hyperparameters and vocab into the file as self-description. What are the advantages over the old \"weights file + external config\" approach? (hint: portability / extensibility / loading)",
+            },
+        ],
+    },
 }
 
 

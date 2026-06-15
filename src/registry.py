@@ -22,4 +22,5 @@ CONTENT = {
     "10-graph-execution.html": part3.LESSON_10,
     "11-core-operators.html": part3.LESSON_11,
     "12-quant-formats.html": part3.LESSON_12,
+    "13-gguf-format.html": part3.LESSON_13,
 }

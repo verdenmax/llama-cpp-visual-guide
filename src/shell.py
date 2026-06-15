@@ -70,6 +70,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("12-quant-formats.html", "量化格式细节", "Quantization formats in detail",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("13-gguf-format.html", "GGUF 文件格式", "The GGUF file format",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -507,6 +509,8 @@ SUBTITLES = {
                                "mul_mat shapes; rms_norm/rope/soft_max_ext; CPU compute"),
     "12-quant-formats.html": ("block 字节布局 · super-block K-quant · 解量化 · type_traits",
                               "block byte layout; super-block K-quant; dequant; type_traits"),
+    "13-gguf-format.html": ("magic/version · metadata KV · tensor info · 对齐 · mmap",
+                            "magic/version; metadata KV; tensor info; alignment; mmap"),
 }
 
 
