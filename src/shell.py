@@ -310,6 +310,35 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
   padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
 .langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 """
 
 SEARCH_JS = """

@@ -84,6 +84,26 @@ QUIZZES = {
                     "en": "ggml describes tensors/graphs and schedules ops; the actual hardware math is implemented by each backend.",
                 },
             },
+            {
+                "q": {
+                    "zh": "Q4_0 量化为什么能大幅压缩体积，却几乎不掉精度？",
+                    "en": "Why can Q4_0 quantization shrink the size so much yet barely lose accuracy?",
+                },
+                "opts": [
+                    {"zh": "因为它直接丢掉了不重要的网络层", "en": "It simply drops the unimportant network layers"},
+                    {
+                        "zh": "整块权重共享一个 scale、按小块贴合数值范围，低位宽档位已够用",
+                        "en": "A whole block shares one scale and hugs that block's value range, so the low-bit levels are enough",
+                    },
+                    {"zh": "因为它用 GPU 重新训练了权重", "en": "It retrains the weights on a GPU"},
+                    {"zh": "因为模型本来就不需要精度", "en": "Because the model never needed precision anyway"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "量化按块共享缩放因子，每块贴合自己的数值范围；权重对微小误差不敏感，4 bit 档位足够，于是省约 4 倍空间而精度几乎不变。进一步的 K-quant 还可选配合重要性矩阵（imatrix）给量化误差加权，让更关键的权重被更精确地保留——位宽不变，只是误差被加权，并非分到更多比特。",
+                    "en": "Quantization shares a scale per block, each fitting its own value range; weights tolerate tiny errors and 4-bit levels suffice, so it saves ~4x space with almost no accuracy change. K-quants can optionally pair with an importance matrix (imatrix) that weights the quantization error so important weights are preserved more faithfully - the bit-width is unchanged, the error is weighted rather than bits reallocated.",
+                },
+            },
         ],
         "open": [
             {
@@ -131,6 +151,29 @@ QUIZZES = {
                     "en": "Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.",
                 },
             },
+            {
+                "q": {
+                    "zh": "<code>common/</code> 在整个项目里扮演什么角色？",
+                    "en": "What role does <code>common/</code> play in the project?",
+                },
+                "opts": [
+                    {
+                        "zh": "推理库本体：模型加载、计算图、采样都在这里",
+                        "en": "The inference core: model loading, the compute graph and sampling all live here",
+                    },
+                    {
+                        "zh": "各可执行程序共用的“胶水”（参数解析、采样封装、日志…），推理本体在 <code>src/llama-*</code>",
+                        "en": "The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code>",
+                    },
+                    {"zh": "ggml 的一部分，负责底层算子", "en": "Part of ggml, handling the low-level ops"},
+                    {"zh": "一组 Python 转换脚本", "en": "A set of Python conversion scripts"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "common 把各程序重复要写的胶水（arg、采样封装、日志…）抽出来给 tools/ 复用；真正的加载/计算图/采样在 src/llama-*，对外只经 include/llama.h。",
+                    "en": "common factors out the boilerplate the programs repeat (arg, sampler wrapper, logging...) for tools/ to reuse; the real loading/graph/sampling is in src/llama-*, exposed only via include/llama.h.",
+                },
+            },
         ],
         "open": [
             {
@@ -159,6 +202,26 @@ QUIZZES = {
                 "why": {
                     "zh": "decode 只算出 logits；选哪个 token 是采样器 llama_sampler_sample 的事，还原文字是 llama_token_to_piece 的事。",
                     "en": "decode only yields logits; picking a token is llama_sampler_sample's job, turning it into text is llama_token_to_piece's.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "“一次 llama_decode 前向”在内部大致是怎么完成的？",
+                    "en": "Internally, how is a single llama_decode forward pass carried out?",
+                },
+                "opts": [
+                    {"zh": "直接查表返回下一个 token", "en": "It looks the next token up in a table directly"},
+                    {
+                        "zh": "先建计算图，再交后端执行，最后得到 logits",
+                        "en": "It builds a compute graph, runs it on the backend, then yields logits",
+                    },
+                    {"zh": "在 Python 里跑一遍前向", "en": "It runs a forward pass in Python"},
+                    {"zh": "重新加载并量化模型权重", "en": "It reloads and quantizes the model weights"},
+                ],
+                "answer": 1,
+                "why": {
+                    "zh": "decode 内部先由 llama-graph.cpp 的 llm_graph_*（经 build_graph）把这步描述成计算图，再交 ggml-backend 调度到硬件执行，算完用 llama_get_logits_ith 取出 logits。",
+                    "en": "Inside decode, llm_graph_* in llama-graph.cpp (via build_graph) describes the step as a compute graph, ggml-backend schedules it on hardware, then llama_get_logits_ith reads out the logits.",
                 },
             },
             {
