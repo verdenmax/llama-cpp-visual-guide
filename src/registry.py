@@ -15,4 +15,5 @@ CONTENT = {
     "04-llm-inference-basics.html": part2.LESSON_04,
     "05-tensors.html": part2.LESSON_05,
     "06-quantization-intro.html": part2.LESSON_06,
+    "07-build-and-backends.html": part2.LESSON_07,
 }

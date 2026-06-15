@@ -58,6 +58,8 @@ PAGES = [
      "第二部分 · 前置基础", "Part 2 · Foundations"),
     ("06-quantization-intro.html", "量化入门", "Quantization, intuitively",
      "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("07-build-and-backends.html", "构建系统与后端", "Build system & backends",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -483,6 +485,8 @@ SUBTITLES = {
                         "shape/stride/row-major; ggml_tensor fields; zero-copy views"),
     "06-quantization-intro.html": ("为什么量化 · 块量化 · Q4_0/Q8_0/K-quant 一览",
                                    "why quantize; block quantization; Q4_0/Q8_0/K-quant tour"),
+    "07-build-and-backends.html": ("CMake 两步走 · 后端选项 · 产物在 build/bin · -ngl",
+                                   "two-step CMake; backend options; build/bin outputs; -ngl"),
 }
 
 

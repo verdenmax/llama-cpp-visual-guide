@@ -1245,3 +1245,412 @@ in the inner loop, skipping the cost of fully restoring to fp32 first. So "quant
 </div>
 """,
 }
+
+LESSON_07 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+前面几课都在讲"是什么"；这一课讲"<strong>怎么把它编出来、怎么挑硬件后端、编完有哪些产物</strong>"。读完这一课，你就能自己从源码 build 一个带 GPU 加速的 llama.cpp，
+也能看懂为什么同一份代码能在 CPU、NVIDIA、苹果、AMD 各种硬件上跑。这一课也是第二部分的收尾。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  CMake 像一个<strong>装修总包工头</strong>：你在订单上勾选"要不要地暖（CUDA）、要不要中央空调（Metal / Vulkan）"，它就去联系对应的施工队（编译器和各家 GPU 工具链）、
+  画出施工图（生成构建文件），最后交付一套能直接入住的房子（可执行文件）。你不用懂每个施工队的细节，只要会下订单——这一课就是教你"怎么下这张订单"。
+</div>
+
+<h2>后端抽象：同一张计算图，多种硬件</h2>
+<p>课 03 说过，一次推理会被描述成一张<strong>计算图</strong>（一堆算子：矩阵乘、softmax、rope……）。但同样一个"矩阵乘"，在 CPU 上要用 SIMD 指令写、在 NVIDIA 上要用 CUDA 写、
+在苹果上要用 Metal 写——实现天差地别。如果让上层的推理逻辑去操心这些，代码会乱成一团。</p>
+<p>ggml 的解法是定义一个统一的<strong>后端（backend）接口</strong>（<span class="mono">ggml/include/ggml-backend.h</span>）：上层只管"我要算这张图"，至于"在哪种硬件上、用什么指令算"，
+交给具体的后端实现（<span class="mono">ggml-cpu</span>、<span class="mono">ggml-cuda</span>、<span class="mono">ggml-metal</span>……）。这正是课 01 反复强调的"<strong>把'算什么'和'在哪算'解耦</strong>"。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">上层</span><span class="name">推理逻辑 / 计算图</span></div><div class="ld">课 03 的"建图"：只描述要算什么（matmul · softmax · rope ...）</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">接口</span><span class="name">ggml-backend</span></div><div class="ld">统一的后端接口：分配内存、调度算子、在设备间搬数据</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">实现</span><span class="name">ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</span></div><div class="ld">每种硬件一份实现，真正把算子算出来</div></div>
+</div>
+<p>这个分层的好处是：<strong>加一种新硬件，只需新写一个后端，上层推理代码一行不用动</strong>；而编译时选哪些后端，就决定了你这份二进制"认得"哪些硬件。
+所以"构建"和"后端"是同一件事的两面——构建系统的主要工作，就是按你的选择，把对应的后端代码编进来。</p>
+<p>再补一点机制：每个后端在编进来时会向 ggml <strong>注册自己</strong>，声明"我能算哪些算子、管哪块内存"。运行时，调度器（<span class="mono">ggml-backend</span> 里的 sched）
+拿到计算图后，会把每个算子<strong>分派给合适的后端</strong>去算，并在 CPU 和 GPU 内存之间按需搬运数据。万一某个算子在 GPU 后端里还没实现，调度器通常能
+<strong>自动回退（fallback）到 CPU</strong> 把这一步算完——所以即使某个新算子 GPU 还没支持，整张图也不至于跑不起来，只是那一步慢一点。</p>
+<p>还要补一句：<strong>"后端"不全是 GPU</strong>。CPU 本身就是一个后端；BLAS 是给 CPU 上大矩阵乘加速的库后端；苹果的 Accelerate 框架也能接进来。
+所以"后端"更准确的说法是"<strong>一种把算子真正算出来的实现途径</strong>"，GPU 只是其中最受关注的一类。理解这一点，你看 <span class="mono">ggml/src</span> 下那一长串
+<span class="mono">ggml-cpu</span>、<span class="mono">ggml-cuda</span>、<span class="mono">ggml-blas</span>、<span class="mono">ggml-metal</span>…… 目录时就不会困惑了。</p>
+
+<h2>怎么编：CMake 两步走</h2>
+<p>llama.cpp 用 <strong>CMake</strong> 作为构建系统。从源码编译，标准流程就两步：先<strong>配置（configure）</strong>，再<strong>构建（build）</strong>。</p>
+<p>当然，最最开始还有一步别漏了：先把源码<strong>克隆</strong>下来——<span class="mono">git clone</span> 仓库地址、进到目录，再走下面那两步 CMake 就行。
+想要某个稳定版本可以 checkout 对应的发布 tag；想跟最新进展就用默认的主分支。整个"<strong>克隆 -&gt; 配置 -&gt; 构建 -&gt; 运行</strong>"四步，
+就是绝大多数人上手 llama.cpp 的完整路径。</p>
+<div class="flow">
+  <div class="node"><div class="nt">cmake -B build</div><div class="nd">配置: 探测 + 选后端</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">cmake --build build</div><div class="nd">编译源码</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">build/bin/</div><div class="nd">库 + 可执行程序</div></div>
+</div>
+<pre class="code"><span class="cm"># 仅 CPU (默认)</span>
+cmake -B build
+cmake --build build --config Release -j
+
+<span class="cm"># 带 NVIDIA CUDA</span>
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release -j</pre>
+<p>第一步 <span class="mono">cmake -B build</span> 是<strong>配置</strong>：CMake 会探测你的系统（有没有 CUDA 工具链、什么编译器、什么 CPU 指令集），根据你给的
+<span class="mono">-D</span> 选项决定要编哪些后端，然后在 <span class="mono">build/</span> 目录里生成真正的构建文件。第二步 <span class="mono">cmake --build build</span> 才是
+<strong>真正编译</strong>，把源码变成库和可执行文件。<span class="mono">-j</span> 让它多核并行编、快很多；<span class="mono">--config Release</span> 表示编优化过的发布版
+（而非带调试信息、慢得多的 Debug 版）。整个过程对照前面那张流程图看，就很清楚了。</p>
+<p>第一次完整编译可能要几分钟到十几分钟（尤其带上 CUDA 这种大后端）；好在 CMake 支持<strong>增量编译</strong>——你改一两个文件后再
+<span class="mono">cmake --build build</span>，它只重编受影响的部分，通常几秒就好。想更快，可以让 CMake 用 <strong>Ninja</strong> 作为底层构建工具
+（<span class="mono">cmake -G Ninja -B build</span>），它的并行调度比传统 Make 更高效。这些都是"配置一次、反复构建"的日常。</p>
+<p>顺便说：<strong>大多数人其实不用自己编</strong>。llama.cpp 官方在 GitHub Releases 提供了各平台的<strong>预编译包</strong>，下载解压即用；很多上层项目
+（如 Ollama、LM Studio）也都内置了它。那什么时候才需要自己从源码编？——当你要<strong>打开某个预编译包没带的后端</strong>（比如针对你这张特定显卡的 CUDA）、
+要<strong>用最新的开发版功能</strong>、或者要<strong>把库嵌进自己的程序</strong>时。这一课讲的就是这后一种"需要动手"的场景。</p>
+<p>再说说 <span class="mono">--config Release</span> 为什么重要。编译器在 Release 档会开启大量优化（向量化、内联、去掉断言和调试信息），跑起来可能比 Debug 档
+<strong>快好几倍</strong>。除非你在<strong>调试 llama.cpp 本身</strong>（要单步、看变量），否则平时一律用 Release。这也是为什么官方预编译包都是 Release 版——
+对"只是想跑模型"的人来说，没理由忍受 Debug 的慢。</p>
+<p>真正动手前，强烈建议先扫一眼仓库里的 <span class="mono">docs/build.md</span>：它把每个平台、每种后端的具体编译命令和注意事项都列全了
+（包括 Windows、各家 GPU 的细节）。这一课给你的是"地图和直觉"，而 <span class="mono">docs/build.md</span> 是"逐条的操作手册"，两者配合着看，第一次编译就能少走很多弯路，遇到平台特有的问题也多半能在那里找到答案。</p>
+
+<h2>选后端：CMake 选项一览</h2>
+<p>要不要某个 GPU 后端，就靠配置时的一个 <span class="mono">-D</span> 开关。常用的几个列在下面：</p>
+<table class="t">
+  <tr><th>CMake 选项</th><th>启用的硬件 / 功能</th></tr>
+  <tr><td><span class="mono">GGML_CPU</span>（默认 ON）</td><td>CPU 后端（自动用 AVX / NEON 等 SIMD）</td></tr>
+  <tr><td><span class="mono">GGML_CUDA</span></td><td>NVIDIA GPU</td></tr>
+  <tr><td><span class="mono">GGML_HIP</span></td><td>AMD GPU（ROCm）</td></tr>
+  <tr><td><span class="mono">GGML_METAL</span></td><td>Apple GPU（macOS 上常默认 ON）</td></tr>
+  <tr><td><span class="mono">GGML_VULKAN</span></td><td>跨厂商 GPU（含部分集显）</td></tr>
+  <tr><td><span class="mono">GGML_SYCL</span></td><td>Intel GPU</td></tr>
+  <tr><td><span class="mono">GGML_BLAS</span></td><td>用 BLAS 库加速大矩阵乘</td></tr>
+</table>
+<pre class="code">option(GGML_CPU    "ggml: enable CPU backend" ON)
+option(GGML_CUDA   "ggml: use CUDA"           OFF)
+option(GGML_METAL  "ggml: use Metal"          ...)
+option(GGML_VULKAN "ggml: use Vulkan"         OFF)
+<span class="cm"># ... HIP / SYCL / OPENCL / BLAS, 都在 ggml/CMakeLists.txt</span></pre>
+<p>这些开关都定义在 <span class="mono">ggml/CMakeLists.txt</span> 里。注意 <strong>CPU 后端默认就是开的</strong>（<span class="mono">GGML_CPU=ON</span>），
+所以你什么都不加，也能得到一个纯 CPU 能跑的 llama.cpp；GPU 后端则默认关闭，要哪个就显式 <span class="mono">-D...=ON</span> 打开。苹果设备上 Metal 通常默认开。
+你也可以同时开多个后端，运行时再决定用哪个。</p>
+<p>自己编最常见的坑，几乎都出在 GPU 工具链上。比如开了 <span class="mono">-DGGML_CUDA=ON</span> 却没装好 CUDA Toolkit、或者 CUDA 版本和显卡驱动对不上，
+配置阶段就会报错——这其实是好事，<strong>CMake 在"配置"时就帮你把环境问题暴露出来了</strong>，省得编到一半才失败。遇到报错别慌，先看它提示缺什么：
+缺 nvcc 就装 CUDA Toolkit、缺某个库就按提示装，多数问题照着错误信息走一遍就能解决。</p>
+
+<h2>编完有什么：产物一览</h2>
+<p>编译完成后，所有产物都落在 <span class="mono">build/bin</span> 目录里，分两类：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>build/bin 产物</b>：分"库"和"可执行程序"两类</div>
+  <div class="cells"><span class="lab">库</span><span class="cell">libggml</span><span class="cell">libllama</span><span class="lab">引擎本体, 可被链接</span></div>
+  <div class="cells"><span class="lab">程序</span><span class="cell hl">llama-cli</span><span class="cell hl">llama-server</span><span class="cell">llama-quantize</span><span class="cell">llama-bench</span><span class="cell">llama-perplexity</span></div>
+</div>
+<p>一类是<strong>库</strong>：<span class="mono">libggml</span>（张量引擎）和 <span class="mono">libllama</span>（推理库），它们是"引擎本体"，可以被别的程序链接调用——
+课 01 说的"可嵌入"，靠的就是它们。另一类是<strong>可执行程序</strong>，就是你平时直接用的命令：<span class="mono">llama-cli</span>（命令行对话）、
+<span class="mono">llama-server</span>（起一个 HTTP 服务）、<span class="mono">llama-quantize</span>（课 06 用过的量化工具）、<span class="mono">llama-bench</span>（测速）、
+<span class="mono">llama-perplexity</span>（测质量）等等。</p>
+<p>前面说库可以"被别的程序链接"，具体怎么用？你的程序只要<strong>包含 <span class="mono">include/llama.h</span> 这个头文件、再链接上 <span class="mono">libllama</span></strong>，
+就能调用课 01 里那套 C API 来加载模型、跑推理。库可以编成<strong>静态库</strong>（直接打包进你的可执行文件，部署时是单个文件）或<strong>动态库</strong>
+（运行时再加载，多个程序可共享）。课 01 强调的"零依赖单文件可执行"，正是把 libllama 和后端<strong>静态链接</strong>进 llama-cli 的结果。</p>
+<p>这些可执行程序里，最常打交道的是两个：<span class="mono">llama-cli</span> 适合<strong>在命令行里快速试一把</strong>或写脚本；<span class="mono">llama-server</span>
+则会起一个<strong>常驻的 HTTP 服务</strong>，对外提供和 OpenAI 兼容的接口，适合给前端、应用或其它服务调用——你常用的各种本地大模型 App，背后往往就是它。
+两者用的是同一套 <span class="mono">libllama</span>，只是把"入口"包装成了不同形态。</p>
+<p>除了主角库和那几个常用程序，<span class="mono">build/bin</span> 里其实还会有一堆小工具和示例：<span class="mono">llama-gguf</span>（查看 / 操作 GGUF 文件）、
+<span class="mono">llama-tokenize</span>（单独试分词）、各种 <span class="mono">test-*</span> 测试程序，以及 <span class="mono">examples/</span> 下编出来的演示。平时用不到不用管，
+但当你想深入某个细节（比如"这个模型到底被分成哪些张量"）时，往往能在这里找到一个正好趁手的小工具。</p>
+<pre class="code"><span class="cm"># 跑起来: -ngl 把多少层卸载到 GPU</span>
+./build/bin/llama-cli -m model.gguf -p "你好" -ngl 99</pre>
+<p>这里的 <span class="mono">-ngl</span>（即 <span class="mono">n-gpu-layers</span>）很关键：它决定把模型的多少层放到 GPU 上算、其余留在 CPU。显存够就尽量多放
+（<span class="mono">-ngl 99</span> 基本是"能放的全放"），显存不够就只放一部分，CPU / GPU 混合跑。这也正呼应前面的后端抽象：<strong>同一个模型、同一张图，
+能灵活地切在不同硬件上算</strong>。</p>
+<p>怎么确认 GPU 后端真的编进去、也真的用上了？最简单的办法是看<strong>启动日志</strong>。跑 <span class="mono">llama-cli</span> 时，它会打印检测到的设备和每层的分配情况——
+如果你看到类似 "offloaded 33/33 layers to GPU" 的字样，就说明层确实卸载到 GPU 上了。要是发现还在纯 CPU 跑，多半是 <span class="mono">-ngl</span> 没加、
+或者那个后端根本没编进去，回到配置那一步检查 <span class="mono">-D</span> 选项即可。</p>
+<p>把这一课和课 06 连起来看：你选的<strong>量化格式</strong>和你编的<strong>后端</strong>是要<strong>配合</strong>的。每个后端都为常见量化格式（如 Q4_K、Q8_0）写了专门的
+解量化 + 矩阵乘内核，能直接吃量化权重、在算的时候顺手解量化。所以"<strong>选什么量化</strong>"和"<strong>用什么后端</strong>"共同决定了你的实际速度——
+这也是为什么第六部分会专门去看这些内核到底怎么写。</p>
+<p>因为后端是可插拔的、依赖又轻，llama.cpp 还能<strong>交叉编译</strong>到很多目标上：编成安卓 / iOS 的库塞进手机 App、编成 WebAssembly 跑在浏览器里、
+甚至编到树莓派这类小板子上。换一个目标平台，往往只是换一套工具链、调一调 CMake 选项的事，核心代码不用动。这正是"<strong>用 C/C++ + 后端抽象</strong>"
+换来的可移植红利——课 01 说的"到处跑"，在构建层面就是这么实现的。</p>
+<p>关于"可移植性"再多说一句，这里有个容易搞反的点。<strong>从源码自己编</strong>时，ggml 默认会打开 <span class="mono">GGML_NATIVE</span>（针对你这台机器的指令集做优化），
+所以默认编出来的二进制是"<strong>本机特化</strong>"的、跑得快，但<strong>不保证能拷到别的机器上跑</strong>（换台 CPU 可能直接"非法指令"崩掉）。反倒是<strong>官方预编译包</strong>
+为了"谁都能用"，特意关掉 native、改用更通用且运行时自适应的指令，所以它们才是<strong>可移植</strong>的那一档。这就是"<strong>预编译求通用、自编可求性能</strong>"的取舍——
+想兼顾可移植，自己编时把 <span class="mono">GGML_NATIVE</span> 关掉即可。</p>
+<p>最后给个动手的起点：想看"怎么用 libllama 写自己的程序"，仓库里的 <span class="mono">examples/simple</span> 是最好的入口——约两百行 C++ 就走完了加载模型、
+分词、跑解码循环、输出文字的全过程，正好是课 03 那条主线的可运行版本。把它读懂、改一改，你就算真正上手 llama.cpp 的 API 了。</p>
+<p>那为什么不干脆把<strong>所有后端</strong>都编进一个二进制、运行时谁有用谁？因为代价很大：每个 GPU 后端都<strong>拖着一大坨依赖</strong>（CUDA 要 CUDA 运行库、
+Vulkan 要 Vulkan SDK……），全编进来体积暴涨、还要求目标机器装齐这些库——这恰恰违背了 llama.cpp"<strong>零依赖、轻量</strong>"的初心。所以它选择让你
+<strong>按需挑选</strong>：纯 CPU 版可以小到拷哪都能跑，要加速时再单独编一个带某后端的版本。这正是本课末尾思考题的答案方向。</p>
+<p>顺便厘清一个容易混的点：<strong>有些东西是编译期定的，有些是运行期定的</strong>。"<strong>支持哪些硬件后端</strong>"是编译期用 <span class="mono">-D</span> 选项定死的；
+而"<strong>用多大上下文、放几层到 GPU、几个线程、用什么采样</strong>"这些都是<strong>运行时</strong>的命令行参数，换一换不用重编。搞清这条界线，你就不会犯
+"想换个上下文长度还跑去重新编译"这种冤枉错。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> CPU 后端也要选吗？SIMD / BLAS 是什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>CPU 后端默认就开，你基本不用管它。它会<strong>自动探测并用上 CPU 的 SIMD 指令</strong>（x86 的 AVX、ARM 的 NEON 等）来加速矩阵运算——这是现代 CPU 上几乎免费的并行算力。</p>
+    <p>你还可以选装 <span class="mono">GGML_BLAS</span>，用成熟的 BLAS 数学库进一步加速大矩阵乘（对 prefill 阶段帮助明显）。追求极致的人会用 <span class="mono">-march=native</span>
+    让编译器针对你这台机器的指令集优化，但这样编出来的二进制就<strong>不能拷到别的机器</strong>用了——这又是一处"性能 vs 可移植"的老权衡。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么用 CMake，而不是手写 Makefile？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为 llama.cpp 要支持的平台和硬件太多了：Linux / macOS / Windows，CPU / CUDA / Metal / Vulkan / ROCm / SYCL……手写 Makefile 根本管不过来。</p>
+    <p>CMake 的价值在于<strong>跨平台</strong>和<strong>自动探测</strong>：它能找到你系统里装的 CUDA、判断编译器支持哪些指令、再生成对应平台的构建文件
+    （Linux 上是 Make 或 Ninja、Windows 上是 Visual Studio 工程）。项目早期其实有手写的 Makefile，但随着后端越来越多，现在已经<strong>统一以 CMake 为主</strong>。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 运行时怎么决定用哪个后端？多 GPU 怎么办？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>编译时可以把多个后端都编进来；<strong>运行时</strong>，ggml 有一个后端"注册表"，会枚举出当前机器上实际可用的设备（比如检测到一张 NVIDIA 卡）。
+    <span class="mono">-ngl</span> 决定多少层放 GPU。</p>
+    <p>如果有<strong>多张 GPU</strong>，还能按层或按张量把模型<strong>切分到几张卡</strong>上一起算（用 <span class="mono">--split-mode</span> 等参数）。
+    所以"装哪些后端"是编译期的事，"具体用哪个、用几张卡"是运行期的事，两者分开，灵活又清晰。</p>
+  </div>
+</details>
+
+<p>到这里，第二部分的四块基础就拼齐了：课 04 讲清了<strong>模型在算什么</strong>（decoder-only、注意力、KV cache），课 05 讲清了<strong>数据怎么表示</strong>
+（张量、shape / stride），课 06 讲清了<strong>权重怎么压</strong>（量化），这一课讲清了<strong>引擎怎么编、怎么挑硬件</strong>（构建与后端）。有了这四块垫底，
+第三部分我们就能放心地钻进 ggml 引擎内部，去看计算图、内存池、算子这些"机器零件"到底是怎么转起来的了。可以说，第二部分是"地基"，第三部分才开始盖"主楼"。</p>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>ggml 的<strong>后端抽象</strong>（<span class="mono">ggml-backend.h</span>）把"算什么（计算图）"和"在哪算（CPU / GPU）"解耦；加新硬件只需加一个后端。</li>
+    <li>编译两步：<span class="mono">cmake -B build [-D 选项]</span> 配置，<span class="mono">cmake --build build</span> 构建。</li>
+    <li>GPU 后端靠 <span class="mono">-DGGML_CUDA / METAL / VULKAN / HIP ...=ON</span> 在配置时打开；<strong>CPU 后端默认就开</strong>。</li>
+    <li>产物在 <span class="mono">build/bin</span>：库（<span class="mono">libllama</span> / <span class="mono">libggml</span>）+ 程序（<span class="mono">llama-cli</span> / <span class="mono">llama-server</span> / <span class="mono">llama-quantize</span> ……）。</li>
+    <li>运行时 <span class="mono">-ngl</span> 控制把多少层卸载到 GPU。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"后端"做成<strong>可插拔的编译期开关</strong>——同一份 ggml / llama 源码，既能编出一个零依赖、到处能跑的纯 CPU 版，也能编出榨干 CUDA / Metal 的加速版。
+  "<strong>零依赖到处跑</strong>"和"<strong>有 GPU 就尽情加速</strong>"这两个看似矛盾的目标，就靠这套构建 + 后端体系优雅地同时满足了。这也正是第二部分的收尾——你已经备齐了读懂 ggml 引擎内部的全部基础。从下一部分起，我们会把 ggml 这台引擎彻底拆开——计算图怎么建、内存池怎么管、算子怎么算，
+  一个零件一个零件地看个明白。打好了这一层地基，再往上盖楼就稳了。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The last few lessons were about "what things are"; this one is about "<strong>how to build it, how to pick a hardware backend, and what the outputs are</strong>".
+After this you can build a GPU-accelerated llama.cpp from source yourself, and you will see why one codebase runs on CPU, NVIDIA, Apple, and AMD hardware alike.
+This lesson also closes Part 2.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  CMake is like a <strong>general contractor</strong>: you tick boxes on the order ("underfloor heating (CUDA)? central air (Metal / Vulkan)?"), and it lines up the
+  right crews (compilers and each vendor's GPU toolchain), draws the blueprints (generates build files), and hands over a move-in-ready house (executables). You need
+  not know each crew's details - just how to place the order, and this lesson teaches you how.
+</div>
+
+<h2>Backend abstraction: one compute graph, many kinds of hardware</h2>
+<p>As lesson 03 noted, an inference is described as a <strong>compute graph</strong> (a pile of operators: matmul, softmax, rope...). But the same "matmul" is written
+with SIMD on CPU, with CUDA on NVIDIA, with Metal on Apple - wildly different implementations. If the upper inference logic had to worry about all this, the code would
+be a mess.</p>
+<p>ggml's answer is a uniform <strong>backend interface</strong> (<span class="mono">ggml/include/ggml-backend.h</span>): the upper layer only says "compute this graph",
+while "on which hardware, with which instructions" is left to a concrete backend (<span class="mono">ggml-cpu</span>, <span class="mono">ggml-cuda</span>,
+<span class="mono">ggml-metal</span>...). This is exactly the "<strong>decouple 'what to compute' from 'where to compute'</strong>" that lesson 01 kept stressing.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul · softmax · rope ...)</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">interface</span><span class="name">ggml-backend</span></div><div class="ld">uniform backend interface: allocate memory, schedule ops, move data between devices</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
+</div>
+<p>The benefit of this layering: <strong>adding a new hardware needs only a new backend; not one line of upper inference code changes</strong>; and which backends you
+pick at build time decides which hardware your binary "knows". So "build" and "backend" are two sides of the same coin - the build system's main job is to compile in
+the backends you chose.</p>
+<p>One more mechanism: each backend, when compiled in, <strong>registers itself</strong> with ggml, declaring "which ops I can compute, which memory I manage". At
+runtime the scheduler (the sched in <span class="mono">ggml-backend</span>) takes the graph and <strong>dispatches each op to a suitable backend</strong>, moving data
+between CPU and GPU memory as needed. If some op is not yet implemented in the GPU backend, the scheduler can usually <strong>fall back to CPU</strong> for that step -
+so even an unsupported new op will not break the whole graph, it just runs that step a bit slower.</p>
+<p>One more note: <strong>"backend" is not only GPUs</strong>. The CPU is itself a backend; BLAS is a library backend that speeds big matmuls on CPU; Apple's Accelerate
+framework can plug in too. So "backend" is more precisely "<strong>a way to actually carry out the ops</strong>", with GPUs being the most-discussed kind. Grasp this and
+the long list of <span class="mono">ggml-cpu</span>, <span class="mono">ggml-cuda</span>, <span class="mono">ggml-blas</span>, <span class="mono">ggml-metal</span>...
+directories under <span class="mono">ggml/src</span> will not confuse you.</p>
+
+<h2>How to build: two-step CMake</h2>
+<p>llama.cpp uses <strong>CMake</strong> as its build system. From source the standard flow is two steps: first <strong>configure</strong>, then <strong>build</strong>.</p>
+<p>Of course, there is one step before all this: <strong>clone</strong> the source - <span class="mono">git clone</span> the repo, cd in, then run the two CMake steps
+below. For a stable version, checkout the matching release tag; to track the latest, use the default main branch. The whole "<strong>clone -&gt; configure -&gt; build
+-&gt; run</strong>" four-step is how most people get started with llama.cpp.</p>
+<div class="flow">
+  <div class="node"><div class="nt">cmake -B build</div><div class="nd">configure: probe + pick backends</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">cmake --build build</div><div class="nd">compile sources</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">build/bin/</div><div class="nd">libraries + executables</div></div>
+</div>
+<pre class="code"><span class="cm"># CPU only (default)</span>
+cmake -B build
+cmake --build build --config Release -j
+
+<span class="cm"># with NVIDIA CUDA</span>
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release -j</pre>
+<p>Step one <span class="mono">cmake -B build</span> is <strong>configure</strong>: CMake probes your system (is there a CUDA toolchain, which compiler, which CPU
+instruction set), decides which backends to build from your <span class="mono">-D</span> options, and generates the real build files in <span class="mono">build/</span>.
+Step two <span class="mono">cmake --build build</span> is the <strong>actual compile</strong>, turning sources into libraries and executables. <span class="mono">-j</span>
+builds in parallel across cores (much faster); <span class="mono">--config Release</span> means an optimized release build (not the much slower, debug-info Debug build).
+Read it against the flow diagram above and it is clear.</p>
+<p>A first full build may take a few to a dozen-plus minutes (especially with a big backend like CUDA); fortunately CMake supports <strong>incremental builds</strong> -
+after changing a file or two, <span class="mono">cmake --build build</span> only recompiles what is affected, usually in seconds. For more speed, have CMake use
+<strong>Ninja</strong> as the underlying build tool (<span class="mono">cmake -G Ninja -B build</span>), whose parallel scheduling beats classic Make. This is the daily
+"configure once, build repeatedly".</p>
+<p>By the way: <strong>most people do not build at all</strong>. The llama.cpp project ships <strong>prebuilt packages</strong> per platform on GitHub Releases -
+download, unzip, run; many higher-level projects (Ollama, LM Studio) bundle it too. So when do you build from source? When you need <strong>a backend the prebuilt
+package lacks</strong> (e.g. CUDA for your specific card), <strong>the latest dev-branch features</strong>, or to <strong>embed the library into your own
+program</strong>. This lesson is about that hands-on case.</p>
+<p>More on why <span class="mono">--config Release</span> matters. In Release the compiler turns on heavy optimization (vectorization, inlining, dropping asserts and
+debug info), often running <strong>several times faster</strong> than Debug. Unless you are <strong>debugging llama.cpp itself</strong> (stepping, inspecting variables),
+always use Release. That is why official prebuilt packages are Release - for someone who "just wants to run a model", there is no reason to suffer Debug's slowness.</p>
+<p>Before getting hands-on, skim the repo's <span class="mono">docs/build.md</span>: it lists the exact build commands and caveats for every platform and backend
+(including Windows and each GPU's details). This lesson gives you "the map and the intuition", while <span class="mono">docs/build.md</span> is "the step-by-step
+manual"; reading both together saves a lot of first-build detours, and most platform-specific snags have an answer there.</p>
+
+<h2>Picking backends: a tour of the CMake options</h2>
+<p>Whether you want a given GPU backend comes down to one <span class="mono">-D</span> switch at configure time. The common ones:</p>
+<table class="t">
+  <tr><th>CMake option</th><th>hardware / feature enabled</th></tr>
+  <tr><td><span class="mono">GGML_CPU</span> (default ON)</td><td>CPU backend (auto-uses AVX / NEON SIMD)</td></tr>
+  <tr><td><span class="mono">GGML_CUDA</span></td><td>NVIDIA GPU</td></tr>
+  <tr><td><span class="mono">GGML_HIP</span></td><td>AMD GPU (ROCm)</td></tr>
+  <tr><td><span class="mono">GGML_METAL</span></td><td>Apple GPU (often default ON on macOS)</td></tr>
+  <tr><td><span class="mono">GGML_VULKAN</span></td><td>cross-vendor GPU (incl. some integrated)</td></tr>
+  <tr><td><span class="mono">GGML_SYCL</span></td><td>Intel GPU</td></tr>
+  <tr><td><span class="mono">GGML_BLAS</span></td><td>use a BLAS library to speed big matmuls</td></tr>
+</table>
+<pre class="code">option(GGML_CPU    "ggml: enable CPU backend" ON)
+option(GGML_CUDA   "ggml: use CUDA"           OFF)
+option(GGML_METAL  "ggml: use Metal"          ...)
+option(GGML_VULKAN "ggml: use Vulkan"         OFF)
+<span class="cm"># ... HIP / SYCL / OPENCL / BLAS, all in ggml/CMakeLists.txt</span></pre>
+<p>These switches all live in <span class="mono">ggml/CMakeLists.txt</span>. Note the <strong>CPU backend is on by default</strong> (<span class="mono">GGML_CPU=ON</span>),
+so with nothing extra you still get a CPU-runnable llama.cpp; GPU backends default off, so turn on whichever you want with an explicit <span class="mono">-D...=ON</span>.
+On Apple devices Metal is usually on by default. You can also enable several backends at once and decide which to use at runtime.</p>
+<p>The most common pitfall when building yourself is almost always the GPU toolchain. Turning on <span class="mono">-DGGML_CUDA=ON</span> without a proper CUDA Toolkit, or
+a CUDA version mismatched with your driver, errors out at configure - which is actually good: <strong>CMake surfaces the environment problem at "configure" time</strong>,
+instead of failing halfway through compiling. Don't panic at an error; read what it says is missing: no nvcc means install the CUDA Toolkit, a missing library means
+install it as prompted - most issues resolve by following the error message.</p>
+
+<h2>What you get: a tour of the outputs</h2>
+<p>After compiling, all outputs land in <span class="mono">build/bin</span>, in two kinds:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>build/bin outputs</b>: split into "libraries" and "executables"</div>
+  <div class="cells"><span class="lab">libs</span><span class="cell">libggml</span><span class="cell">libllama</span><span class="lab">the engine itself, linkable</span></div>
+  <div class="cells"><span class="lab">programs</span><span class="cell hl">llama-cli</span><span class="cell hl">llama-server</span><span class="cell">llama-quantize</span><span class="cell">llama-bench</span><span class="cell">llama-perplexity</span></div>
+</div>
+<p>One kind is <strong>libraries</strong>: <span class="mono">libggml</span> (the tensor engine) and <span class="mono">libllama</span> (the inference library) - the "engine
+itself", which other programs can link against; lesson 01's "embeddable" rests on these. The other kind is <strong>executables</strong>, the commands you use directly:
+<span class="mono">llama-cli</span> (command-line chat), <span class="mono">llama-server</span> (starts an HTTP service), <span class="mono">llama-quantize</span> (the
+quantizer from lesson 06), <span class="mono">llama-bench</span> (speed), <span class="mono">llama-perplexity</span> (quality), and more.</p>
+<p>We said the libraries can "be linked by other programs" - how exactly? Your program just <strong>includes the <span class="mono">include/llama.h</span> header and links
+<span class="mono">libllama</span></strong> to call the C API from lesson 01 to load a model and run inference. The libraries can be built <strong>static</strong> (baked into
+your executable, a single file to deploy) or <strong>dynamic</strong> (loaded at runtime, shareable across programs). Lesson 01's "zero-dependency single-file
+executable" is exactly the result of <strong>statically linking</strong> libllama and the backends into llama-cli.</p>
+<p>Of these executables, two you will use most: <span class="mono">llama-cli</span> suits <strong>a quick command-line try</strong> or scripting;
+<span class="mono">llama-server</span> starts a <strong>long-running HTTP service</strong> with an OpenAI-compatible API, for front-ends, apps, or other services to call -
+the local-LLM apps you use are often it under the hood. Both use the same <span class="mono">libllama</span>, just wrapping the "entry point" in different forms.</p>
+<p>Besides the star libraries and those common programs, <span class="mono">build/bin</span> also holds a pile of small tools and demos: <span class="mono">llama-gguf</span>
+(inspect / manipulate GGUF files), <span class="mono">llama-tokenize</span> (try tokenization alone), various <span class="mono">test-*</span> programs, and the demos built
+from <span class="mono">examples/</span>. You can ignore them day to day, but when you want to dig into a detail (e.g. "which tensors is this model split into") there is
+often a handy little tool right here.</p>
+<pre class="code"><span class="cm"># run it: -ngl offloads how many layers to the GPU</span>
+./build/bin/llama-cli -m model.gguf -p "Hello" -ngl 99</pre>
+<p>Here <span class="mono">-ngl</span> (i.e. <span class="mono">n-gpu-layers</span>) is key: it decides how many of the model's layers run on the GPU, the rest on CPU.
+With enough VRAM put as many as you can (<span class="mono">-ngl 99</span> is basically "all that fit"); with too little, put only some and run CPU / GPU mixed. This
+echoes the backend abstraction: <strong>the same model, the same graph, flexibly split across different hardware</strong>.</p>
+<p>How do you confirm the GPU backend was really compiled in and is really being used? The simplest way is the <strong>startup log</strong>. When running
+<span class="mono">llama-cli</span> it prints the detected devices and per-layer placement - if you see something like "offloaded 33/33 layers to GPU", layers really went
+to the GPU. If it is still CPU-only, likely <span class="mono">-ngl</span> was omitted or that backend was not compiled in; go back to configure and check the
+<span class="mono">-D</span> options.</p>
+<p>Tying this lesson to lesson 06: the <strong>quantization format</strong> you pick and the <strong>backend</strong> you build must <strong>work together</strong>. Each
+backend has dedicated dequant + matmul kernels for common quant formats (Q4_K, Q8_0), consuming quantized weights directly and dequantizing on the fly. So "<strong>which
+quantization</strong>" and "<strong>which backend</strong>" jointly decide your real-world speed - which is why Part 6 goes to look at how those kernels are actually written.</p>
+<p>Because backends are pluggable and dependencies are light, llama.cpp can also <strong>cross-compile</strong> to many targets: a library for Android / iOS apps,
+WebAssembly to run in the browser, even small boards like a Raspberry Pi. Switching target platform is often just a different toolchain and a few CMake tweaks; the core
+code stays put. This is the portability dividend of "<strong>C/C++ plus a backend abstraction</strong>" - lesson 01's "run anywhere", realized at the build level.</p>
+<p>One more word on "portability", with an easy-to-get-backwards point. When you <strong>build from source</strong>, ggml turns on <span class="mono">GGML_NATIVE</span> by
+default (optimizing for your machine's instruction set), so the default binary is <strong>machine-tuned</strong> and fast, but <strong>not guaranteed to run on other
+machines</strong> (a different CPU may crash with "illegal instruction"). It is the <strong>official prebuilt packages</strong> that, to be "usable by everyone", turn
+native off and use more generic, runtime-adaptive instructions - so those are the <strong>portable</strong> ones. That is the trade: <strong>prebuilt for portability,
+self-build for performance</strong> - and if you want both, just turn <span class="mono">GGML_NATIVE</span> off when building.</p>
+<p>A hands-on starting point: to see "how to write your own program with libllama", the repo's <span class="mono">examples/simple</span> is the best entry - around a couple hundred
+lines of C++ walk the whole path of loading a model, tokenizing, running the decode loop, and printing text, a runnable version of lesson 03's main line. Read it, tweak
+it, and you have truly started using the llama.cpp API.</p>
+<p>So why not just compile <strong>all backends</strong> into one binary and let runtime pick? Because the cost is high: each GPU backend <strong>drags a big pile of
+dependencies</strong> (CUDA needs the CUDA runtime, Vulkan the Vulkan SDK...), so compiling them all balloons the size and demands the target machine have all those
+libraries - which contradicts llama.cpp's "<strong>zero-dependency, lightweight</strong>" ethos. So it lets you <strong>pick what you need</strong>: a CPU-only build can
+be tiny and copy-anywhere, and you build a backend-specific version separately when you want acceleration. That is the direction of this lesson's closing question.</p>
+<p>One easily-confused point: <strong>some things are set at compile time, others at runtime</strong>. "<strong>Which hardware backends</strong>" is fixed at compile time
+with <span class="mono">-D</span> options; but "<strong>context size, how many layers on GPU, thread count, sampling</strong>" are all <strong>runtime</strong> command-line
+flags, changeable without recompiling. Get this line straight and you will not make the mistake of "rebuilding just to change the context length".</p>
+
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Do I even pick the CPU backend? What are SIMD / BLAS? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The CPU backend is on by default; you mostly need not touch it. It <strong>auto-detects and uses your CPU's SIMD instructions</strong> (AVX on x86, NEON on ARM)
+    to speed up matrix math - nearly free parallel compute on modern CPUs.</p>
+    <p>You can also opt into <span class="mono">GGML_BLAS</span> to further speed big matmuls with a mature BLAS library (noticeably helps prefill). The extreme route is
+    <span class="mono">-march=native</span>, letting the compiler optimize for your exact instruction set - but the resulting binary <strong>cannot be copied to another
+    machine</strong>. Another classic "performance vs portability" trade-off.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why CMake instead of a hand-written Makefile? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because llama.cpp must support too many platforms and hardware: Linux / macOS / Windows, CPU / CUDA / Metal / Vulkan / ROCm / SYCL... a hand-written Makefile
+    simply cannot keep up.</p>
+    <p>CMake's value is <strong>cross-platform</strong> and <strong>auto-detection</strong>: it finds your installed CUDA, checks which instructions the compiler supports,
+    and generates the right build files per platform (Make or Ninja on Linux, a Visual Studio project on Windows). The project did have a hand-written Makefile early on,
+    but as backends multiplied it has <strong>standardized on CMake</strong>.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> How is the backend chosen at runtime? What about multiple GPUs? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>You can compile several backends in; <strong>at runtime</strong>, ggml has a backend "registry" that enumerates the devices actually available on the machine
+    (e.g. it detects an NVIDIA card). <span class="mono">-ngl</span> decides how many layers go on the GPU.</p>
+    <p>With <strong>multiple GPUs</strong>, you can <strong>split the model across cards</strong> by layer or by tensor (via parameters like
+    <span class="mono">--split-mode</span>). So "which backends to compile" is a build-time matter, "which to use and across how many cards" a runtime matter - kept
+    separate, flexible and clear.</p>
+  </div>
+</details>
+
+<p>And with that, Part 2's four foundations are complete: lesson 04 clarified <strong>what the model computes</strong> (decoder-only, attention, KV cache), lesson 05
+<strong>how data is represented</strong> (tensors, shape/stride), lesson 06 <strong>how weights are compressed</strong> (quantization), and this one <strong>how the engine
+is built and how hardware is chosen</strong> (build &amp; backends). With these four underneath, Part 3 can confidently dive into the ggml engine to see how the compute
+graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 is the "foundation"; Part 3 starts building the "main floors".</p>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>ggml's <strong>backend abstraction</strong> (<span class="mono">ggml-backend.h</span>) decouples "what to compute (the graph)" from "where (CPU / GPU)"; new hardware just needs a new backend.</li>
+    <li>Two build steps: <span class="mono">cmake -B build [-D options]</span> to configure, <span class="mono">cmake --build build</span> to build.</li>
+    <li>GPU backends are turned on at configure time with <span class="mono">-DGGML_CUDA / METAL / VULKAN / HIP ...=ON</span>; the <strong>CPU backend is on by default</strong>.</li>
+    <li>Outputs are in <span class="mono">build/bin</span>: libraries (<span class="mono">libllama</span> / <span class="mono">libggml</span>) + programs (<span class="mono">llama-cli</span> / <span class="mono">llama-server</span> / <span class="mono">llama-quantize</span> ...).</li>
+    <li>At runtime <span class="mono">-ngl</span> controls how many layers are offloaded to the GPU.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Making "backends" a <strong>pluggable compile-time switch</strong> - the same ggml / llama source can build a zero-dependency, run-anywhere CPU-only binary, or a
+  CUDA / Metal-accelerated one. The two seemingly contradictory goals, "<strong>run anywhere with zero dependencies</strong>" and "<strong>go all-out when a GPU is
+  present</strong>", are met at once, elegantly, by this build-plus-backend system. And that closes Part 2 - you now have all the groundwork to read the ggml engine internals.
+  From the next part on, we take the ggml engine fully apart - how the compute graph is built, how the memory pool is managed, how operators compute - part by part.
+  With this foundation laid, building upward is solid.
+</div>
+""",
+}

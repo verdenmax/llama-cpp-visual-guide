@@ -453,6 +453,73 @@ QUIZZES = {
             },
         ],
     },
+    "07-build-and-backends.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "想编一个支持 NVIDIA GPU 的 llama.cpp，应该怎么做？",
+                    "en": "How do you build a llama.cpp with NVIDIA GPU support?",
+                },
+                "opts": [
+                    {"zh": "配置时加 cmake -B build -DGGML_CUDA=ON", "en": "Configure with cmake -B build -DGGML_CUDA=ON"},
+                    {"zh": "pip install cuda", "en": "pip install cuda"},
+                    {"zh": "运行时加 --gpu 参数", "en": "Add a --gpu flag at runtime"},
+                    {"zh": "手动改源码里的 if", "en": "Manually edit the ifs in the source"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端是编译期的 CMake 开关：配置时用 -DGGML_CUDA=ON 把 CUDA 后端编进去，再 cmake --build。",
+                    "en": "Backends are compile-time CMake switches: configure with -DGGML_CUDA=ON to compile in the CUDA backend, then cmake --build.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 的“后端”(CPU/CUDA/Metal/...)主要解决什么问题？",
+                    "en": "What does ggml's \"backend\" layer (CPU/CUDA/Metal/...) mainly solve?",
+                },
+                "opts": [
+                    {
+                        "zh": "让同一张计算图能派发到不同硬件执行，把“算什么”和“在哪算”解耦",
+                        "en": "It lets the same compute graph dispatch to different hardware, decoupling \"what to compute\" from \"where\"",
+                    },
+                    {"zh": "决定模型的精度", "en": "It decides the model's precision"},
+                    {"zh": "负责量化权重", "en": "It quantizes the weights"},
+                    {"zh": "解析 GGUF 文件", "en": "It parses GGUF files"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端是“执行层”的统一抽象：上层只描述计算图，具体在 CPU/GPU 上怎么算交给各后端实现。",
+                    "en": "The backend is a uniform \"execution layer\": the upper layer only describes the graph; each backend implements how to compute it on CPU/GPU.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "运行时的 -ngl 参数是干什么的？",
+                    "en": "What does the runtime -ngl flag do?",
+                },
+                "opts": [
+                    {
+                        "zh": "决定把模型多少层卸载到 GPU 上算（其余留在 CPU）",
+                        "en": "It decides how many model layers to offload to the GPU (the rest stay on CPU)",
+                    },
+                    {"zh": "选择量化档位", "en": "It selects the quantization tier"},
+                    {"zh": "设置线程数", "en": "It sets the thread count"},
+                    {"zh": "设置上下文长度", "en": "It sets the context length"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "-ngl（n-gpu-layers）控制 GPU 层卸载：显存够就多放，不够就 CPU/GPU 混合跑。",
+                    "en": "-ngl (n-gpu-layers) controls GPU layer offload: put more if VRAM allows, otherwise run CPU/GPU mixed.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么“选哪些后端”是编译期开关，而不是运行时把所有后端都带上？（提示：依赖、体积、零依赖哲学）",
+                "en": "Why are backends a compile-time switch rather than bundling all of them at runtime? (hint: dependencies, size, the zero-dependency philosophy)",
+            },
+        ],
+    },
 }
 
 
