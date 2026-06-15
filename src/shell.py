@@ -72,6 +72,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("13-gguf-format.html", "GGUF 文件格式", "The GGUF file format",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("14-model-loading.html", "模型加载", "Model loading",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -511,6 +513,8 @@ SUBTITLES = {
                               "block byte layout; super-block K-quant; dequant; type_traits"),
     "13-gguf-format.html": ("magic/version · metadata KV · tensor info · 对齐 · mmap",
                             "magic/version; metadata KV; tensor info; alignment; mmap"),
+    "14-model-loading.html": ("llama_model_loader · GGUF metadata/张量清单 · mmap · 分片",
+                              "llama_model_loader; GGUF metadata/tensor map; mmap; splits"),
 }
 
 

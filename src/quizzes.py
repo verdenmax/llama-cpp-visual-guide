@@ -937,6 +937,73 @@ QUIZZES = {
             },
         ],
     },
+    "14-model-loading.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model_loader 主要做什么？",
+                    "en": "What does llama_model_loader mainly do?",
+                },
+                "opts": [
+                    {
+                        "zh": "读 GGUF 的 metadata（超参）和 tensor infos、建按名字的张量清单、（按 use_mmap）把权重数据 mmap 或读入",
+                        "en": "read GGUF metadata (hyperparameters) and tensor infos, build a name-indexed tensor list, and (per use_mmap) mmap or read the weight data",
+                    },
+                    {"zh": "训练这个模型", "en": "train the model"},
+                    {"zh": "把权重重新量化", "en": "re-quantize the weights"},
+                    {"zh": "编译 GPU kernel", "en": "compile GPU kernels"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "loader 不计算，只把字节整理成可用模型：gguf_init_from_file 读头部、weights_map 按名字登记每个张量、use_mmap 时让 data 指针指进文件映射（L13 零拷贝）。",
+                    "en": "The loader computes nothing; it organizes bytes into a usable model: gguf_init_from_file reads the header, weights_map registers each tensor by name, and with use_mmap the data pointers point into the file mapping (L13 zero-copy).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个被分片的大模型，文件名长什么样？",
+                    "en": "What do the filenames of a split large model look like?",
+                },
+                "opts": [
+                    {"zh": "model-00001-of-00003.gguf 这种 of-N 编号", "en": "of-N numbering like model-00001-of-00003.gguf"},
+                    {"zh": "随机哈希名", "en": "random hash names"},
+                    {"zh": "一个 .zip 压缩包", "en": "a single .zip archive"},
+                    {"zh": "永远是单文件，不能分片", "en": "always a single file, never split"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "分片文件名由 llama_split_path 按 \"%s-%05d-of-%05d.gguf\" 拼出；split.count 记总片数；loader 按编号逐片打开、并进同一张 weights_map。",
+                    "en": "Split filenames are built by llama_split_path as \"%s-%05d-of-%05d.gguf\"; split.count records the total; the loader opens each by number and merges into one weights_map.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "加载器怎么知道模型有多少层、多大维度？",
+                    "en": "How does the loader know the model's layer count and dimensions?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 get_key(llm_kv, ...) 从 GGUF 的 metadata KV 里读（自描述）",
+                        "en": "it reads them from the GGUF metadata KVs via get_key(llm_kv, ...) (self-describing)",
+                    },
+                    {"zh": "靠猜测", "en": "by guessing"},
+                    {"zh": "读一个外部 config.json", "en": "by reading an external config.json"},
+                    {"zh": "在代码里硬编码", "en": "hard-coded in the code"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "超参全在 GGUF 的 metadata KV 里（L13 自描述）；loader 用模板方法 get_key 把键映射到具体超参字段，无需外部配置或猜测。",
+                    "en": "Hyperparameters live in the GGUF metadata KVs (L13 self-description); the loader's templated get_key maps a key to a specific field, with no external config or guessing.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L13，说说 llama_model_loader 为什么用 mmap 加载权重数据能做到“秒加载”又省内存。（提示：零拷贝/按页/共享）",
+                "en": "Drawing on L13, explain why llama_model_loader's mmap loading of weight data achieves 'instant load' and saves memory. (hint: zero-copy / paging / sharing)",
+            },
+        ],
+    },
 }
 
 
