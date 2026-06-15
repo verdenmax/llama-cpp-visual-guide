@@ -252,6 +252,73 @@ QUIZZES = {
             },
         ],
     },
+    "04-llm-inference-basics.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "为什么说 KV cache 是“精确优化”而不是“近似”？",
+                    "en": "Why is the KV cache an exact optimization rather than an approximation?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为因果掩码下旧 token 看不到新 token，它们的 K/V 不随新 token 改变",
+                        "en": "Because under the causal mask, old tokens cannot see new tokens, so their K/V never change as new tokens arrive",
+                    },
+                    {"zh": "因为它把 logits 也缓存了", "en": "Because it also caches the logits"},
+                    {"zh": "因为权重被量化了", "en": "Because the weights are quantized"},
+                    {"zh": "因为只缓存了最后一层", "en": "Because it only caches the last layer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "因果掩码使旧 token 的 K/V 与未来无关，故缓存它们是精确的、与从头重算逐位相等，不是近似。",
+                    "en": "The causal mask makes old tokens' K/V independent of the future, so caching them is exact - bit for bit equal to recomputing - not approximate.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "decoder-only 模型里，token 之间“互相交流”主要发生在？",
+                    "en": "In a decoder-only model, where do tokens mainly \"talk to each other\"?",
+                },
+                "opts": [
+                    {"zh": "带因果掩码的自注意力层", "en": "The self-attention layer (with the causal mask)"},
+                    {"zh": "FFN（前馈层）", "en": "The FFN (feed-forward layer)"},
+                    {"zh": "RMSNorm", "en": "RMSNorm"},
+                    {"zh": "输出投影", "en": "The output projection"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "FFN、归一化、投影都对每个 token 独立处理，只有注意力让 token 互相看。",
+                    "en": "FFN, norm, and projection all process each token independently; only attention lets tokens see each other.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "decode 时为什么用 llama_get_logits_ith(ctx, -1) 只取最后一个位置？",
+                    "en": "During decode, why does llama_get_logits_ith(ctx, -1) read only the last position?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为预测“下一个 token”只需要最后一个位置的输出，其余位置不用算输出",
+                        "en": "Because predicting the next token needs only the last position's output; other positions need no output",
+                    },
+                    {"zh": "因为前面的位置算错了", "en": "Because the earlier positions were computed wrong"},
+                    {"zh": "因为 -1 表示取平均", "en": "Because -1 means take the average"},
+                    {"zh": "因为只有最后一层有 logits", "en": "Because only the last layer has logits"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "自回归每步只产出一个新 token，对应的就是序列最后一个位置那一行 logits。",
+                    "en": "Autoregression emits one new token per step, which corresponds to the logits row at the sequence's last position.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "如果去掉因果掩码（允许看到未来 token），自回归生成还成立吗？KV cache 还精确吗？",
+                "en": "If you removed the causal mask (letting tokens see the future), would autoregressive generation still hold? Would the KV cache still be exact?",
+            },
+        ],
+    },
 }
 
 

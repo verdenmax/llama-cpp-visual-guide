@@ -52,6 +52,8 @@ PAGES = [
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
     ("03-inference-lifecycle.html", "一次推理的生命周期", "Lifecycle of one inference",
      "第一部分 · 宏观全景", "Part 1 · The Big Picture"),
+    ("04-llm-inference-basics.html", "大模型推理基础", "LLM inference fundamentals",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -471,6 +473,8 @@ SUBTITLES = {
                             "ggml / src·llama / common / tools / converters"),
     "03-inference-lifecycle.html": ("prompt -> 分词 -> 计算图 -> logits -> 采样 -> token",
                                     "prompt -> tokenize -> graph -> logits -> sample -> token"),
+    "04-llm-inference-basics.html": ("decoder-only · 因果掩码 · 自回归 · KV cache 为何精确",
+                                     "decoder-only; causal mask; autoregression; why the KV cache is exact"),
 }
 
 
