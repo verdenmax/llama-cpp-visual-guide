@@ -855,3 +855,393 @@ ne/nb: <strong>shape is the "grammar" of ggml programming</strong>; get the gram
 </div>
 """,
 }
+
+LESSON_06 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+量化是 llama.cpp 能把一个 7B、甚至 70B 大模型塞进消费级显卡 / 内存的"<strong>压缩术</strong>"。课 01 提过它有 4/5/8 bit 多种档位；
+这一课讲清三件事：<strong>为什么能压、怎么压（块量化）、Q4_0 / Q8_0 / K-quant 各是什么</strong>。
+硬核的字节级细节留到第三部分的"量化格式"课，这里先把直觉建立起来。
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  量化很像把一张高清照片<strong>按小块压缩</strong>：每个小方块里，先记一个"基准亮度"（scale），块内每个像素只存"相对基准差几档"。
+  因为同一小块里的像素通常很接近，几档就够用，压完看起来还和原图差不多。把"像素"换成"模型权重"，这就是块量化——块越小、基准越贴合，还原得越像。
+</div>
+
+<h2>为什么要量化：显存与带宽</h2>
+<p>训练好的大模型，本质是<strong>一大堆浮点数</strong>（权重）。默认用 16 位浮点（FP16 / BF16）存，每个权重 2 字节——一个 70 亿（7B）参数的模型，
+光权重就要 <strong>约 14 GB</strong>，普通显卡和内存直接被劝退。量化就是<strong>用更少的位数近似地存这些权重</strong>：8 bit 砍掉一半、4 bit 再砍一半，
+显存需求成倍下降。</p>
+<div class="cols">
+  <div class="col"><h4>FP16（原始）</h4><p>每权重 2 字节<br><strong>7B -&gt; 约 14 GB</strong></p></div>
+  <div class="col"><h4>Q8_0（8-bit）</h4><p>约 1 字节 / 权重<br><strong>7B -&gt; 约 7 GB</strong></p></div>
+  <div class="col"><h4>Q4_0（4-bit）</h4><p>约 0.56 字节 / 权重<br><strong>7B -&gt; 约 3.9 GB</strong></p></div>
+</div>
+<p>省显存只是其一。更关键的是<strong>带宽</strong>：课 04 说过，decode 阶段的瓶颈常常是"把权重从显存搬到计算单元"。权重越小，每生成一个 token 要搬的
+字节越少，<strong>速度直接变快</strong>。所以量化往往是"既省显存、又提速"的双赢，代价只是<strong>一点点精度损失</strong>——而大模型对这种损失通常相当宽容。</p>
+<p>为什么大模型能被压到这么狠还能用？因为它的权重里<strong>有大量冗余</strong>：每个权重的具体数值并不需要那么高的精度，模型真正依赖的是这些权重
+<strong>整体的统计规律</strong>。把每个数从"非常精确"降到"大致正确"，单看一个损失明显，但成千上万个权重一起作用时，误差很大程度上互相抵消，最终输出几乎不受影响。
+这也是为什么 4-bit 量化常常只让模型质量掉一点点，却换来几倍的体积和速度收益。</p>
+<p>那为什么大家最常用 <strong>4-bit</strong> 而不是更狠的 2-bit、或更稳的 8-bit？这是个"<strong>甜点</strong>"问题：8-bit 几乎不掉质量，但省得不够多；
+2-bit、3-bit 省得很狠，质量却开始明显滑坡。<strong>4-bit（尤其是 K-quant 的 4-bit）落在曲线的拐点上</strong>——体积压到原来的约四分之一，质量却只掉一点点，
+于是成了社区下载量最大的档位。具体选哪档，还要看你的硬件、对质量的容忍度，以及模型本身大小（越大的模型，往往越扛得住激进量化）。</p>
+<p>顺便补一点背景：前面反复出现的 <strong>FP32 / FP16 / BF16</strong> 都是浮点格式，区别在用多少位、以及怎么分配给"指数"和"尾数"。
+FP32 是 4 字节的全精度，训练时常用；FP16 和 BF16 都是 2 字节的半精度，其中 BF16 牺牲一点尾数精度，换来和 FP32 一样大的表示范围，在大模型里很受欢迎。
+量化则更进一步，把这些浮点直接换成<strong>更省的整数表示</strong>——可以理解为"在 FP16 已经省了一半的基础上，再往下狠压一截"。</p>
+<p>把这个体量感再放大一点：一个 70B 模型，FP16 要 <strong>约 140 GB</strong>——这是好几张顶级显卡才装得下的量；而 Q4_K_M 量化后只要 <strong>约 40 GB 上下</strong>，
+一张 48 GB 显存的卡、或一台大内存的机器就能跑起来。正是量化，把"只有大公司机房玩得起"的大模型，变成了"发烧友在家也能折腾"的东西。</p>
+
+<h2>块量化：每块一个 scale</h2>
+<p>那"用更少位数近似"具体怎么做？最朴素的想法：给整个权重矩阵定一个统一的缩放系数（scale），把浮点数等比例映射到一个小整数范围。
+但问题是，<strong>同一个矩阵里权重的大小可能差很多</strong>，用一个全局 scale，大值和小值没法兼顾，误差会很大。</p>
+<p>块量化的办法是：把权重切成一个个<strong>小块</strong>（Q4_0 里每块 32 个权重），<strong>每块各自配一个 scale</strong>。块内动态范围小、scale 贴得准，
+近似自然更精确。这就是"分而治之"在量化上的体现：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>块量化</b>：32 个浮点权重 -&gt; 1 个 scale（半精度）+ 32 个低位整数</div>
+  <div class="cells"><span class="lab">原始</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">…</span><span class="cell">-0.15</span><span class="lab">32 个 fp</span></div>
+  <div class="cells"><span class="lab">量化后</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">…</span><span class="cell q">5</span><span class="lab">1 个 scale + 32 个 4-bit</span></div>
+</div>
+<p>再换个角度理解"为什么块内范围小就更准"：量化的本质是"用有限的几档去近似连续的值"，<strong>这几档要覆盖的范围越窄，每一档之间的间隔就越小、分得越细</strong>。
+一整个矩阵里既有 0.001 也有 5.0，硬用 16 档去分，间隔必然很粗；可一旦切成小块，每块内部的数往往挤在相近的量级，同样 16 档分得就细多了。这就是块量化精度更高的根本道理。</p>
+<p>落到代码上，Q4_0 的"一块"就是一个紧凑的结构体（来自 <span class="mono">ggml/src/ggml-common.h</span>）：</p>
+<pre class="code"><span class="cm">#define QK4_0 32       // 一块 32 个权重</span>
+<span class="kw">typedef struct</span> {
+    ggml_half d;            <span class="cm">// scale (fp16), 每块一个</span>
+    uint8_t   qs[QK4_0/2];  <span class="cm">// 32 个权重, 每个压成 4-bit, 两个挤一字节</span>
+} block_q4_0;              <span class="cm">// 2 + 16 = 18 字节 -> 平均 4.5 bit/权重</span></pre>
+<p>算笔账：一块 32 个权重，用 <strong>2 字节</strong>存 scale（半精度浮点 <span class="mono">ggml_half</span>）、<strong>16 字节</strong>存 32 个 4-bit 量化值
+（每个权重 4 bit，两个挤进一个字节），合计 <strong>18 字节</strong>。摊到每个权重就是 18 × 8 / 32 = <strong>4.5 bit</strong>——这就是"4-bit 量化"实际占用稍多于
+4 bit 的原因：那多出来的 0.5 bit，是每块都要分摊的那个 scale。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Q4_0 一块 = 18 字节</b>，装下 32 个权重</div>
+  <div class="cells"><span class="lab">布局</span><span class="cell scale">d：2 字节 scale</span><span class="cell q">qs：32 个 4-bit = 16 字节</span></div>
+  <div class="cells"><span class="lab">合计</span><span class="cell">2 + 16 = 18 字节</span><span class="cell dim">摊到每权重 = 4.5 bit</span></div>
+</div>
+<p>用的时候要"解量化"：把存的 4-bit 整数还原成近似的浮点值。Q4_0 的规则很简单（对应 <span class="mono">ggml/src/ggml-quants.c</span> 的
+<span class="mono">dequantize_row_q4_0</span>）：</p>
+<pre class="code"><span class="cm"># 每个 4-bit 值 q 在 0..15, 还原成带符号的权重:</span>
+for i in range(32):
+    q    = nibble(qs, i)     <span class="cm"># 0..15</span>
+    x[i] = (q - 8) * d       <span class="cm"># 减 8 居中到 0 附近, 再乘以这一块的 scale d</span></pre>
+<p>那个 <span class="mono">-8</span> 是把 0..15 的无符号范围<strong>平移到 -8..7</strong>，让它对称地分布在 0 两侧（权重有正有负）；乘以 <span class="mono">d</span>
+则把这个小整数还原回原来的尺度。整个过程没有查表、没有分支，就是一个减法加一个乘法，非常适合在 CPU / GPU 上批量快速跑——这正是 Q4_0 这种
+"<strong>对称量化</strong>"格式简单高效的原因。</p>
+<p>反过来，<strong>怎么从浮点权重得到那些 4-bit 整数</strong>？以对称量化为例：先在这一块里找出<strong>绝对值最大</strong>的那个权重，用它定出 scale——Q4_0 的具体做法是 <span class="mono">d = max / -8</span>（<span class="mono">max</span> 是块内<strong>带符号</strong>的极值权重），相当于把这个极值锚定到量化范围的端点 <span class="mono">q=0</span>，从而用满 <span class="mono">-8..7</span> 整个范围；再把每个权重除以 <span class="mono">d</span>、四舍五入、加上偏移，压进 0..15。所以"量化"和"解量化"是一对互逆操作：
+量化时 <span class="mono">q = round(x/d) + 8</span>，用时 <span class="mono">x ≈ (q-8)*d</span>。两次取整之间丢掉的那点零头，正是量化误差的来源。</p>
+<p>注意那个 scale <span class="mono">d</span> 本身是用<strong>半精度浮点（fp16）</strong>存的，而不是再压成整数——因为每块只有一个 scale，占比很小，用 fp16 保住它的精度很划算，
+而它的准确度直接决定整块的还原质量。把视角拉远，你会看到一条清晰的<strong>"量化粒度"谱系</strong>：最粗的是整个张量共享一个 scale（per-tensor），
+中间是每块一个（per-block，如 Q4_0），最细的是超块里每个子块一个（K-quant）。<strong>粒度越细，精度越高，但要存的 scale 也越多</strong>——
+量化格式的演化，基本就是在这条线上找更好的平衡点。</p>
+<p>顺带一问：块大小为什么常取 <strong>32</strong>？这又是一处权衡——块越小，scale 越贴合局部、精度越高，但要存的 scale 越多、压缩率下降；块越大则相反。
+32 是精度和体积之间一个经过实践检验的折中，也正好契合硬件上常见的并行宽度，算起来顺手。K-quant 用 256 的超块再细分，则是想"<strong>既要大块的高压缩率、又要小块的高精度</strong>"，
+试图鱼和熊掌兼得。</p>
+
+<h2>Q8_0 / K-quant：精度与压缩的取舍</h2>
+<p>Q4_0 只是量化大家庭里的一个。同样的"块 + scale"思路，换一换参数，就是不同档位：</p>
+<table class="t">
+  <tr><th>类型</th><th>每权重 bit</th><th>块 / 超块</th><th>特点</th></tr>
+  <tr><td><strong>Q8_0</strong></td><td>约 8.5 bit</td><td>32</td><td>最接近 FP16，体积大，质量最稳</td></tr>
+  <tr><td><strong>Q4_0</strong></td><td>约 4.5 bit</td><td>32</td><td>最轻最快，精度损失较明显</td></tr>
+  <tr><td><strong>Q4_K</strong></td><td>约 4.5 bit</td><td>超块 256</td><td>子块各有 scale + 混合精度，同 bit 下更准</td></tr>
+</table>
+<p><strong>Q8_0</strong> 用 8 bit 存每个权重（块还是 32，结构是 <span class="mono">d + 32 个 int8</span>），约 8.5 bit/权重，体积大但精度最接近原始 FP16，
+常用于对质量最敏感的场合。<strong>Q4_0</strong> 最轻，4.5 bit，速度快、省显存，但精度损失相对明显。</p>
+<p>而 <strong>K-quant</strong>（名字里带 K，如 <span class="mono">Q4_K</span>、<span class="mono">Q5_K</span>）是更聪明的一档：它用更大的"<strong>超块</strong>"
+（super-block，<span class="mono">QK_K = 256</span> 个权重），超块内再分成若干子块，每个子块有自己更精细的 scale 和 min，还会对不同张量<strong>混合用不同位宽</strong>。
+结果是：在<strong>同样的平均 bit 数</strong>下，K-quant 的困惑度（perplexity，衡量模型预测好坏的指标，越低越好）通常明显低于对应的 Q4_0 / Q5_0。
+今天大家从网上下载的 GGUF，大多就是 <span class="mono">Q4_K_M</span> 这类 K-quant 档位。</p>
+<p>把这些名字连起来读就有规律了：<strong>字母 Q + 位数 + 可选的 K + 可选的档位后缀</strong>。<span class="mono">Q4_0</span> 是"4-bit、对称、基础块"，
+<span class="mono">Q4_K_M</span> 是"4-bit、K-quant、中档混合精度"，<span class="mono">Q8_0</span> 是"8-bit、对称、基础块"。下次在下载页面看到一长串
+<span class="mono">Q3_K_S</span>、<span class="mono">Q5_K_M</span>、<span class="mono">Q6_K</span>，你就能一眼读出它大概多大、多准了。</p>
+<pre class="code"><span class="kw">typedef struct</span> {
+    ggml_half d;          <span class="cm">// 超块整体 scale</span>
+    ggml_half dmin;       <span class="cm">// 超块整体 min (非对称)</span>
+    uint8_t scales[...];  <span class="cm">// 各子块更细的 scale/min (6-bit, 已量化)</span>
+    uint8_t qs[...];      <span class="cm">// 量化值</span>
+} block_q4_K;            <span class="cm">// QK_K = 256, 简化自 ggml-common.h</span></pre>
+<p>还有两点值得知道。其一，<strong>llama.cpp 量化的主要是"权重"</strong>，推理时流动的"激活值"通常仍用较高精度（如 fp16/fp32）计算——因为权重是静态的、
+占绝大多数内存，最值得压；激活是动态的，过度量化更容易伤精度。其二，<strong>并非每个张量都用同一档</strong>：像词嵌入、输出投影这种对质量影响大的张量，
+常被刻意保留在更高的位宽，这正是 K-quant 的 <span class="mono">_M</span> / <span class="mono">_L</span> 档在做的"混合精度"。</p>
+<p>那这些量化文件是怎么来的？流程很直接：先用转换脚本把原始模型导出成一个<strong>高精度的 GGUF</strong>（通常是 fp16），再用 <span class="mono">llama-quantize</span>
+工具把它"压"成目标档位，比如 <span class="mono">llama-quantize model-f16.gguf model-Q4_K_M.gguf Q4_K_M</span>。量化是<strong>一次性的离线操作</strong>，
+压完得到一个更小的 GGUF，之后每次加载运行的都是这个小文件——所以量化的开销只在"制作"时付一次，运行时只享受它带来的省与快。</p>
+<p>怎么衡量"量化掉了多少质量"？最常用的指标是<strong>困惑度（perplexity）</strong>：拿一段标准文本，看模型对"下一个词"预测得有多准，困惑度越低越好。
+社区常做的事，就是把同一个模型的各个量化档位都跑一遍困惑度、列成表对比——你会看到 Q8_0 几乎和 fp16 持平、Q4_K_M 只高一丁点，而 Q2_K 则明显抬高。
+<span class="mono">llama-perplexity</span> 工具就是干这个的，第七部分会专门讲怎么用它给量化"打分"。一个经验法则：<strong>在显存放得下的前提下，尽量选高一档</strong>，质量更有保障。</p>
+<p>最后澄清一个边界：量化只压缩权重的<strong>表示方式</strong>（每个数用几位存），<strong>并不改变模型的结构</strong>——层数、维度、参数个数都原封不动。
+这和<strong>剪枝</strong>（删掉一部分权重 / 神经元）、<strong>蒸馏</strong>（训练一个更小的新模型去模仿大模型）是完全不同的三条压缩路线。量化最大的好处就是
+<strong>几乎免费、即插即用</strong>：不用重新训练，一个命令就能把现成模型变小变快，这也是它在本地推理里如此普及的原因。</p>
+<p>量化的损失也不是对所有任务一视同仁。<strong>闲聊、续写这类容错高的任务，4-bit 几乎感觉不出差别</strong>；而<strong>代码生成、数学推理、长链条逻辑</strong>这类
+"一步错步步错"的任务，对精度更敏感，激进量化时更容易看出退步。所以同一个 Q4 模型，你拿它聊天觉得很好、拿它写复杂代码却偶有翻车，并不奇怪——
+这时往上换一档（如 <span class="mono">Q5_K</span>、<span class="mono">Q6_K</span> 甚至 <span class="mono">Q8_0</span>）往往能找回不少。</p>
+<p>还有个实用细节：<strong>不同硬件后端对量化格式的支持和优化程度并不一样</strong>。同一个 Q4_K 模型，在 CPU 上靠 SIMD 指令快速解量化、在 CUDA 上有专门的核函数，
+速度表现可能差别不小。所以"选哪个量化档位"有时也要看你打算在什么硬件上跑——这部分在第六部分讲内核时会更具体。整体而言，主流的 Q4_K / Q8_0 在各后端都有良好支持，闭眼选基本不会错。</p>
+<p>最后把这一课和课 02、课 05 串起来：一个量化后的 GGUF 文件，里面每个权重张量都带着自己的 <span class="mono">type</span>（课 05 讲过），
+有的标着 <span class="mono">Q4_K</span>、有的可能是 <span class="mono">Q6_K</span> 或 <span class="mono">F16</span>。加载时，<span class="mono">llama-model-loader</span>
+按张量的 type 决定怎么读、怎么解量化；计算时，ggml 的算子（如矩阵乘）能<strong>直接吃量化权重</strong>，在乘法的内层即时解量化，省去"先整体还原成 fp32 再算"的开销。
+所以"量化"不是一个孤立的步骤，而是<strong>贯穿存储（GGUF）、加载（loader）、计算（ggml 算子）的一条完整链路</strong>。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Q4_0 / Q4_1 / Q8_0 后面的数字和 0/1 是什么意思？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>数字是<strong>每个权重的 bit 数</strong>：Q4 = 4 bit、Q8 = 8 bit。后缀 <span class="mono">_0</span> / <span class="mono">_1</span> 区分量化的"对称性"。</p>
+    <p><span class="mono">_0</span> 是<strong>对称量化</strong>，只存一个 scale、零点固定（就像前面 Q4_0 的 <span class="mono">(q-8)*d</span>）；<span class="mono">_1</span> 是
+    <strong>非对称量化</strong>，额外再存一个最小值 min（偏移量），还原公式变成 <span class="mono">q*d + min</span>。多存一个 min 让它能更贴合那些
+    "不以 0 为中心"的权重分布，精度略高，但每块要多占几字节。要不要这个 min，就是 <span class="mono">_0</span> 和 <span class="mono">_1</span> 的区别。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> K-quant（Q4_K_M 等）凭什么更准？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>关键在<strong>更细粒度的 scale</strong>。普通 Q4_0 是"32 个权重共享 1 个 scale"；K-quant 用 256 个权重的超块，但超块内部再切成多个子块，
+    <strong>每个子块有自己的 scale 和 min</strong>（这些子块 scale 本身又被量化成 6-bit 存起来，省空间）。粒度越细，scale 越能贴合局部，误差越小。</p>
+    <p>名字里的 <span class="mono">_S</span> / <span class="mono">_M</span> / <span class="mono">_L</span>（small / medium / large）是不同的"<strong>混合精度</strong>"档：
+    对模型里更重要的层用稍高的位宽、不重要的用低位宽，在体积和精度之间取不同平衡。所以同样标着"4-bit"，<span class="mono">Q4_K_M</span> 往往比
+    <span class="mono">Q4_0</span> 又准又只大一点点——这也是它成为主流下载格式的原因。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> imatrix 是什么？和量化什么关系？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><strong>imatrix（importance matrix，重要性矩阵）</strong>常被误解为"决定每个权重用几 bit"——其实<strong>不是</strong>。它是用一批<strong>校准数据</strong>
+    跑一遍模型，统计出"每个权重对最终输出的影响有多大"。</p>
+    <p>量化时，<strong>对更重要的权重，让它的量化误差更小</strong>（在选 scale、取整时更偏向保住它们）。换句话说，imatrix 改变的是"<strong>误差怎么分配</strong>"，
+    让宝贵的精度用在刀刃上，而<strong>不改变</strong>位宽分配本身。它由 <span class="mono">llama-imatrix</span> 工具生成，再喂给 <span class="mono">llama-quantize</span>
+    一起用，通常能在<strong>不增大体积</strong>的前提下进一步降低困惑度。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>量化 = 用更少 bit 近似存权重，<strong>省显存、省带宽、提速</strong>，代价是少量精度损失（大模型通常很宽容）。</li>
+    <li><strong>块量化</strong>：把权重切成小块、每块一个 scale；Q4_0 每块 32 个权重 = 2 字节 scale + 16 字节量化值 = <strong>18 字节 = 4.5 bit/权重</strong>。</li>
+    <li>解量化就是 <span class="mono">x = (q - 8) * d</span> 这么简单（Q4_0 对称量化）。</li>
+    <li><strong>Q8_0</strong> 准而大、<strong>Q4_0</strong> 轻而糙、<strong>K-quant</strong>（超块 + 子块 scale + 混合精度）同 bit 下更准，是当下主流。</li>
+    <li><strong>imatrix 是误差加权、不是位宽分配。</strong></li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  "<strong>每块一个 scale</strong>"——就这一个朴素的想法，把"浮点数动态范围太大"这个全局难题，拆成了无数个"块内范围很小"的局部小问题，
+  于是低到 4 bit 也能保住可用的精度。大模型能从数据中心走进你的笔记本，这一招居功至伟。记住一句话：<strong>量化不是把模型变笨，
+  而是把"过度精确"的浪费挤掉</strong>——用刚刚好的位数，装下模型真正需要的那部分信息。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Quantization is the "<strong>compression trick</strong>" that lets llama.cpp fit a 7B - or even 70B - model into consumer GPU / RAM. Lesson 01 mentioned its
+4/5/8-bit tiers; this lesson nails down three things: <strong>why it compresses, how it compresses (block quantization), and what Q4_0 / Q8_0 / K-quant are</strong>.
+The hardcore byte-level details wait for Part 3's "quantization format" lesson; here we build the intuition first.
+</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Quantization is like compressing a high-res photo <strong>block by block</strong>: in each small block, record one "baseline brightness" (scale), and each pixel
+  stores only "how many notches off the baseline". Since pixels in one block are usually close, a few notches suffice and the result still looks like the original.
+  Swap "pixels" for "model weights" and that is block quantization - the smaller the block and the tighter the baseline, the closer the reconstruction.
+</div>
+
+<h2>Why quantize: memory and bandwidth</h2>
+<p>A trained model is essentially <strong>a huge pile of floating-point numbers</strong> (weights). Stored by default in 16-bit float (FP16 / BF16), each weight is
+2 bytes - a 7-billion-parameter (7B) model needs <strong>about 14 GB</strong> for weights alone, which ordinary GPUs and RAM simply refuse. Quantization
+<strong>approximates these weights with fewer bits</strong>: 8-bit halves it, 4-bit halves it again, dropping memory needs several-fold.</p>
+<div class="cols">
+  <div class="col"><h4>FP16 (original)</h4><p>2 bytes / weight<br><strong>7B -&gt; ~14 GB</strong></p></div>
+  <div class="col"><h4>Q8_0 (8-bit)</h4><p>~1 byte / weight<br><strong>7B -&gt; ~7 GB</strong></p></div>
+  <div class="col"><h4>Q4_0 (4-bit)</h4><p>~0.56 bytes / weight<br><strong>7B -&gt; ~3.9 GB</strong></p></div>
+</div>
+<p>Saving memory is only half of it. The bigger win is <strong>bandwidth</strong>: as lesson 04 noted, the decode bottleneck is often "moving weights from memory to
+the compute units". Smaller weights mean fewer bytes to move per generated token, so it is <strong>directly faster</strong>. Quantization is thus usually a win-win -
+less memory and more speed - at the cost of just <strong>a little accuracy</strong>, which large models tolerate quite well.</p>
+<p>Why can a big model be squeezed this hard and still work? Because its weights carry <strong>a lot of redundancy</strong>: each weight's exact value need not be so
+precise; what the model really relies on is the <strong>overall statistical pattern</strong> of the weights. Dropping each number from "very precise" to "roughly
+right" looks lossy one at a time, but across thousands of weights the errors largely cancel, leaving the output almost unaffected. That is why 4-bit quantization
+often costs only a sliver of quality for several-fold gains in size and speed.</p>
+<p>So why is <strong>4-bit</strong> the go-to rather than more aggressive 2-bit or safer 8-bit? It is a "<strong>sweet spot</strong>" question: 8-bit barely loses
+quality but saves too little; 2-bit and 3-bit save a lot but quality starts to slide noticeably. <strong>4-bit (especially K-quant 4-bit) sits at the knee of the
+curve</strong> - about a quarter the size, only a sliver of quality lost - so it is the most-downloaded tier. Which exact tier still depends on your hardware, your
+quality tolerance, and the model's own size (bigger models usually withstand aggressive quantization better).</p>
+<p>A bit of background: the <strong>FP32 / FP16 / BF16</strong> that keep coming up are all floating-point formats, differing in how many bits they use and how they
+split them between "exponent" and "mantissa". FP32 is 4-byte full precision, common in training; FP16 and BF16 are both 2-byte half precision, with BF16 trading some
+mantissa precision for the same wide range as FP32, which large models like. Quantization goes a step further, replacing these floats with <strong>cheaper integer
+representations</strong> - think of it as "squeezing further down, on top of the half FP16 already saved".</p>
+<p>To scale the intuition up: a 70B model in FP16 needs <strong>about 140 GB</strong> - several top-end GPUs' worth; quantized to Q4_K_M it needs only <strong>around
+40 GB</strong>, runnable on a single 48 GB card or a big-RAM machine. Quantization is exactly what turned "only a corporate data center can afford it" models into
+something "an enthusiast can tinker with at home".</p>
+
+<h2>Block quantization: one scale per block</h2>
+<p>So how exactly do we "approximate with fewer bits"? The naive idea: pick one global scale for the whole weight matrix and map the floats proportionally into a
+small integer range. The problem: <strong>weight magnitudes within one matrix can vary a lot</strong>, and a single global scale cannot serve both large and small
+values well, so the error is big.</p>
+<p>Block quantization's answer: cut the weights into small <strong>blocks</strong> (32 weights per block in Q4_0) and give <strong>each block its own scale</strong>.
+A block's dynamic range is small, the scale fits tightly, and the approximation is naturally more accurate. This is "divide and conquer" applied to quantization:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Block quantization</b>: 32 float weights -&gt; 1 scale (half-precision) + 32 low-bit integers</div>
+  <div class="cells"><span class="lab">original</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">…</span><span class="cell">-0.15</span><span class="lab">32 floats</span></div>
+  <div class="cells"><span class="lab">quantized</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">…</span><span class="cell q">5</span><span class="lab">1 scale + 32 4-bit</span></div>
+</div>
+<p>Another way to see "why a small in-block range is more accurate": quantization approximates continuous values with a few fixed levels, and <strong>the narrower
+the range those levels must cover, the smaller the gap between levels and the finer the quantization</strong>. A whole matrix holding both 0.001 and 5.0 forced into 16
+levels has coarse gaps; but cut into small blocks, the numbers in each block usually cluster at a similar magnitude, so the same 16 levels resolve them far more finely.
+That is the root reason block quantization is more accurate.</p>
+<p>In code, one Q4_0 "block" is a compact struct (from <span class="mono">ggml/src/ggml-common.h</span>):</p>
+<pre class="code"><span class="cm">#define QK4_0 32       // 32 weights per block</span>
+<span class="kw">typedef struct</span> {
+    ggml_half d;            <span class="cm">// scale (fp16), one per block</span>
+    uint8_t   qs[QK4_0/2];  <span class="cm">// 32 weights, each 4-bit, two packed per byte</span>
+} block_q4_0;              <span class="cm">// 2 + 16 = 18 bytes -> 4.5 bit/weight on average</span></pre>
+<p>Do the math: a block of 32 weights uses <strong>2 bytes</strong> for the scale (half-precision <span class="mono">ggml_half</span>) and <strong>16 bytes</strong> for 32
+4-bit quants (4 bits each, two packed into a byte), totaling <strong>18 bytes</strong>. Per weight that is 18 x 8 / 32 = <strong>4.5 bit</strong> - which is why "4-bit
+quantization" actually takes a bit more than 4 bits: the extra 0.5 bit is the per-block scale, amortized over the block.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Q4_0 one block = 18 bytes</b>, holding 32 weights</div>
+  <div class="cells"><span class="lab">layout</span><span class="cell scale">d: 2-byte scale</span><span class="cell q">qs: 32 x 4-bit = 16 bytes</span></div>
+  <div class="cells"><span class="lab">total</span><span class="cell">2 + 16 = 18 bytes</span><span class="cell dim">per weight = 4.5 bit</span></div>
+</div>
+<p>To use it you "dequantize": restore the stored 4-bit integers to approximate floats. Q4_0's rule is simple (cf. <span class="mono">dequantize_row_q4_0</span> in
+<span class="mono">ggml/src/ggml-quants.c</span>):</p>
+<pre class="code"><span class="cm"># each 4-bit value q in 0..15, restored to a signed weight:</span>
+for i in range(32):
+    q    = nibble(qs, i)     <span class="cm"># 0..15</span>
+    x[i] = (q - 8) * d       <span class="cm"># subtract 8 to center near 0, then scale by the block's d</span></pre>
+<p>The <span class="mono">-8</span> shifts the unsigned 0..15 range to <strong>-8..7</strong>, placing it symmetrically around 0 (weights are positive and negative);
+multiplying by <span class="mono">d</span> restores the small integer to the original scale. The whole thing has no lookup table and no branches - just a subtract and a
+multiply - perfect for running fast in bulk on CPU / GPU. That is why a "<strong>symmetric quantization</strong>" format like Q4_0 is so simple and efficient.</p>
+<p>Conversely, <strong>how do you get those 4-bit integers from float weights</strong>? For symmetric quantization: find the largest-magnitude weight in the block and
+use it to set the scale; Q4_0's recipe is <span class="mono">d = max / -8</span> (<span class="mono">max</span> is the block's <strong>signed</strong> extreme weight),
+anchoring that extreme to the end of the range (<span class="mono">q=0</span>) so the full <span class="mono">-8..7</span> range is used; then divide each weight by
+<span class="mono">d</span>, round, and add the offset to pack into 0..15. So "quantize" and "dequantize" are inverse operations: quantize with
+<span class="mono">q = round(x/d) + 8</span>, use with <span class="mono">x ~= (q-8)*d</span>. The little remainder lost between the two roundings is exactly where
+quantization error comes from.</p>
+<p>Note the scale <span class="mono">d</span> itself is stored in <strong>half precision (fp16)</strong>, not further squeezed to an integer - since there is only one
+scale per block its overhead is tiny, and keeping its precision in fp16 is well worth it because its accuracy directly determines the whole block's reconstruction
+quality. Zooming out, you see a clear <strong>"granularity spectrum"</strong>: coarsest is one scale for the whole tensor (per-tensor), middle is one per block
+(per-block, like Q4_0), finest is one per sub-block within a super-block (K-quant). <strong>Finer granularity means higher accuracy but more scales to store</strong> -
+the evolution of quantization formats is basically finding better balance points along this line.</p>
+<p>A side question: why is the block size often <strong>32</strong>? Another trade-off - smaller blocks fit the local scale better and raise accuracy but need more
+scales, lowering the compression ratio; larger blocks do the reverse. 32 is a practice-tested compromise between accuracy and size, and it also matches common hardware
+parallel widths, so it computes nicely. K-quant's 256-weight super-block with sub-division then tries to get "<strong>both the high compression of big blocks and the
+high accuracy of small ones</strong>".</p>
+
+<h2>Q8_0 / K-quant: trading accuracy against compression</h2>
+<p>Q4_0 is just one member of the quantization family. The same "block + scale" idea, with different parameters, gives different tiers:</p>
+<table class="t">
+  <tr><th>Type</th><th>bits / weight</th><th>block / super-block</th><th>character</th></tr>
+  <tr><td><strong>Q8_0</strong></td><td>~8.5 bit</td><td>32</td><td>closest to FP16, large, most stable quality</td></tr>
+  <tr><td><strong>Q4_0</strong></td><td>~4.5 bit</td><td>32</td><td>lightest and fastest, more visible accuracy loss</td></tr>
+  <tr><td><strong>Q4_K</strong></td><td>~4.5 bit</td><td>super-block 256</td><td>per-sub-block scales + mixed precision, more accurate at the same bits</td></tr>
+</table>
+<p><strong>Q8_0</strong> stores each weight in 8 bits (block still 32, struct is <span class="mono">d + 32 int8</span>), ~8.5 bit/weight - large but closest to the original
+FP16, used where quality matters most. <strong>Q4_0</strong> is lightest at 4.5 bit, fast and memory-saving, but with more visible accuracy loss.</p>
+<p>And <strong>K-quant</strong> (the ones with K, like <span class="mono">Q4_K</span>, <span class="mono">Q5_K</span>) is a smarter tier: it uses a larger
+"<strong>super-block</strong>" (<span class="mono">QK_K = 256</span> weights), splits it into several sub-blocks each with its own finer scale and min, and even
+<strong>mixes bit-widths</strong> across tensors. The result: at the <strong>same average bits</strong>, K-quant's perplexity (a measure of prediction quality, lower
+is better) is usually clearly lower than the matching Q4_0 / Q5_0. The GGUF files people download today are mostly K-quant tiers like
+<span class="mono">Q4_K_M</span>.</p>
+<p>Read these names together and a pattern emerges: <strong>letter Q + bit count + optional K + optional tier suffix</strong>. <span class="mono">Q4_0</span> is
+"4-bit, symmetric, basic block", <span class="mono">Q4_K_M</span> is "4-bit, K-quant, medium mixed precision", <span class="mono">Q8_0</span> is "8-bit, symmetric, basic
+block". Next time you see a long list of <span class="mono">Q3_K_S</span>, <span class="mono">Q5_K_M</span>, <span class="mono">Q6_K</span> on a download page, you can read
+off roughly how big and how accurate each is.</p>
+<pre class="code"><span class="kw">typedef struct</span> {
+    ggml_half d;          <span class="cm">// super-block overall scale</span>
+    ggml_half dmin;       <span class="cm">// super-block overall min (asymmetric)</span>
+    uint8_t scales[...];  <span class="cm">// finer per-sub-block scale/min (6-bit, quantized)</span>
+    uint8_t qs[...];      <span class="cm">// quants</span>
+} block_q4_K;            <span class="cm">// QK_K = 256, simplified from ggml-common.h</span></pre>
+<p>Two more things worth knowing. First, <strong>llama.cpp mainly quantizes "weights"</strong>; the "activations" flowing during inference are usually still computed
+in higher precision (fp16/fp32) - weights are static and dominate memory, so they are most worth compressing, while activations are dynamic and over-quantizing them
+hurts accuracy more easily. Second, <strong>not every tensor uses the same tier</strong>: high-impact tensors like the embedding and output projection are often
+deliberately kept at higher bit-widths - exactly the "mixed precision" the K-quant <span class="mono">_M</span> / <span class="mono">_L</span> tiers do.</p>
+<p>So where do these quantized files come from? The flow is direct: first export the original model to a <strong>high-precision GGUF</strong> (usually fp16) with the
+conversion script, then "compress" it to the target tier with the <span class="mono">llama-quantize</span> tool, e.g.
+<span class="mono">llama-quantize model-f16.gguf model-Q4_K_M.gguf Q4_K_M</span>. Quantization is a <strong>one-time offline operation</strong>; you get a smaller GGUF and
+run that small file every time afterwards - so you pay the quantization cost once at "manufacture", and only enjoy the savings and speed at runtime.</p>
+<p>How do you measure "how much quality quantization cost"? The most common metric is <strong>perplexity</strong>: take a standard text and see how well the model
+predicts the "next word" - lower is better. A common community exercise is to run perplexity across a model's quant tiers and tabulate them - you will see Q8_0 nearly
+matching fp16, Q4_K_M only a hair higher, and Q2_K clearly higher. The <span class="mono">llama-perplexity</span> tool does exactly this, and Part 7 covers using it to
+"grade" quantization. A rule of thumb: <strong>pick one tier higher whenever memory allows</strong>, for safer quality.</p>
+<p>Finally, a boundary to clarify: quantization only compresses the weights' <strong>representation</strong> (how many bits each number uses); it <strong>does not change
+the model's structure</strong> - layer count, dimensions, parameter count all stay. That makes it a different path from <strong>pruning</strong> (removing some
+weights/neurons) and <strong>distillation</strong> (training a smaller new model to mimic a big one). Quantization's big advantage is being <strong>nearly free and
+plug-and-play</strong>: no retraining, one command shrinks and speeds up an existing model - which is why it is so ubiquitous in local inference.</p>
+<p>Quantization's loss is not uniform across tasks. <strong>Forgiving tasks like chat and free continuation barely show a difference at 4-bit</strong>; but
+<strong>code generation, math reasoning, long chains of logic</strong> - where one wrong step cascades - are more sensitive to precision and show regressions more
+readily under aggressive quantization. So it is not odd that the same Q4 model feels great chatting but occasionally trips on complex code - bumping up a tier
+(<span class="mono">Q5_K</span>, <span class="mono">Q6_K</span>, even <span class="mono">Q8_0</span>) often recovers a lot.</p>
+<p>Another practical detail: <strong>different hardware backends support and optimize quant formats to different degrees</strong>. The same Q4_K model may perform quite
+differently dequantizing via SIMD on CPU versus a dedicated kernel on CUDA. So "which tier" sometimes also depends on what hardware you will run on - Part 6 on kernels
+gets concrete about this. Overall, the mainstream Q4_K / Q8_0 are well supported on all backends, so you can pick them blind without much risk.</p>
+<p>Finally, tying this lesson to lessons 02 and 05: a quantized GGUF carries, for each weight tensor, its own <span class="mono">type</span> (from lesson 05) - some
+marked <span class="mono">Q4_K</span>, some maybe <span class="mono">Q6_K</span> or <span class="mono">F16</span>. At load time, <span class="mono">llama-model-loader</span>
+reads and dequantizes per tensor type; at compute time, ggml's operators (like matmul) can <strong>consume quantized weights directly</strong>, dequantizing on the fly
+in the inner loop, skipping the cost of fully restoring to fp32 first. So "quantization" is not an isolated step but <strong>a full chain across storage (GGUF), loading
+(loader), and computation (ggml operators)</strong>.</p>
+
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What do the numbers and the 0/1 in Q4_0 / Q4_1 / Q8_0 mean? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The number is <strong>bits per weight</strong>: Q4 = 4-bit, Q8 = 8-bit. The suffix <span class="mono">_0</span> / <span class="mono">_1</span> distinguishes the
+    quantization's "symmetry".</p>
+    <p><span class="mono">_0</span> is <strong>symmetric</strong> - it stores only a scale with a fixed zero point (like Q4_0's <span class="mono">(q-8)*d</span> above);
+    <span class="mono">_1</span> is <strong>asymmetric</strong> - it stores an extra minimum (offset), so the formula becomes <span class="mono">q*d + min</span>. The extra
+    min lets it fit weight distributions that are "not centered on 0", giving slightly better accuracy at a few extra bytes per block. Whether to keep that min is
+    exactly the <span class="mono">_0</span> vs <span class="mono">_1</span> difference.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is K-quant (Q4_K_M etc.) more accurate? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The key is <strong>finer-grained scales</strong>. Plain Q4_0 is "32 weights share 1 scale"; K-quant uses a 256-weight super-block but cuts it into several
+    sub-blocks, <strong>each with its own scale and min</strong> (these sub-block scales are themselves quantized to 6 bits to save space). Finer granularity means the
+    scale fits the local data better, so error shrinks.</p>
+    <p>The <span class="mono">_S</span> / <span class="mono">_M</span> / <span class="mono">_L</span> (small / medium / large) in the name are different
+    "<strong>mixed-precision</strong>" tiers: use slightly higher bits for the model's more important layers and lower bits for the rest, balancing size and accuracy
+    differently. So even labeled "4-bit", <span class="mono">Q4_K_M</span> is often both more accurate and only slightly larger than <span class="mono">Q4_0</span> - which
+    is why it became the mainstream download format.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> What is imatrix, and how does it relate to quantization? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><strong>imatrix (importance matrix)</strong> is often misread as "deciding how many bits each weight gets" - it is <strong>not</strong>. It runs the model over a
+    batch of <strong>calibration data</strong> to measure "how much each weight influences the final output".</p>
+    <p>During quantization, <strong>more important weights are kept with smaller quantization error</strong> (the scale choice and rounding lean toward preserving them).
+    In other words, imatrix changes <strong>how the error is distributed</strong>, spending precious precision where it matters, while <strong>not changing</strong> the
+    bit-width allocation itself. It is produced by the <span class="mono">llama-imatrix</span> tool and fed to <span class="mono">llama-quantize</span>, usually lowering
+    perplexity further <strong>without increasing size</strong>.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Quantization = approximate weights with fewer bits, <strong>saving memory and bandwidth and gaining speed</strong>, at a small accuracy cost (large models tolerate it well).</li>
+    <li><strong>Block quantization</strong>: cut weights into blocks, one scale per block; Q4_0 has 32 weights/block = 2-byte scale + 16 bytes of quants = <strong>18 bytes = 4.5 bit/weight</strong>.</li>
+    <li>Dequantization is just <span class="mono">x = (q - 8) * d</span> (Q4_0 symmetric quantization).</li>
+    <li><strong>Q8_0</strong> accurate but large, <strong>Q4_0</strong> light but coarse, <strong>K-quant</strong> (super-block + per-sub-block scales + mixed precision) more accurate at the same bits and is today's mainstream.</li>
+    <li><strong>imatrix is error weighting, not bit-width allocation.</strong></li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  "<strong>One scale per block</strong>" - that single plain idea turns the global problem of "floats have too wide a dynamic range" into countless local problems of
+  "a block's range is small", so even 4 bits can hold usable accuracy. That large models can walk out of the data center and onto your laptop owes much to this one move. Remember one line:
+  <strong>quantization does not make the model dumber; it squeezes out the waste of "over-precision"</strong> - using just enough bits to hold the information the model actually needs.
+</div>
+""",
+}

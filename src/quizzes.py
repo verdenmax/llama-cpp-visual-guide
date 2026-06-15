@@ -386,6 +386,73 @@ QUIZZES = {
             },
         ],
     },
+    "06-quantization-intro.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "块量化（每块一个 scale）为什么比“整个张量共用一个 scale”更准？",
+                    "en": "Why is block quantization (one scale per block) more accurate than one scale for the whole tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "每块自带 scale，块内动态范围更小，近似误差更小",
+                        "en": "Each block has its own scale, so its dynamic range is smaller and the approximation error is smaller",
+                    },
+                    {"zh": "因为用了更多 bit", "en": "Because it uses more bits"},
+                    {"zh": "因为压缩率更高", "en": "Because the compression ratio is higher"},
+                    {"zh": "因为完全不丢数据", "en": "Because it loses no data at all"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "全局一个 scale 没法兼顾大值和小值；切成小块、每块各配 scale，局部范围小、贴得准，误差自然更小。",
+                    "en": "One global scale cannot serve large and small values at once; per-block scales fit local ranges tightly, so error shrinks.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "Q4_0 每个权重平均约几 bit？（每块 32 权重 = 2 字节 scale + 16 字节量化值）",
+                    "en": "About how many bits per weight does Q4_0 use? (per 32-weight block = 2-byte scale + 16 bytes of quants)",
+                },
+                "opts": [
+                    {"zh": "约 4.5 bit", "en": "About 4.5 bit"},
+                    {"zh": "正好 4 bit", "en": "Exactly 4 bit"},
+                    {"zh": "8 bit", "en": "8 bit"},
+                    {"zh": "2 bit", "en": "2 bit"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "(2 + 16) 字节 × 8 / 32 = 4.5 bit；多出的 0.5 bit 是每块都要分摊的那个 scale。",
+                    "en": "(2 + 16) bytes x 8 / 32 = 4.5 bit; the extra 0.5 bit is the per-block scale amortized over the block.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "imatrix（重要性矩阵）在量化里起什么作用？",
+                    "en": "What role does imatrix (importance matrix) play in quantization?",
+                },
+                "opts": [
+                    {
+                        "zh": "用校准数据按权重的重要性来加权量化误差，让重要权重更准；不改变位宽分配",
+                        "en": "It uses calibration data to weight quantization error by weight importance, keeping important weights more accurate; it does not change bit-width allocation",
+                    },
+                    {"zh": "决定每个权重用几 bit", "en": "It decides how many bits each weight gets"},
+                    {"zh": "它本身是一种新的量化格式", "en": "It is itself a new quantization format"},
+                    {"zh": "它给模型增加显存占用", "en": "It increases the model's memory footprint"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "imatrix 改变的是“误差怎么分配”，让精度用在重要权重上；位宽由量化档位（如 Q4_K）决定，与 imatrix 无关。",
+                    "en": "imatrix changes how error is distributed, spending precision on important weights; bit-width is set by the quant tier (e.g. Q4_K), independent of imatrix.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "同样压到约 4bit，为什么 Q4_K 通常比 Q4_0 困惑度更低？（提示：super-block 与子块 scale）",
+                "en": "At roughly 4 bits, why does Q4_K usually have lower perplexity than Q4_0? (hint: super-block and per-sub-block scales)",
+            },
+        ],
+    },
 }
 
 

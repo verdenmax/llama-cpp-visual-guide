@@ -56,6 +56,8 @@ PAGES = [
      "第二部分 · 前置基础", "Part 2 · Foundations"),
     ("05-tensors.html", "张量是什么", "What is a tensor",
      "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("06-quantization-intro.html", "量化入门", "Quantization, intuitively",
+     "第二部分 · 前置基础", "Part 2 · Foundations"),
 ]
 
 
@@ -479,6 +481,8 @@ SUBTITLES = {
                                      "decoder-only; causal mask; autoregression; why the KV cache is exact"),
     "05-tensors.html": ("shape/stride/行优先 · ggml_tensor 字段 · view 零拷贝",
                         "shape/stride/row-major; ggml_tensor fields; zero-copy views"),
+    "06-quantization-intro.html": ("为什么量化 · 块量化 · Q4_0/Q8_0/K-quant 一览",
+                                   "why quantize; block quantization; Q4_0/Q8_0/K-quant tour"),
 }
 
 
