@@ -60,6 +60,18 @@ PAGES = [
      "第二部分 · 前置基础", "Part 2 · Foundations"),
     ("07-build-and-backends.html", "构建系统与后端", "Build system & backends",
      "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("08-ggml-core-objects.html", "ggml 核心对象", "ggml core objects",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("09-compute-graph.html", "计算图：惰性构建", "The compute graph: lazy build",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("10-graph-execution.html", "图的执行与调度", "Graph execution & scheduling",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("11-core-operators.html", "核心算子", "Core operators",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("12-quant-formats.html", "量化格式细节", "Quantization formats in detail",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("13-gguf-format.html", "GGUF 文件格式", "The GGUF file format",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -417,7 +429,7 @@ def page(filename, content, home_href="../index.html"):
         p = PAGES[idx - 1]
         prev_link = (
             f'<a class="prev" href="{p[0]}"><div class="dir">{bi("← 上一课", "← Prev")}</div>'
-            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+            f'<div class="ttl">{bi(esc(p[1]), esc(p[2]))}</div></a>'
         )
     else:
         prev_link = (
@@ -428,7 +440,7 @@ def page(filename, content, home_href="../index.html"):
         p = PAGES[idx + 1]
         next_link = (
             f'<a class="next" href="{p[0]}"><div class="dir">{bi("下一课 →", "Next →")}</div>'
-            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+            f'<div class="ttl">{bi(esc(p[1]), esc(p[2]))}</div></a>'
         )
     else:
         next_link = (
@@ -451,7 +463,7 @@ def page(filename, content, home_href="../index.html"):
 <div class="topbar">
   <div class="topbar-inner">
     <a class="home" href="{home}">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
-    <span class="pill">{bi(part_zh, part_en)}</span>
+    <span class="pill">{bi(esc(part_zh), esc(part_en))}</span>
     <span class="pill">{idx+1:02d} / {total:02d}</span>
     <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
@@ -459,8 +471,8 @@ def page(filename, content, home_href="../index.html"):
 </div>
 <div class="wrap">
   <div class="hero">
-    <div class="part">{bi(part_zh, part_en)}</div>
-    <h1><span class="lang-zh">{title_zh}</span><span class="lang-en">{title_en}</span></h1>
+    <div class="part">{bi(esc(part_zh), esc(part_en))}</div>
+    <h1><span class="lang-zh">{esc(title_zh)}</span><span class="lang-en">{esc(title_en)}</span></h1>
   </div>
   <div class="lang-zh">{content["zh"]}</div>
   <div class="lang-en">{content["en"]}</div>
@@ -487,6 +499,18 @@ SUBTITLES = {
                                    "why quantize; block quantization; Q4_0/Q8_0/K-quant tour"),
     "07-build-and-backends.html": ("CMake 两步走 · 后端选项 · 产物在 build/bin · -ngl",
                                    "two-step CMake; backend options; build/bin outputs; -ngl"),
+    "08-ggml-core-objects.html": ("ggml_context · 内存池 arena · no-malloc bump 分配",
+                                  "ggml_context; the memory-pool arena; no-malloc bump allocation"),
+    "09-compute-graph.html": ("先建图后执行 · op/src 反向指针 · nodes vs leafs",
+                              "build-then-run; op/src back-pointers; nodes vs leafs"),
+    "10-graph-execution.html": ("backend 执行 · sched 多后端调度 · ggml-alloc 内存复用",
+                                "backend compute; multi-backend sched; ggml-alloc memory reuse"),
+    "11-core-operators.html": ("mul_mat 形状推导 · rms_norm/rope/soft_max_ext · CPU 计算",
+                               "mul_mat shapes; rms_norm/rope/soft_max_ext; CPU compute"),
+    "12-quant-formats.html": ("block 字节布局 · super-block K-quant · 解量化 · type_traits",
+                              "block byte layout; super-block K-quant; dequant; type_traits"),
+    "13-gguf-format.html": ("magic/version · metadata KV · tensor info · 对齐 · mmap",
+                            "magic/version; metadata KV; tensor info; alignment; mmap"),
 }
 
 
@@ -502,15 +526,15 @@ def index_page(lesson_prefix="lessons/"):
 
     blocks = []
     for pz, pe in order:
-        blocks.append(f'<div class="toc-part">{bi(pz, pe)}</div>')
+        blocks.append(f'<div class="toc-part">{bi(esc(pz), esc(pe))}</div>')
         for num, fname, tz, te in groups[pz]:
             sz, se = SUBTITLES.get(fname, ("", ""))
             blocks.append(
                 f'<a href="{lesson_prefix}{fname}"><span class="n">{num:02d}</span>'
-                f'<span class="tt"><span class="lang-zh">{tz}</span>'
-                f'<span class="lang-en">{te}</span></span>'
-                f'<span class="ts"><span class="lang-zh">{sz}</span>'
-                f'<span class="lang-en">{se}</span></span></a>'
+                f'<span class="tt"><span class="lang-zh">{esc(tz)}</span>'
+                f'<span class="lang-en">{esc(te)}</span></span>'
+                f'<span class="ts"><span class="lang-zh">{esc(sz)}</span>'
+                f'<span class="lang-en">{esc(se)}</span></span></a>'
             )
     toc = "\n".join(blocks)
     total = len(PAGES)

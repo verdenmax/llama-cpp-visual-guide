@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>10 · 图的执行与调度 / Graph execution &amp; scheduling - llama.cpp 图解教程</title>
+<meta name="description" content="第三部分 · ggml 引擎｜图的执行与调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="10 · 图的执行与调度 / Graph execution &amp; scheduling - llama.cpp 图解教程">
+<meta property="og:description" content="第三部分 · ggml 引擎｜图的执行与调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="10 · 图的执行与调度 / Graph execution &amp; scheduling - llama.cpp 图解教程">
+<meta name="twitter:description" content="第三部分 · ggml 引擎｜图的执行与调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第三部分 · ggml 引擎</span><span class="lang-en">Part 3 · The ggml engine</span></span>
+    <span class="pill">10 / 13</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:76%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第三部分 · ggml 引擎</span><span class="lang-en">Part 3 · The ggml engine</span></div>
+    <h1><span class="lang-zh">图的执行与调度</span><span class="lang-en">Graph execution &amp; scheduling</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课，我们把整张计算图<strong>搭</strong>了出来——但它此刻还只是一具"指针搭成的骨架"，里面一个数都没算。这一课，就让这张图真正
+<strong>跑起来</strong>：先给它分配内存，再按拓扑序逐个算出每个节点；如果你的机器上既有 CPU 又有 GPU，还要在多个后端之间协调分工。
+这一课接上 L07（后端是什么）和 L09（图是什么），把"先建图、后执行"的后半截补完整。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">换句话说，前两课我们一直在"<strong>纸上谈兵</strong>"——L08 备好内存池、L09 画好计算图，但<strong>没有一个真实的数字被算出来</strong>。
+这一课是"<strong>临门一脚</strong>"：把图变成结果。你会看到，这一脚踢得相当讲究：不是简单地从头到尾算一遍就完事，而是要<strong>精打细算地用内存</strong>、还要<strong>聪明地把活儿分给不同硬件</strong>。
+正是这两件事，把"能算"变成了"又快又省地算"，也让 ggml 配得上"<strong>高性能推理引擎</strong>"这个名号。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  执行一张计算图，像<strong>施工队照着图纸盖楼</strong>：先看懂整张图纸、算出总共要多少材料、堆放在哪（<strong>内存分配</strong>），
+  再按"先打地基、后盖楼层"的顺序一层层施工（<strong>按拓扑序算节点</strong>）；要是场地不够大，就把已经用不上的脚手架拆掉、把场地<strong>腾出来给后面的工序复用</strong>（<strong>内存复用</strong>）。
+  图纸（L09）已经画好，这一课讲的就是"怎么照图施工"。施工的两大讲究——<strong>省料</strong>和<strong>分工</strong>——正是这一课的两条主线。
+</div>
+
+<h2>执行三步走</h2>
+<p>把"让一张图算出结果"这件事拆开，正好是三步，顺次发生：</p>
+<div class="flow">
+  <div class="node"><div class="nt">建图</div><div class="nd">L09: 填 op/src</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">规划内存</div><div class="nd">ggml-alloc</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">逐节点执行</div><div class="nd">backend compute</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">输出</div><div class="nd">结果张量有数了</div></div>
+</div>
+<p>第一步建图是上一课的事。这一课的主角是中间两步：<strong>规划内存</strong>（决定每个张量的数据放在缓冲区的哪个位置）和<strong>逐节点执行</strong>
+（按拓扑序把每个算子真正算出来）。这两步做完，图里那些原本空着的结果张量，<span class="mono">data</span> 就被填上了真实的数字——你终于能读到结果了。
+听起来直白，但"规划内存"这一步藏着 ggml 一个相当漂亮的优化，值得细看。我们先讲"省料"（内存），再讲"分工"（后端与调度）。</p>
+<p>为什么"规划内存"要<strong>单独成为一步</strong>、而不是边算边随手分配？这正是惰性建图的红利所在。如果边算边分配，你算到第 6 层时，根本不知道第 20 层会不会还要用第 6 层的输出，
+只能<strong>保守地把它留着</strong>。而现在图是完整的，规划器可以在<strong>真正动手算之前</strong>，先把整张图从头到尾扫一遍，把"<strong>每块内存什么时候用、什么时候能让出来</strong>"算得明明白白，
+再开始执行。"先规划、后执行"，就像出门前先把行李箱怎么装规划好，而不是边走边往里塞——前者总能塞得更紧。</p>
+
+<h2>内存复用：ggml-alloc 的妙招</h2>
+<p>先问个问题：一张有上千个节点的图，是不是要为每个节点的输出都单独留一块内存？如果真这么做，峰值内存会大得吓人。
+但 ggml 不这么干——它发现，<strong>很多中间结果是"用完即弃"的</strong>：第 5 层的输出喂给第 6 层之后，就再也用不到了，那块内存完全可以<strong>让第 8 层的输出来复用</strong>。
+这正是 <span class="mono">ggml-alloc</span>（图分配器 <span class="mono">ggml_gallocr</span>）干的事：</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>内存复用</b>：张量 A 用完后，它占的那块内存被后来的张量 C 接手（同一块地，先住 A、后住 C）</div>
+  <div class="cells"><span class="lab">时刻 1</span><span class="cell hl">A</span><span class="cell">B</span><span class="cell dim">空闲</span></div>
+  <div class="cells"><span class="lab">时刻 2</span><span class="cell dim">A 已弃</span><span class="cell">B</span><span class="cell hl">C 复用 A 的地</span></div>
+</div>
+<p>它凭什么能这么精准地复用？<strong>全靠 L09 那张完整的图</strong>。因为图把"谁依赖谁"说得一清二楚，分配器可以<strong>预先推算出每个张量的"生命周期"</strong>
+——它从哪个节点开始被需要、到哪个节点之后就再没人用了。一旦某个张量"寿终正寝"，它占的内存立刻被归还，供后面的张量复用。把这套逻辑写成伪代码：</p>
+<pre class="code"><span class="cm"># 对应 ggml/src/ggml-alloc.c 的 gallocr 规划逻辑(简化)</span>
+<span class="kw">def</span> <span class="fn">plan</span>(graph):
+    <span class="kw">for</span> t <span class="kw">in</span> graph.nodes:                 <span class="cm"># 按拓扑序</span>
+        t.offset = free_blocks.<span class="fn">best_fit</span>(nbytes(t))  <span class="cm"># 从空闲块里找一块复用</span>
+        <span class="kw">for</span> s <span class="kw">in</span> t.src:
+            <span class="kw">if</span> <span class="fn">last_use</span>(s) == t:          <span class="cm"># s 在这之后再没人用了</span>
+                free_blocks.<span class="fn">give_back</span>(s)  <span class="cm"># 归还它的内存, 供后面复用</span></pre>
+<p>这里的关键词是 <span class="mono">best_fit</span>（从空闲块里挑一块大小最合适的）和 <span class="mono">give_back</span>（张量用完就归还内存）。
+ggml-alloc 内部维护一组"空闲块"，分配时找最合适的复用，释放时把相邻的空闲块合并成更大的块。<strong>因为提前看到了整张图，它能把内存复用到极致</strong>——
+实际跑下来，峰值内存常常只有"每个张量各占一块"的几分之一。这就是 L09 强调"先建图"<strong>真正的回报之一</strong>：没有完整的图，就没法做这种全局的内存规划。</p>
+<p>这件事用一个生活场景就能体会：想象一条很长的流水线，每道工序都会产出一个半成品交给下一道。<strong>笨办法</strong>是给每个半成品都准备一个专属货架，流水线越长、货架越多，仓库迟早爆满。
+<strong>聪明办法</strong>是：一个半成品被下一道工序取走后，它的货架立刻腾出来，给后面的半成品用——因为你<strong>提前知道</strong>整条流水线的全貌，知道每个半成品什么时候"功成身退"。
+ggml-alloc 就是这个聪明的仓库管理员，而 L09 的计算图，就是它手里那张"<strong>全流程图</strong>"。少了这张图，它就只能用笨办法。</p>
+<p>顺带说一个常见误区：内存复用<strong>不会</strong>影响计算结果的正确性。有人担心"A 的地盘给了 C，会不会把 A 的数据弄乱？"——不会，因为复用只发生在 A <strong>确定不再被任何人需要之后</strong>。
+分配器严格按生命周期办事：只要还有谁可能读 A，A 的内存就绝不会被征用。所以内存复用是一种<strong>完全无损</strong>的优化，省的是空间，动不了结果——这一点和 L06 说的"量化是有损、KV cache 是无损"那个区分，是同一种思维。</p>
+
+<h2>逐节点执行：后端登场</h2>
+<p>内存规划好了，终于到了"真正算"的一步。这一步由<strong>后端</strong>（L07 讲过的 CPU/CUDA/Metal 等）来执行。最简单的情形是只用一个后端：</p>
+<pre class="code"><span class="cm">// 简化的用法; 涉及 ggml-backend.h / ggml-cpu.h / ggml-alloc.h</span>
+ggml_backend_t be = <span class="fn">ggml_backend_cpu_init</span>();   <span class="cm">// 选一个后端(也可以是 cuda/metal...)</span>
+<span class="fn">ggml_gallocr_alloc_graph</span>(galloc, graph);       <span class="cm">// 按规划真正分配内存</span>
+<span class="fn">ggml_backend_graph_compute</span>(be, graph);         <span class="cm">// 逐节点执行!</span></pre>
+<p><span class="mono">ggml_backend_graph_compute</span> 做的事，就是<strong>按拓扑序遍历 <span class="mono">graph.nodes</span>，对每个节点调用该后端对应的算子实现</strong>
+（matmul 调 matmul 核、softmax 调 softmax 核……这些核函数是 L11、第六部分的主题）。因为 L09 保证了拓扑序，每算到一个节点，它的输入<strong>必定已经算好</strong>，
+所以从头到尾扫一遍就完事。算完最后一个节点，输出张量里就有结果了。叶子（权重、输入）则全程不计算，只是被算子读取。</p>
+<p>这里要破除一个幻觉：<span class="mono">ggml_backend_graph_compute</span> 这个函数名听起来很"重"，好像它自己在做天大的事，其实它更像一个<strong>循环 + 派发器</strong>——
+真正的苦力活（一次矩阵乘里成千上万次乘加）是在每个算子的<strong>核函数</strong>里完成的，而核函数是各后端各自实现的（CPU 用 SIMD、CUDA 用 GPU kernel）。
+所以"执行一张图"在 ggml 这一层很薄：<strong>按顺序遍历节点、对每个节点喊一声"该你了"</strong>；至于"怎么算得快"，是下一课（L11 算子）和第六部分（内核）的主题。
+这种"<strong>调度归调度、计算归计算</strong>"的分层，正是 ggml 能把同一张图跑在天差地别的硬件上的原因。</p>
+<p>再点破一个容易忽略的细节：执行<strong>不是从叶子开始算的</strong>，而是直接从第一个<strong>节点</strong>开始。叶子（权重、输入）在执行前就已经备好数据了——权重是从模型文件加载的、
+输入是你喂进去的，它们不需要"算"。所以 <span class="mono">ggml_backend_graph_compute</span> 的循环只遍历 <span class="mono">graph.nodes</span>，对每个节点取出它的 src（输入已就绪）、调核函数算出结果、填进它的 data。
+一圈下来，从第一个节点到最后一个节点，整张图就算完了。理解这一点，你就明白为什么 L09 要把叶子和节点分开存——<strong>正是为了让执行循环能干净利落地"只算节点"</strong>。</p>
+
+<h2>多后端调度：ggml_backend_sched</h2>
+<p>但现实往往更复杂：你可能想把模型的<strong>一部分层放 GPU、其余留 CPU</strong>（还记得 L07 的 <span class="mono">-ngl</span> 吗？）。这时一个后端不够用了，
+需要一个"<strong>调度器</strong>"来协调多个后端，它就是 <span class="mono">ggml_backend_sched</span>：</p>
+<div class="cols">
+  <div class="col"><h4>它要解决的问题</h4><p>一张图里，有的算子该在 GPU 上跑、有的在 CPU 上跑；数据在两种内存里，跨设备时要搬运。谁来统筹？</p></div>
+  <div class="col"><h4>sched 的三件事</h4><p><strong>① 拆图</strong>：把图切成若干段，按设备归类；<strong>② 指派</strong>：每段算子分给合适的后端；<strong>③ 拷贝</strong>：在 CPU/GPU 边界自动插入数据搬运。</p></div>
+</div>
+<p>简单说，<span class="mono">ggml_backend_sched</span> 就是个"<strong>包工头</strong>"：拿到整张图后，它把活儿<strong>分派</strong>给手下不同的"工种"（后端），
+谁擅长干什么就给谁，还负责在工种之间<strong>传递半成品</strong>（跨设备拷贝张量）。这正是你用 <span class="mono">-ngl 20</span> 把 20 层放进 GPU 时，背后默默发生的事——
+sched 把这 20 层的算子指派给 CUDA 后端、其余留给 CPU，并在两者交界处安排好数据搬运。你只填了一个数字，它替你搞定了一切协调。</p>
+<p>顺便厘清 <span class="mono">ggml_backend_graph_compute</span> 和 <span class="mono">ggml_backend_sched</span> 的关系：前者是"<strong>单后端</strong>"的执行——一张图、一个设备，直接从头算到尾；
+后者是"<strong>多后端</strong>"的总指挥——它先把图拆成几段，每段再各自交给 <span class="mono">ggml_backend_graph_compute</span> 在对应设备上执行。所以 sched 是<strong>更上一层</strong>的协调者，
+单后端执行是它手里的基本工具。只用 CPU 时你可能直接用前者；要混合 CPU/GPU，就得请出后者。理清这层包含关系，你看 ggml 的执行代码就不会绕晕。</p>
+<p>为什么要分多个后端，而不是统统塞给 GPU？因为<strong>显存常常装不下整个模型</strong>。一个量化后还有几十 GB 的大模型，你的显卡可能只放得下一半的层；
+剩下的层只能留在 CPU 内存里、用 CPU 算。这种"<strong>一半 GPU、一半 CPU</strong>"的混合执行，正是消费级硬件跑大模型的常态，也是 <span class="mono">ggml_backend_sched</span> 存在的根本理由。
+它让你能<strong>按显存大小灵活地切</strong>：显存多就多放几层进 GPU、少就少放几层，剩下的 CPU 兜底，总能跑起来——只是放进 GPU 的层越多、整体越快。</p>
+<p>也正因为有跨设备拷贝这件事，"放多少层进 GPU"并不是越多越好的简单题。每跨一次 CPU/GPU 边界，都要把数据搬一趟，<strong>搬运本身有开销</strong>。
+如果切得太碎、来回搬太多次，省下的计算时间可能还不够还搬运的债。所以实践中，往往是<strong>把连续的一大段层整体放进 GPU</strong>（减少边界），而不是东放一层、西放一层。
+这些权衡 sched 帮你处理了大部分，但理解它，能帮你在显存紧张时更聪明地设 <span class="mono">-ngl</span>。</p>
+
+<h2>深入一点（选读）</h2>
+<p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么内存能复用得这么省？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>核心还是那句话：<strong>靠 L09 的完整图</strong>。即时计算（边算边丢）时，你没法预知"这个中间结果以后还用不用"，只能保守地都留着，内存自然省不下来。</p>
+    <p>而有了完整的图，分配器能<strong>精确算出每个张量"最后一次被用"是在哪个节点</strong>。过了那个点，这块内存立刻可回收。再配合 <span class="mono">best_fit</span> 挑最合适的空闲块、
+    把相邻空闲块合并，整张图的峰值内存就被压到很低。可以说，<strong>惰性建图省内存，省的就是这一笔</strong>——这也是为什么训练/推理框架都爱用计算图。</p>
+    <p>顺便给个量级感：对一个几十层的大模型，"每个中间张量各占一块"和"复用"两种做法，<strong>峰值内存能差好几倍</strong>。在显存本就紧张的消费级显卡上，这"好几倍"往往就是
+    "<strong>跑得起来</strong>"和"<strong>爆显存跑不起来</strong>"的分界线。所以内存复用不是锦上添花的小优化，而是很多模型能在你机器上跑起来的<strong>前提条件</strong>之一。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> sched 怎么决定哪段放哪个后端？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>大体看两点：一是<strong>张量当前在谁的内存里</strong>（数据已经在 GPU 上，自然倾向于在 GPU 算）；二是<strong>这个算子该后端支不支持</strong>。
+    如果某个算子 GPU 后端还没实现，sched 会让它<strong>回退到 CPU</strong> 算完（这就是 L07 提过的 fallback），保证整张图总能跑完。</p>
+    <p>每当一段的输出要喂给另一种设备上的下一段时，sched 就在<strong>边界处自动插入一个"拷贝"节点</strong>，把数据从一种内存搬到另一种。这些拷贝是有开销的，
+    所以"切在哪、放哪些层到 GPU"会影响性能——但这些细节 sched 都替你处理了，你通常只需给一个 <span class="mono">-ngl</span> 数字。</p>
+    <p>还有一种更细的切法叫"<strong>按张量切分</strong>"（tensor split）：把<strong>同一个</strong>大矩阵乘，按列拆成几块，分给多张 GPU 同时算，再把结果拼起来。
+    这适合<strong>多卡</strong>场景，能把一个单步算子的负载摊到几张卡上。无论是"按层切"还是"按张量切"，背后都是 sched 在统筹——你只需通过 <span class="mono">--split-mode</span> 等参数告诉它怎么切，
+    剩下的拆图、指派、拷贝、拼接，都由它默默完成。这种"<strong>把复杂的多设备协调藏在一个简单接口后面</strong>"的设计，正是 ggml 好用的地方。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> reserve 和 alloc 两步是干嘛的？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>这是 ggml 一个"配置一次、反复执行"的典型套路。<strong>reserve（预留）</strong>：先用图<strong>预演</strong>一遍，量出"这张图最多要占多少内存"，
+    然后一次性把这块缓冲开好。<strong>alloc（分配）</strong>：之后每次执行，都在这块已开好的缓冲里<strong>复用</strong>，把各张量摆到规划好的位置上。</p>
+    <p>为什么分两步？因为开大块内存（尤其是 GPU 显存）很贵，不能每次执行都重新开一遍。先 reserve 一次、量好峰值、开好缓冲，后面成千上万步推理就<strong>反复复用同一块缓冲</strong>，
+    省掉了反复大分配的开销。这和 L08 的 arena 思想一脉相承：<strong>大块内存一次拿好，内部反复腾挪</strong>。</p>
+    <p>把这条线串起来看，你会发现 ggml 从头到尾贯穿着同一个信念：<strong>大额的、昂贵的操作（找系统要内存）尽量只做一次，之后全靠内部复用</strong>。
+    L08 的 arena 如此、这里的 reserve/alloc 如此、L10 的内存复用也如此。理解了这个一以贯之的"<strong>一次拿好、反复复用</strong>"，你就抓住了 ggml 性能设计的灵魂。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>执行 = <strong>规划内存</strong>（ggml-alloc）+ <strong>按拓扑序逐节点 compute</strong>（后端）；算完结果张量的 <span class="mono">data</span> 才有数。</li>
+    <li><strong>ggml-alloc</strong> 靠 L09 的完整图<strong>预知每个张量的生命周期</strong>，用完即归还、best-fit 复用，把峰值内存压到很低。</li>
+    <li><span class="mono">ggml_backend_graph_compute</span> 在<strong>单个后端</strong>上逐节点执行；叶子不算、只被读取。</li>
+    <li><span class="mono">ggml_backend_sched</span> 协调<strong>多后端</strong>：拆图、把算子指派到设备、跨设备自动拷贝——这是 <span class="mono">-ngl</span> 的底层。</li>
+    <li><strong>reserve/alloc 两步</strong>：先预演量出峰值、开好缓冲，之后反复复用，省掉反复大分配。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  L09 那个"先不算"的延迟，在这一课<strong>连本带利地还了回来</strong>：正因为提前拿到了整张图，内存才能被算得死死地复用、算子才能被聪明地分派到不同硬件。
+  "<strong>先描述、后执行</strong>"从来不是麻烦，而是把<strong>全局优化的主动权</strong>牢牢攥在手里。ggml 引擎最核心的三课——内存（L08）、建图（L09）、执行（L10）——到这里就拼齐了。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. ggml-alloc 为什么能大幅复用内存、压低峰值？</div>
+  <ol class="opts">
+    <li>因为惰性建图提供了完整的图，能预知每个张量的生命周期，用完即归还供后续复用</li>
+    <li>因为内存很便宜</li>
+    <li>因为它不存任何中间结果</li>
+    <li>因为用了量化</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。有了完整的图才能算出每个张量“最后一次被用”在哪，过了那点立刻回收；best-fit 复用 + 合并空闲块把峰值压到很低。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml_backend_sched 主要负责什么？</div>
+  <ol class="opts">
+    <li>把一张图拆开、把算子指派到合适的后端设备，并在设备间拷贝张量</li>
+    <li>量化权重</li>
+    <li>决定采样策略</li>
+    <li>解析 GGUF 文件</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。sched 是“包工头”：拆图、按设备指派算子、在 CPU/GPU 边界自动插入拷贝——这正是 -ngl 把部分层放 GPU 的底层机制。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. ggml_backend_graph_compute 执行一张图时，叶子（权重、输入）会被计算吗？</div>
+  <ol class="opts">
+    <li>会，每个张量都要算一遍</li>
+    <li>不会，叶子是现成的数据，只被算子读取；只有节点（算子结果）才按拓扑序逐个计算</li>
+    <li>只算叶子，不算节点</li>
+    <li>随机选一半来算</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。叶子是权重/输入等现成数据，执行时只被读取；执行引擎只对节点从头到尾算一遍。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>把模型一半层放 GPU、一半留 CPU（-ngl 设一半）时，ggml_backend_sched 在背后大概做了哪些事？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson we <strong>built</strong> the whole compute graph - but it is still just a "skeleton of pointers", not a number computed in it. This lesson makes that graph actually
+<strong>run</strong>: first allocate its memory, then compute each node in topological order; and if your machine has both a CPU and a GPU, coordinate the division of labor across multiple
+backends. This connects L07 (what a backend is) and L09 (what the graph is), completing the second half of "build first, execute later".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">In other words, the last two lessons were all "<strong>theory on paper</strong>" - L08 prepared the memory pool, L09 drew the compute graph, but <strong>not a single real number was
+computed</strong>. This lesson is the "<strong>final kick</strong>": turning the graph into results. And you will see this kick is rather refined: not simply computing front to back, but <strong>using
+memory frugally</strong> and <strong>cleverly splitting the work across hardware</strong>. These two things turn "can compute" into "compute fast and frugally", earning ggml the name "<strong>high-performance
+inference engine</strong>".</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Executing a compute graph is like <strong>a construction crew building from blueprints</strong>: first read the whole blueprint, compute how much material is needed and where to stack it
+  (<strong>memory allocation</strong>), then build floor by floor in order "foundation first, then floors" (<strong>compute nodes in topological order</strong>); and if the site is too small,
+  tear down scaffolding no longer needed and <strong>free the space for later steps to reuse</strong> (<strong>memory reuse</strong>). The blueprint (L09) is drawn; this lesson is about "building
+  from it". The two crafts of building - <strong>saving materials</strong> and <strong>dividing labor</strong> - are this lesson's two main threads.
+</div>
+
+<h2>Three execution steps</h2>
+<p>Break "make a graph produce a result" apart and it is exactly three steps, in sequence:</p>
+<div class="flow">
+  <div class="node"><div class="nt">build</div><div class="nd">L09: fill op/src</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">plan memory</div><div class="nd">ggml-alloc</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">compute nodes</div><div class="nd">backend compute</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">output</div><div class="nd">result tensors have data</div></div>
+</div>
+<p>The first step, building, was last lesson. This lesson stars the middle two: <strong>planning memory</strong> (deciding where each tensor's data sits in the buffer) and <strong>computing
+nodes</strong> (actually computing each operator in topological order). After these two, the once-empty result tensors get their <span class="mono">data</span> filled with real numbers - you can
+finally read results. Sounds plain, but "planning memory" hides a rather beautiful ggml optimization worth a close look. We cover "saving materials" (memory) first, then "dividing labor" (backends and
+scheduling).</p>
+<p>Why is "planning memory" <strong>its own step</strong> rather than allocating on the fly as you compute? This is exactly the dividend of lazy building. Allocating on the fly, by layer 6 you have no idea
+whether layer 20 will still need layer 6's output, so you can only <strong>conservatively keep it</strong>. But now the graph is complete, so the planner can - <strong>before actually computing</strong> -
+sweep the whole graph front to back and work out clearly "<strong>when each block is used and when it can be released</strong>", then start executing. "Plan first, execute later" is like planning how to
+pack a suitcase before leaving rather than stuffing it as you walk - the former always packs tighter.</p>
+
+<h2>Memory reuse: ggml-alloc's trick</h2>
+<p>First a question: for a graph with thousands of nodes, must each node's output get its own block of memory? Doing so would make peak memory frighteningly large. But ggml does not - it
+notices <strong>many intermediates are "use-once and discard"</strong>: layer 5's output, once fed to layer 6, is never needed again, so its memory can perfectly well <strong>be reused by layer
+8's output</strong>. That is exactly what <span class="mono">ggml-alloc</span> (the graph allocator <span class="mono">ggml_gallocr</span>) does:</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Memory reuse</b>: once tensor A is done, its block is taken over by a later tensor C (same plot, A lives then C)</div>
+  <div class="cells"><span class="lab">time 1</span><span class="cell hl">A</span><span class="cell">B</span><span class="cell dim">free</span></div>
+  <div class="cells"><span class="lab">time 2</span><span class="cell dim">A done</span><span class="cell">B</span><span class="cell hl">C reuses A's plot</span></div>
+</div>
+<p>How can it reuse so precisely? <strong>All thanks to L09's complete graph</strong>. Because the graph spells out "who depends on whom", the allocator can <strong>pre-compute each tensor's
+"lifetime"</strong> - from which node it starts being needed, to which node after which no one uses it. Once a tensor "dies", its memory is immediately returned for later tensors to reuse. As
+pseudocode:</p>
+<pre class="code"><span class="cm"># cf. the gallocr planning logic in ggml/src/ggml-alloc.c (simplified)</span>
+<span class="kw">def</span> <span class="fn">plan</span>(graph):
+    <span class="kw">for</span> t <span class="kw">in</span> graph.nodes:                 <span class="cm"># topological order</span>
+        t.offset = free_blocks.<span class="fn">best_fit</span>(nbytes(t))  <span class="cm"># find a reusable free block</span>
+        <span class="kw">for</span> s <span class="kw">in</span> t.src:
+            <span class="kw">if</span> <span class="fn">last_use</span>(s) == t:          <span class="cm"># s is used by no one after this</span>
+                free_blocks.<span class="fn">give_back</span>(s)  <span class="cm"># return its memory for reuse</span></pre>
+<p>The keywords are <span class="mono">best_fit</span> (pick the most suitably-sized free block) and <span class="mono">give_back</span> (return a tensor's memory once done). ggml-alloc keeps a set
+of "free blocks", finds the best fit when allocating, and merges adjacent free blocks when releasing. <strong>Because it saw the whole graph in advance, it reuses memory to the hilt</strong> - in
+practice peak memory is often a fraction of "each tensor its own block". This is <strong>one of the real payoffs</strong> of L09's "build first": without the complete graph, this global memory
+planning would be impossible.</p>
+<p>An everyday scene makes it click: imagine a long assembly line where each station produces a half-product handed to the next. The <strong>dumb way</strong> is to give every half-product its own
+dedicated shelf - the longer the line, the more shelves, until the warehouse overflows. The <strong>smart way</strong>: once a half-product is taken by the next station, its shelf frees immediately
+for later half-products - because you <strong>know in advance</strong> the whole line and when each half-product "retires". ggml-alloc is that smart warehouse manager, and L09's compute graph is the
+"<strong>full-process chart</strong>" in its hand. Without that chart, it could only use the dumb way.</p>
+<p>A common misconception in passing: memory reuse does <strong>not</strong> affect correctness. Some worry "giving A's plot to C - won't it corrupt A's data?" - no, because reuse only happens after A
+is <strong>certainly needed by no one</strong>. The allocator strictly follows lifetimes: as long as anyone might still read A, A's memory is never requisitioned. So memory reuse is a <strong>completely
+lossless</strong> optimization - it saves space without touching results, the same thinking as L06's distinction "quantization is lossy, the KV cache is lossless".</p>
+
+<h2>Computing nodes: the backend steps in</h2>
+<p>With memory planned, we finally reach "actually compute". This step is carried out by a <strong>backend</strong> (the CPU/CUDA/Metal from L07). The simplest case uses one backend:</p>
+<pre class="code"><span class="cm">// simplified usage; spans ggml-backend.h / ggml-cpu.h / ggml-alloc.h</span>
+ggml_backend_t be = <span class="fn">ggml_backend_cpu_init</span>();   <span class="cm">// pick a backend (could be cuda/metal...)</span>
+<span class="fn">ggml_gallocr_alloc_graph</span>(galloc, graph);       <span class="cm">// actually allocate per the plan</span>
+<span class="fn">ggml_backend_graph_compute</span>(be, graph);         <span class="cm">// compute node by node!</span></pre>
+<p>What <span class="mono">ggml_backend_graph_compute</span> does is <strong>walk <span class="mono">graph.nodes</span> in topological order, calling that backend's operator implementation for each node</strong>
+(matmul calls the matmul kernel, softmax the softmax kernel... these kernels are the topic of L11 and Part 6). Because L09 guarantees topological order, when each node is reached its inputs are
+<strong>certainly already computed</strong>, so one front-to-back pass does it. After the last node, the output tensor holds the result. Leafs (weights, inputs) are never computed, only read by
+operators.</p>
+<p>Dispel one illusion here: the name <span class="mono">ggml_backend_graph_compute</span> sounds "heavy", as if it does something enormous itself, but it is really more of a <strong>loop +
+dispatcher</strong> - the real grunt work (the thousands of multiply-adds in one matmul) happens inside each operator's <strong>kernel</strong>, and kernels are implemented by each backend separately (CPU
+with SIMD, CUDA with GPU kernels). So "executing a graph" is thin at this ggml layer: <strong>walk the nodes in order and shout "your turn" at each</strong>; "how to compute fast" is the topic of the next
+lesson (L11 operators) and Part 6 (kernels). This "<strong>scheduling is scheduling, computing is computing</strong>" layering is exactly why ggml can run the same graph on wildly different hardware.</p>
+<p>One more easily-missed detail: execution <strong>does not start from the leafs</strong> but straight from the first <strong>node</strong>. Leafs (weights, inputs) already have their data before execution -
+weights loaded from the model file, inputs fed by you; they need no "computing". So <span class="mono">ggml_backend_graph_compute</span>'s loop only walks <span class="mono">graph.nodes</span>, taking each node's
+src (inputs ready), calling the kernel to compute the result, filling its data. One pass from the first node to the last and the whole graph is done. Grasp this and you see why L09 stores leafs and nodes
+separately - <strong>precisely so the execution loop can cleanly "compute only nodes"</strong>.</p>
+
+<h2>Multi-backend scheduling: ggml_backend_sched</h2>
+<p>But reality is often more complex: you may want <strong>some layers on GPU, the rest on CPU</strong> (remember L07's <span class="mono">-ngl</span>?). Now one backend is not enough; you need a
+"<strong>scheduler</strong>" to coordinate multiple backends - that is <span class="mono">ggml_backend_sched</span>:</p>
+<div class="cols">
+  <div class="col"><h4>The problem it solves</h4><p>In one graph, some operators should run on GPU, some on CPU; data lives in two memories, needing transfer across devices. Who coordinates?</p></div>
+  <div class="col"><h4>sched's three jobs</h4><p><strong>1. Split</strong> the graph into segments, grouped by device; <strong>2. Assign</strong> each segment's operators to a suitable backend; <strong>3. Copy</strong> - auto-insert data transfers at CPU/GPU boundaries.</p></div>
+</div>
+<p>Simply put, <span class="mono">ggml_backend_sched</span> is a "<strong>general contractor</strong>": given the whole graph, it <strong>assigns</strong> the work to different "trades" (backends) under
+it - whoever is good at what gets it - and handles <strong>passing half-finished goods</strong> between trades (cross-device tensor copies). This is exactly what happens behind the scenes when you put
+20 layers on GPU with <span class="mono">-ngl 20</span> - sched assigns those 20 layers' operators to the CUDA backend, leaves the rest to the CPU, and arranges the data transfers at the boundary.
+You filled in one number; it handled all the coordination for you.</p>
+<p>Let me clarify the relation between <span class="mono">ggml_backend_graph_compute</span> and <span class="mono">ggml_backend_sched</span>: the former is "<strong>single-backend</strong>" execution - one
+graph, one device, computed straight front to back; the latter is the "<strong>multi-backend</strong>" conductor - it first splits the graph into segments, then hands each to
+<span class="mono">ggml_backend_graph_compute</span> to execute on its device. So sched is the <strong>higher-level</strong> coordinator, and single-backend execution is the basic tool in its hand. On CPU only
+you might use the former directly; to mix CPU/GPU you call in the latter. Get this containment straight and ggml's execution code will not dizzy you.</p>
+<p>Why multiple backends rather than just cramming everything onto the GPU? Because <strong>VRAM often cannot hold the whole model</strong>. A big model that is still tens of GB after quantization may only fit
+half its layers on your card; the rest must stay in CPU memory and compute on CPU. This "<strong>half GPU, half CPU</strong>" hybrid execution is the norm for running big models on consumer hardware, and
+the fundamental reason <span class="mono">ggml_backend_sched</span> exists. It lets you <strong>cut flexibly by VRAM size</strong>: more VRAM, put more layers on GPU; less, fewer, with the CPU as backstop, so
+it always runs - just faster the more layers go on GPU.</p>
+<p>And precisely because of cross-device copies, "how many layers on GPU" is not a simple "more is better". Each crossing of a CPU/GPU boundary means moving data, and <strong>the move itself has a
+cost</strong>. Cut too finely and shuttle too often, and the compute time saved may not repay the moving debt. So in practice one usually <strong>puts a large contiguous span of layers on the GPU as a
+whole</strong> (fewer boundaries) rather than one layer here, one there. sched handles most of these trade-offs, but understanding it helps you set <span class="mono">-ngl</span> more wisely when VRAM is
+tight.</p>
+
+<h2>Going deeper (optional)</h2>
+<p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why can memory be reused so frugally? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Still the same line: <strong>thanks to L09's complete graph</strong>. With eager computation (compute and discard as you go), you cannot foresee "will this intermediate be needed later", so
+    you conservatively keep them all, and memory cannot be saved.</p>
+    <p>With the complete graph, the allocator can <strong>compute exactly at which node each tensor is "last used"</strong>. Past that point, its memory is immediately reclaimable. Combined with
+    <span class="mono">best_fit</span> picking the most suitable free block and merging adjacent free blocks, the whole graph's peak memory is crushed. You could say <strong>lazy building saves memory,
+    and this is the saving</strong> - which is why training/inference frameworks love compute graphs.</p>
+    <p>For a sense of scale: for a many-layer big model, "each intermediate tensor its own block" vs "reuse" can differ in peak memory by <strong>several times</strong>. On a consumer GPU already tight on
+    VRAM, that "several times" is often the line between "<strong>it runs</strong>" and "<strong>out of VRAM, won't run</strong>". So memory reuse is not a nice-to-have tweak but one of the <strong>preconditions
+    </strong> for many models to run on your machine at all.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> How does sched decide which segment goes to which backend? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Roughly two things: one, <strong>whose memory the tensor currently lives in</strong> (data already on GPU naturally favors computing on GPU); two, <strong>whether that backend supports this
+    operator</strong>. If some operator is not yet implemented in the GPU backend, sched lets it <strong>fall back to CPU</strong> (the fallback mentioned in L07), guaranteeing the whole graph always
+    runs.</p>
+    <p>Whenever a segment's output must feed the next segment on a different device, sched <strong>auto-inserts a "copy" node at the boundary</strong>, moving data from one memory to another. These
+    copies have a cost, so "where to cut, which layers on GPU" affects performance - but sched handles these details, and you usually just give a single <span class="mono">-ngl</span> number.</p>
+    <p>There is also a finer cut called "<strong>tensor split</strong>": split <strong>one</strong> big matmul by columns into several pieces, give them to multiple GPUs to compute at once, then stitch the
+    results. This suits <strong>multi-card</strong> setups, spreading a single operator's load across several cards. Whether "split by layer" or "split by tensor", sched coordinates behind the scenes - you just
+    tell it how to cut via parameters like <span class="mono">--split-mode</span>, and the rest - splitting, assigning, copying, stitching - it does quietly. This "<strong>hide complex multi-device coordination
+    behind a simple interface</strong>" design is exactly what makes ggml pleasant to use.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> What are the reserve and alloc steps for? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>This is a classic ggml "configure once, execute repeatedly" pattern. <strong>reserve</strong>: first <strong>rehearse</strong> with the graph to measure "how much memory this graph needs at most",
+    then open that buffer once. <strong>alloc</strong>: on each later execution, <strong>reuse</strong> this already-opened buffer, placing tensors at their planned positions.</p>
+    <p>Why two steps? Because opening big blocks (especially GPU VRAM) is expensive; you cannot reopen it every execution. Reserve once, measure the peak, open the buffer, and the thousands of later
+    inference steps <strong>reuse the same buffer over and over</strong>, sparing repeated big allocations. This is of a piece with L08's arena idea: <strong>grab a big block once, shuffle within it
+    repeatedly</strong>.</p>
+    <p>String this thread together and you find one belief running through all of ggml: <strong>do the large, expensive operations (asking the system for memory) as few times as possible - ideally once -
+    then reuse internally</strong>. L08's arena is like this, reserve/alloc here is like this, L10's memory reuse is like this. Grasp this consistent "<strong>grab once, reuse repeatedly</strong>" and you have
+    the soul of ggml's performance design.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Execution = <strong>plan memory</strong> (ggml-alloc) + <strong>compute nodes in topological order</strong> (backend); only then do result tensors' <span class="mono">data</span> hold numbers.</li>
+    <li><strong>ggml-alloc</strong> uses L09's complete graph to <strong>foresee each tensor's lifetime</strong>, returning memory once done and reusing via best-fit, crushing peak memory.</li>
+    <li><span class="mono">ggml_backend_graph_compute</span> computes node by node on <strong>a single backend</strong>; leafs are not computed, only read.</li>
+    <li><span class="mono">ggml_backend_sched</span> coordinates <strong>multiple backends</strong>: split the graph, assign operators to devices, auto-copy across devices - the underpinning of <span class="mono">-ngl</span>.</li>
+    <li><strong>reserve/alloc two steps</strong>: rehearse to measure the peak and open the buffer, then reuse repeatedly, sparing repeated big allocations.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  L09's "don't compute yet" delay <strong>pays back with interest</strong> in this lesson: precisely because the whole graph was obtained in advance, memory can be reused tightly and operators
+  cleverly dispatched to different hardware. "<strong>Describe first, execute later</strong>" was never a hassle but a way to keep the <strong>initiative for global optimization</strong> firmly in hand.
+  The ggml engine's three core lessons - memory (L08), graph building (L09), execution (L10) - now fit together.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Why can ggml-alloc reuse memory heavily and crush the peak?</div>
+  <ol class="opts">
+    <li>Because lazy building gives the complete graph, so it foresees each tensor's lifetime and returns memory once done for later reuse</li>
+    <li>Because memory is cheap</li>
+    <li>Because it stores no intermediate results</li>
+    <li>Because it uses quantization</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Only the complete graph lets it compute where each tensor is last used; past that it reclaims immediately, and best-fit reuse + merging free blocks crushes the peak.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is ggml_backend_sched mainly responsible for?</div>
+  <ol class="opts">
+    <li>Splitting a graph, assigning operators to suitable backend devices, and copying tensors between devices</li>
+    <li>Quantizing weights</li>
+    <li>Deciding the sampling strategy</li>
+    <li>Parsing GGUF files</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. sched is the "general contractor": split, assign operators by device, and auto-insert copies at CPU/GPU boundaries - the mechanism behind -ngl putting some layers on GPU.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When ggml_backend_graph_compute runs a graph, are leafs (weights, inputs) computed?</div>
+  <ol class="opts">
+    <li>Yes, every tensor is computed</li>
+    <li>No - leafs are ready-made data, only read by operators; only nodes (operator results) are computed one by one in topological order</li>
+    <li>Only leafs are computed, not nodes</li>
+    <li>A random half is computed</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Leafs are ready-made data like weights/inputs, only read at execution; the engine computes only the nodes, front to back.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>When you put half the layers on GPU and keep half on CPU (-ngl set to half), what does ggml_backend_sched roughly do behind the scenes?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="09-compute-graph.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">计算图：惰性构建</span><span class="lang-en">The compute graph: lazy build</span></div></a><a class="next" href="11-core-operators.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">核心算子</span><span class="lang-en">Core operators</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

@@ -520,6 +520,423 @@ QUIZZES = {
             },
         ],
     },
+    "08-ggml-core-objects.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml 会为每个张量都单独 malloc 一次内存吗？",
+                    "en": "Does ggml malloc memory separately for every single tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "不会，张量从 ggml_context 预分配的 arena 里 bump 切出，不做 per-tensor malloc",
+                        "en": "No - tensors are bump-carved from the arena pre-allocated by ggml_context, with no per-tensor malloc",
+                    },
+                    {"zh": "会，每建一个张量就 malloc 一次", "en": "Yes, it mallocs once per tensor created"},
+                    {"zh": "用垃圾回收器自动管理", "en": "It uses a garbage collector"},
+                    {"zh": "把每个张量都存到磁盘", "en": "It stores each tensor to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_init 一次性备好一块 arena，ggml_new_object 在里面往后推游标就地放下；元数据和数据都从这块池子切，避免成千上万次 malloc。",
+                    "en": "ggml_init prepares one arena up front; ggml_new_object bumps a cursor and places in situ. Metadata and data are both carved from this pool, avoiding thousands of mallocs.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_init_params 里 no_alloc=true 意味着什么？",
+                    "en": "What does no_alloc=true in ggml_init_params mean?",
+                },
+                "opts": [
+                    {
+                        "zh": "只分配张量元数据、不分配数据缓冲，为“先建图、后由后端分配”铺路",
+                        "en": "Allocate tensor metadata only, no data buffer - paving the way for \"build the graph first, let the backend allocate later\"",
+                    },
+                    {"zh": "什么都不分配", "en": "Allocate nothing at all"},
+                    {"zh": "关闭量化", "en": "Turn off quantization"},
+                    {"zh": "把 context 设为只读", "en": "Make the context read-only"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建计算图只需要形状和依赖，用不到真正的数据内存；no_alloc 让 ctx 只存元数据，数据等图建好后由后端统一分配（L10）。",
+                    "en": "Building a graph needs only shapes and dependencies, not real data memory; no_alloc keeps the ctx metadata-only, and the backend allocates data once the graph is built (L10).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 arena 满了 ggml 选择直接 abort，而不是自动扩容？这对使用者提出了什么要求？",
+                "en": "Why does ggml abort outright when the arena is full instead of auto-growing? What does that demand of the user?",
+            },
+        ],
+    },
+    "09-compute-graph.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "调用 c = ggml_mul_mat(a, b) 时发生了什么？",
+                    "en": "What happens when you call c = ggml_mul_mat(a, b)?",
+                },
+                "opts": [
+                    {
+                        "zh": "新建一个结果张量并记下 op=MUL_MAT、src=[a, b]，但不做任何乘法",
+                        "en": "It builds a result tensor and records op=MUL_MAT, src=[a, b], but does no multiplication",
+                    },
+                    {"zh": "立刻算出矩阵乘的结果数字", "en": "It immediately computes the matmul result numbers"},
+                    {"zh": "修改了 a 的内容", "en": "It modifies the contents of a"},
+                    {"zh": "把结果写到磁盘", "en": "It writes the result to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml 是惰性建图：算子函数只建结果张量、填 op/src 反向指针，真正的运算留到执行阶段（下一课）。",
+                    "en": "ggml builds graphs lazily: an operator function only builds the result tensor and fills op/src back-pointers; the real math waits for execution (next lesson).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "计算图里 leafs 和 nodes 的区别是？",
+                    "en": "What is the difference between leafs and nodes in the compute graph?",
+                },
+                "opts": [
+                    {
+                        "zh": "leafs 是输入/权重/常量（op==NONE），nodes 是算子结果（按拓扑序计算）",
+                        "en": "leafs are inputs/weights/constants (op==NONE); nodes are operator results (computed in topological order)",
+                    },
+                    {"zh": "leafs 是输出，nodes 是输入", "en": "leafs are outputs, nodes are inputs"},
+                    {"zh": "两者没有区别", "en": "There is no difference"},
+                    {"zh": "nodes 是叶子，leafs 是树枝", "en": "nodes are leaves, leafs are branches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "判据是有没有“来历”：op==NONE 的是叶子（输入/常量，直接用其数据），有 op 的是节点（要按依赖顺序算出来）。",
+                    "en": "The criterion is whether it has an origin: op==NONE means a leaf (input/constant, used directly); having an op means a node (computed in dependency order).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_build_forward_expand 从输出张量出发做了什么？",
+                    "en": "What does ggml_build_forward_expand do, starting from the output tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "沿 src 指针递归回溯，把所有依赖按拓扑序收进图，保证执行时输入先于输出算好",
+                        "en": "It recurses back along src pointers, collecting all dependencies in topological order so inputs are computed before outputs at execution",
+                    },
+                    {"zh": "立刻执行整张图", "en": "It immediately executes the whole graph"},
+                    {"zh": "把图保存成 GGUF 文件", "en": "It saves the graph to a GGUF file"},
+                    {"zh": "随机打乱节点顺序", "en": "It randomly shuffles the node order"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "“先递归收集依赖、再放自己”天然产生拓扑序：排在前面的不依赖后面的，执行时从头算到尾即可。",
+                    "en": "\"Recurse to collect dependencies first, then add itself\" naturally yields topological order: earlier never depends on later, so execution just goes front to back.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 ggml 要“先建图、后执行”，而不是边调用边算？至少说出两个好处。",
+                "en": "Why does ggml \"build the graph first, execute later\" instead of computing as it goes? Name at least two benefits.",
+            },
+        ],
+    },
+    "10-graph-execution.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml-alloc 为什么能大幅复用内存、压低峰值？",
+                    "en": "Why can ggml-alloc reuse memory heavily and crush the peak?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为惰性建图提供了完整的图，能预知每个张量的生命周期，用完即归还供后续复用",
+                        "en": "Because lazy building gives the complete graph, so it foresees each tensor's lifetime and returns memory once done for later reuse",
+                    },
+                    {"zh": "因为用了量化", "en": "Because it uses quantization"},
+                    {"zh": "因为内存很便宜", "en": "Because memory is cheap"},
+                    {"zh": "因为它不存任何中间结果", "en": "Because it stores no intermediate results"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "有了完整的图才能算出每个张量“最后一次被用”在哪，过了那点立刻回收；best-fit 复用 + 合并空闲块把峰值压到很低。",
+                    "en": "Only the complete graph lets it compute where each tensor is last used; past that it reclaims immediately, and best-fit reuse + merging free blocks crushes the peak.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_sched 主要负责什么？",
+                    "en": "What is ggml_backend_sched mainly responsible for?",
+                },
+                "opts": [
+                    {
+                        "zh": "把一张图拆开、把算子指派到合适的后端设备，并在设备间拷贝张量",
+                        "en": "Splitting a graph, assigning operators to suitable backend devices, and copying tensors between devices",
+                    },
+                    {"zh": "解析 GGUF 文件", "en": "Parsing GGUF files"},
+                    {"zh": "量化权重", "en": "Quantizing weights"},
+                    {"zh": "决定采样策略", "en": "Deciding the sampling strategy"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "sched 是“包工头”：拆图、按设备指派算子、在 CPU/GPU 边界自动插入拷贝——这正是 -ngl 把部分层放 GPU 的底层机制。",
+                    "en": "sched is the \"general contractor\": split, assign operators by device, and auto-insert copies at CPU/GPU boundaries - the mechanism behind -ngl putting some layers on GPU.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_graph_compute 执行一张图时，叶子（权重、输入）会被计算吗？",
+                    "en": "When ggml_backend_graph_compute runs a graph, are leafs (weights, inputs) computed?",
+                },
+                "opts": [
+                    {
+                        "zh": "不会，叶子是现成的数据，只被算子读取；只有节点（算子结果）才按拓扑序逐个计算",
+                        "en": "No - leafs are ready-made data, only read by operators; only nodes (operator results) are computed one by one in topological order",
+                    },
+                    {"zh": "会，每个张量都要算一遍", "en": "Yes, every tensor is computed"},
+                    {"zh": "只算叶子，不算节点", "en": "Only leafs are computed, not nodes"},
+                    {"zh": "随机选一半来算", "en": "A random half is computed"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "叶子是权重/输入等现成数据，执行时只被读取；执行引擎只对节点从头到尾算一遍。",
+                    "en": "Leafs are ready-made data like weights/inputs, only read at execution; the engine computes only the nodes, front to back.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "把模型一半层放 GPU、一半留 CPU（-ngl 设一半）时，ggml_backend_sched 在背后大概做了哪些事？",
+                "en": "When you put half the layers on GPU and keep half on CPU (-ngl set to half), what does ggml_backend_sched roughly do behind the scenes?",
+            },
+        ],
+    },
+    "11-core-operators.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml_mul_mat(a, b) 对形状的核心要求是？",
+                    "en": "What is the core shape requirement of ggml_mul_mat(a, b)?",
+                },
+                "opts": [
+                    {
+                        "zh": "a 和 b 的内维 ne[0] 必须相等（这一维在相乘时被消去）",
+                        "en": "a and b must have equal inner dim ne[0] (this dim is eliminated in the multiply)",
+                    },
+                    {"zh": "a 和 b 形状必须完全相同", "en": "a and b must have identical shapes"},
+                    {"zh": "b 必须是方阵", "en": "b must be square"},
+                    {"zh": "没有任何要求", "en": "There is no requirement"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "mul_mat 要求 a->ne[0]==b->ne[0]；结果 ne={a.ne[1], b.ne[1], ...}。因 ggml 行优先、ne[0] 最内，这条规则方向和数学“行×列”相反。",
+                    "en": "mul_mat requires a->ne[0]==b->ne[0]; result ne={a.ne[1], b.ne[1], ...}. Since ggml is row-major with ne[0] innermost, this reads reversed from math's rows x columns.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "soft_max_ext 里的 mask 起什么作用？",
+                    "en": "What does the mask in soft_max_ext do?",
+                },
+                "opts": [
+                    {
+                        "zh": "给分数加上掩码，例如把未来位置设为 -inf 以实现因果掩码",
+                        "en": "Adds a mask to the scores, e.g. setting future positions to -inf to implement the causal mask",
+                    },
+                    {"zh": "对输入做归一化", "en": "Normalizes the input"},
+                    {"zh": "把权重量化", "en": "Quantizes the weights"},
+                    {"zh": "缩放学习率", "en": "Scales the learning rate"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "soft_max_ext 融合 softmax(a*scale + mask)：scale 通常 1/sqrt(d) 防止分数过大，mask 加因果掩码（未来位 -inf，softmax 后权重为 0）。",
+                    "en": "soft_max_ext fuses softmax(a*scale + mask): scale is usually 1/sqrt(d) to keep scores in range, mask adds the causal mask (future at -inf, weight 0 after softmax).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么说一个 ggml 算子有“两处代码”？",
+                    "en": "Why is a ggml operator said to have \"two pieces of code\"?",
+                },
+                "opts": [
+                    {
+                        "zh": "一处在 ggml.c 建图、定 op/src 与输出形状；另一处在后端（如 ggml-cpu 的 compute_forward）真正计算",
+                        "en": "One in ggml.c builds the graph, defining op/src and output shape; the other in a backend (e.g. ggml-cpu's compute_forward) actually computes",
+                    },
+                    {"zh": "调试版和发布版", "en": "Debug and release builds"},
+                    {"zh": "前端网页和后端服务器", "en": "Frontend web page and backend server"},
+                    {"zh": "训练和推理", "en": "Training and inference"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建图侧（ggml.c）只定形状、填 op/src，不算；计算侧（各后端的 ggml_compute_forward_*）真算。两者靠 enum ggml_op + switch(op) 对接。",
+                    "en": "The build side (ggml.c) only defines the shape and fills op/src, no compute; the compute side (each backend's ggml_compute_forward_*) actually computes. They meet via enum ggml_op + switch(op).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "执行时，后端怎么知道每个节点该调哪个算子实现？",
+                    "en": "At execution, how does the backend know which operator implementation to call for each node?",
+                },
+                "opts": [
+                    {
+                        "zh": "用一个大 switch(node->op) 按算子编号派发到对应的 ggml_compute_forward_*",
+                        "en": "A big switch(node->op) dispatches by operator number to the matching ggml_compute_forward_*",
+                    },
+                    {"zh": "靠文件名匹配", "en": "By matching file names"},
+                    {"zh": "随机选一个", "en": "It picks one at random"},
+                    {"zh": "每次都重新编译", "en": "It recompiles each time"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建图时算子编号记在 tensor->op；执行时后端用 switch(op) 跳到对应实现。加新算子 = 加一个 enum 值 + 写一份 forward 并接进 switch。",
+                    "en": "The operator number is recorded in tensor->op at build; at execution the backend uses switch(op) to jump to the implementation. Adding an operator = add an enum value + write a forward wired into the switch.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "ggml 的 mul_mat 形状规则为什么读起来和你在数学课学的“行×列”方向相反？（提示：L05 的维度顺序）",
+                "en": "Why does ggml's mul_mat shape rule read reversed from the \"rows x columns\" you learned in math? (hint: L05's dimension order)",
+            },
+        ],
+    },
+    "12-quant-formats.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "q4_0 的一块 18 字节是怎么构成的？",
+                    "en": "How are the 18 bytes of a q4_0 block made up?",
+                },
+                "opts": [
+                    {
+                        "zh": "2 字节的 half scale + 16 字节装 32 个 4-bit 量化值",
+                        "en": "a 2-byte half scale + 16 bytes holding 32 4-bit quantized values",
+                    },
+                    {"zh": "18 个权重，每个 1 字节", "en": "18 weights, one byte each"},
+                    {"zh": "16 字节 scale + 2 字节量化值", "en": "16 bytes of scale + 2 bytes of values"},
+                    {"zh": "全是 int8，没有 scale", "en": "all int8, no scale"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "block_q4_0 = {ggml_half d; uint8_t qs[16]}：2 字节 scale + 16 字节装 32 个 4-bit 值（每字节两个 nibble），共 18 字节、平均每权重 4.5 bit。",
+                    "en": "block_q4_0 = {ggml_half d; uint8_t qs[16]}: a 2-byte scale + 16 bytes holding 32 4-bit values (two nibbles per byte), 18 bytes total, 4.5 bits per weight on average.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "K-quant（如 q4_K）为什么在相同位宽下比 q4_0 更准？",
+                    "en": "Why is K-quant (e.g. q4_K) more accurate than q4_0 at the same bit width?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 256 的超块：整体 d/dmin 之外，每个子块还有更细的 scale，局部更贴合",
+                        "en": "It uses a 256 super-block: beyond the overall d/dmin, each sub-block has a finer scale, fitting locally better",
+                    },
+                    {"zh": "它其实用了更多的 bit", "en": "It actually uses more bits"},
+                    {"zh": "它的量化值不打包", "en": "Its quantized values are not packed"},
+                    {"zh": "它完全不丢失任何信息", "en": "It loses no information at all"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "q4_K 是两层 scale：超块 d/dmin 定大范围、8 个子块各有 6-bit scale/min 做局部微调，加上 dmin 的偏移量化，同样 4.5 bit 却比 q4_0 单层 scale 更准。",
+                    "en": "q4_K has a two-level scale: super-block d/dmin set the broad range, 8 sub-blocks each carry a 6-bit scale/min for local fine-tuning, plus dmin's offset - the same 4.5 bits but more accurate than q4_0's single scale.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 怎么让算子统一处理几十种量化类型？",
+                    "en": "How does ggml let operators handle dozens of quantization types uniformly?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 ggml_type_traits 表 + to_float/from_float_ref 函数指针，算子按 traits 解量化，无需为每种类型各写一遍",
+                        "en": "A ggml_type_traits table + to_float/from_float_ref function pointers; operators dequantize per traits, no need to rewrite per type",
+                    },
+                    {"zh": "为每种量化类型写一个专门的算子", "en": "Write a dedicated operator for each quantization type"},
+                    {"zh": "运行时为每种类型即时编译代码", "en": "JIT-compile code for each type at runtime"},
+                    {"zh": "把所有权重都转成 F32 存盘", "en": "Convert all weights to F32 on disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_type_traits 为每种 type 登记一行（blck_size、type_size、to_float、from_float_ref 等）；算子查表、调函数指针解量化，加新类型只需填一行 + 写解/量化函数。",
+                    "en": "ggml_type_traits registers one row per type (blck_size, type_size, to_float, from_float_ref, ...); operators look it up and call the function pointers, so a new type needs only one row + its dequant/quant functions.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "q4_K 和 q4_0 都是约 4-bit，但内存布局差别很大。试着说出至少两点结构上的不同。（提示：超块/两层 scale/dmin/字节数）",
+                "en": "q4_K and q4_0 are both ~4-bit, yet their memory layouts differ a lot. Name at least two structural differences. (hint: super-block / two-level scale / dmin / byte count)",
+            },
+        ],
+    },
+    "13-gguf-format.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GGUF 文件里的 metadata KV 主要存什么？",
+                    "en": "What does the metadata KV in a GGUF file mainly store?",
+                },
+                "opts": [
+                    {
+                        "zh": "模型的自描述信息——架构、层数/维度等超参、词表、聊天模板，让加载器无需猜测结构",
+                        "en": "the model's self-describing info - architecture, hyperparameters like layer count/dimension, vocab, chat template - so the loader need not guess the structure",
+                    },
+                    {"zh": "只有权重的原始字节", "en": "only the raw bytes of the weights"},
+                    {"zh": "只有一个版本号", "en": "only a version number"},
+                    {"zh": "模型的源代码", "en": "the model's source code"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "metadata 是一串带类型（gguf_type）的键值对，自描述地存架构、超参、词表、聊天模板等；加载器直接读 KV 就能建图，无需外部配置或猜测。",
+                    "en": "Metadata is a run of typed (gguf_type) key-value pairs that self-describe architecture, hyperparameters, vocab, chat template, etc.; the loader reads the KVs to build the graph, with no external config or guessing.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama.cpp 用 mmap 加载 GGUF 权重的好处是？",
+                    "en": "What is the benefit of llama.cpp loading GGUF weights with mmap?",
+                },
+                "opts": [
+                    {
+                        "zh": "只读映射文件、零拷贝，按需分页载入，不必把几 GB 权重先读进内存再拷一遍",
+                        "en": "read-only file mapping, zero-copy, paged in on demand - no need to read several GB of weights into memory and copy them again",
+                    },
+                    {"zh": "可以在运行时修改权重", "en": "it lets you modify the weights at runtime"},
+                    {"zh": "会自动对权重再做量化", "en": "it auto-quantizes the weights again"},
+                    {"zh": "会加密权重数据", "en": "it encrypts the weight data"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "mmap 把文件只读映射进地址空间，张量 data 指针直接指向磁盘页，用到哪页 OS 才载入；省去了把几 GB 权重整体读入再拷贝的开销，这就是“秒加载”。",
+                    "en": "mmap maps the file read-only into the address space, with tensor data pointers pointing straight at disk pages loaded only when touched; it avoids reading and copying several GB of weights wholesale - that is the 'instant load'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "GGUF 文件开头的 magic 和当前 version 是？",
+                    "en": "What are the magic and current version at the start of a GGUF file?",
+                },
+                "opts": [
+                    {"zh": "magic 是 \"GGUF\"，当前 version 是 3", "en": "the magic is \"GGUF\" and the current version is 3"},
+                    {"zh": "magic 是 \"GGML\"，version 是 1", "en": "the magic is \"GGML\", version 1"},
+                    {"zh": "magic 是 \"LLMA\"，version 是 2", "en": "the magic is \"LLMA\", version 2"},
+                    {"zh": "没有 magic，直接就是权重", "en": "there is no magic, just weights directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GGUF_MAGIC = \"GGUF\"（开头 4 字节），GGUF_VERSION = 3（见 ggml/include/gguf.h）；加载器一上来就核对它们，不对就拒绝或报错。",
+                    "en": "GGUF_MAGIC = \"GGUF\" (the first 4 bytes), GGUF_VERSION = 3 (see ggml/include/gguf.h); the loader checks them immediately and refuses or errors if they do not match.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "GGUF 把超参和词表都写进文件自描述，相比“权重文件 + 外部 config”的老办法有什么好处？（提示：可移植/可扩展/加载）",
+                "en": "GGUF writes hyperparameters and vocab into the file as self-description. What are the advantages over the old \"weights file + external config\" approach? (hint: portability / extensibility / loading)",
+            },
+        ],
+    },
 }
 
 
