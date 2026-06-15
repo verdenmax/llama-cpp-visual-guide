@@ -1199,6 +1199,67 @@ QUIZZES = {
             },
         ],
     },
+    "18-batching.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_batch 的 logits 字段是干嘛的？",
+                    "en": "What is the logits field of llama_batch for?",
+                },
+                "opts": [
+                    {"zh": "一个 per-token 标志，标记哪些 token 需要算输出 logits", "en": "a per-token flag marking which tokens need output logits computed"},
+                    {"zh": "存放算好的 logits", "en": "stores the already-computed logits"},
+                    {"zh": "存权重", "en": "stores weights"},
+                    {"zh": "采样温度", "en": "the sampling temperature"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "logits 是个开关数组（源码注释将改名 output）：标了的位置才做输出投影（隐藏向量 -> 词表大小的大矩阵乘）。prefill 往往只标最后一个，省掉大量无用投影。",
+                    "en": "logits is a switch array (source comment will rename to output): only flagged positions do the output projection (a hidden-vector -> vocab-size matmul). Prefill often flags only the last, saving many useless projections.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么要把 batch 切成 ubatch？",
+                    "en": "Why split a batch into ubatches?",
+                },
+                "opts": [
+                    {"zh": "硬件一次能高效处理的物理批大小有限（n_ubatch），大批切成小批逐个算", "en": "the physical batch size hardware can efficiently process is limited (n_ubatch); a big batch is split into small ones computed one by one"},
+                    {"zh": "为了加密", "en": "for encryption"},
+                    {"zh": "为多线程随机切", "en": "to split randomly for multithreading"},
+                    {"zh": "没有意义", "en": "no reason"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "n_batch 是逻辑批（一次能提交多少），n_ubatch 是物理批（硬件一次高效算多少）。llama_batch_allocr 把大的逻辑批 split 成若干 &lt;= n_ubatch 的物理批逐个喂图，两者解耦。",
+                    "en": "n_batch is the logical batch (how much you can submit at once), n_ubatch the physical batch (how much hardware efficiently computes at once). llama_batch_allocr splits the big logical batch into several &lt;= n_ubatch physical batches fed one by one, the two decoupled.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "batch 里的 seq_id 表示什么？",
+                    "en": "What does seq_id in a batch represent?",
+                },
+                "opts": [
+                    {"zh": "这个 token 属于哪条序列（支持多序列并行）", "en": "which sequence this token belongs to (supports multi-sequence parallelism)"},
+                    {"zh": "token 的 id", "en": "the token's id"},
+                    {"zh": "token 的位置", "en": "the token's position"},
+                    {"zh": "输出标志", "en": "the output flag"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "seq_id 标明每个 token 属于哪条（或哪些）序列。一个 batch/context 可同时装多条序列，它们共享权重和调度、各有各的 KV（按 seq_id 区分，L19）。",
+                    "en": "seq_id marks which sequence(s) each token belongs to. One batch/context can hold several sequences at once, sharing weights and scheduling, each with its own KV (distinguished by seq_id, L19).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L03 的 prefill/decode，说说 batch 的 logits 标志怎么帮引擎省掉不必要的计算。",
+                "en": "Drawing on L03's prefill/decode, explain how the batch's logits flag helps the engine skip unnecessary computation.",
+            },
+        ],
+    },
 }
 
 

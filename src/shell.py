@@ -80,6 +80,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("17-context-session.html", "上下文与会话", "Context & session",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("18-batching.html", "批处理", "Batching",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -527,6 +529,8 @@ SUBTITLES = {
                             "build_graph dispatch; build_attn/build_ffn blocks; src/models; ggml_cgraph"),
     "17-context-session.html": ("llama_context · cparams · memory/sched/logits · llama_decode",
                                 "llama_context; cparams; memory/sched/logits; llama_decode"),
+    "18-batching.html": ("llama_batch · pos/seq_id/logits 标志 · llama_batch_allocr -> ubatch",
+                         "llama_batch; pos/seq_id/logits flags; llama_batch_allocr -> ubatch"),
 }
 
 
