@@ -41,6 +41,7 @@ SOFT_EXEMPT = {"40-glossary.html"}
 # Visual-block density (soft): containers that count as a "diagram/table".
 DIAGRAM_CLASSES = ("layers", "vflow", "flow", "cols", "cellgroup", "timeline")
 MIN_DIAGRAMS = 6  # per lesson, counting BOTH languages (>= 3 per language)
+MIN_CJK = 3000  # per-lesson zh CJK chars (soft floor; authoring target ~4000+)
 
 issues = []
 
@@ -129,6 +130,10 @@ def main():
         for lang in ("zh", "en"):
             if len(c.get(lang, "").strip()) < MIN_CONTENT:
                 add("ERR", fname, f"{lang} content missing or too short")
+        if fname not in SOFT_EXEMPT:
+            cjk = len(re.findall(r"[\u4e00-\u9fff]", c.get("zh", "")))
+            if cjk < MIN_CJK:
+                add("WARN", fname, f"only {cjk} CJK chars in zh (want >= {MIN_CJK})")
     for fname in CONTENT:
         if fname not in ORDER:
             add("ERR", "registry", f"CONTENT key not in PAGES: {fname}")
