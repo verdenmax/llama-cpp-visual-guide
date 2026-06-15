@@ -1135,6 +1135,70 @@ QUIZZES = {
             },
         ],
     },
+    "17-context-session.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model 和 llama_context 的区别是？",
+                    "en": "What is the difference between llama_model and llama_context?",
+                },
+                "opts": [
+                    {
+                        "zh": "model 是只读权重（可被多 context 共享），context 是有状态运行时（KV/sched/logits，每会话一个）",
+                        "en": "model is read-only weights (shareable by many contexts); context is a stateful runtime (KV/sched/logits, one per session)",
+                    },
+                    {"zh": "是一回事，只是名字不同", "en": "they are the same thing, just different names"},
+                    {"zh": "context 存权重，model 存 KV", "en": "context stores weights, model stores KV"},
+                    {"zh": "model 有状态，context 只读", "en": "model is stateful, context is read-only"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "权重只读、几个 GB，多会话共享同一份最省内存；KV cache、当前位置是每会话不同的状态，必须各存一份。所以 model 只读可共享、context 有状态每会话一个。",
+                    "en": "Weights are read-only and several GB, so sharing one copy across sessions saves the most memory; KV cache and current position are per-session state stored separately. So model is read-only/shareable, context is stateful/per-session.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama_decode 做什么？",
+                    "en": "What does llama_decode do?",
+                },
+                "opts": [
+                    {"zh": "跑一步前向（建图 + 执行 + 更新 KV），算出 logits", "en": "runs one forward step (build graph + execute + update KV), producing logits"},
+                    {"zh": "加载模型", "en": "loads the model"},
+                    {"zh": "直接采样出一个 token", "en": "directly samples a token"},
+                    {"zh": "释放内存", "en": "frees memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_decode 吃一个 batch，内部切 ubatch（L18）-> build_graph（L16）-> sched 执行（L10）-> 更新 KV（L19）-> 把 logits 写进输出缓冲。采样是下一步（L21）的事。",
+                    "en": "llama_decode eats a batch, internally splitting ubatch (L18) -> build_graph (L16) -> sched execute (L10) -> update KV (L19) -> write logits to the output buffer. Sampling is the next step's job (L21).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "取第 i 个 token 的 logits 用哪个？",
+                    "en": "Which call gets the i-th token's logits?",
+                },
+                "opts": [
+                    {"zh": "llama_get_logits_ith(ctx, i)", "en": "llama_get_logits_ith(ctx, i)"},
+                    {"zh": "llama_get_model", "en": "llama_get_model"},
+                    {"zh": "llama_tokenize", "en": "llama_tokenize"},
+                    {"zh": "llama_free", "en": "llama_free"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_get_logits_ith(ctx, i) 取第 i 个被标记输出的位置的 logits——一个 n_vocab 维向量，交给采样（L21）挑词。",
+                    "en": "llama_get_logits_ith(ctx, i) reads the logits of the i-th flagged-output position - an n_vocab-dimensional vector handed to sampling (L21) to pick a word.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么把“权重”（model）和“会话状态”（context）分成两个对象？这对一台机器服务很多用户有什么好处？",
+                "en": "Why split 'weights' (model) and 'session state' (context) into two objects? What does this gain for one machine serving many users?",
+            },
+        ],
+    },
 }
 
 

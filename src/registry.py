@@ -27,4 +27,5 @@ CONTENT = {
     "14-model-loading.html": part4.LESSON_14,
     "15-architecture-hparams.html": part4.LESSON_15,
     "16-build-graph.html": part4.LESSON_16,
+    "17-context-session.html": part4.LESSON_17,
 }

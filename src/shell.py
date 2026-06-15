@@ -78,6 +78,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("16-build-graph.html", "构建计算图", "Building the compute graph",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("17-context-session.html", "上下文与会话", "Context & session",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -523,6 +525,8 @@ SUBTITLES = {
                                      "llm_arch; llama_hparams; LLM_TENSOR_NAMES naming"),
     "16-build-graph.html": ("build_graph 派发 · build_attn/build_ffn 积木 · src/models · ggml_cgraph",
                             "build_graph dispatch; build_attn/build_ffn blocks; src/models; ggml_cgraph"),
+    "17-context-session.html": ("llama_context · cparams · memory/sched/logits · llama_decode",
+                                "llama_context; cparams; memory/sched/logits; llama_decode"),
 }
 
 
