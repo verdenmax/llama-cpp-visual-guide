@@ -423,7 +423,7 @@ def page(filename, content, home_href="../index.html"):
         p = PAGES[idx - 1]
         prev_link = (
             f'<a class="prev" href="{p[0]}"><div class="dir">{bi("← 上一课", "← Prev")}</div>'
-            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+            f'<div class="ttl">{bi(esc(p[1]), esc(p[2]))}</div></a>'
         )
     else:
         prev_link = (
@@ -434,7 +434,7 @@ def page(filename, content, home_href="../index.html"):
         p = PAGES[idx + 1]
         next_link = (
             f'<a class="next" href="{p[0]}"><div class="dir">{bi("下一课 →", "Next →")}</div>'
-            f'<div class="ttl">{bi(p[1], p[2])}</div></a>'
+            f'<div class="ttl">{bi(esc(p[1]), esc(p[2]))}</div></a>'
         )
     else:
         next_link = (
@@ -457,7 +457,7 @@ def page(filename, content, home_href="../index.html"):
 <div class="topbar">
   <div class="topbar-inner">
     <a class="home" href="{home}">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
-    <span class="pill">{bi(part_zh, part_en)}</span>
+    <span class="pill">{bi(esc(part_zh), esc(part_en))}</span>
     <span class="pill">{idx+1:02d} / {total:02d}</span>
     <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
@@ -465,8 +465,8 @@ def page(filename, content, home_href="../index.html"):
 </div>
 <div class="wrap">
   <div class="hero">
-    <div class="part">{bi(part_zh, part_en)}</div>
-    <h1><span class="lang-zh">{title_zh}</span><span class="lang-en">{title_en}</span></h1>
+    <div class="part">{bi(esc(part_zh), esc(part_en))}</div>
+    <h1><span class="lang-zh">{esc(title_zh)}</span><span class="lang-en">{esc(title_en)}</span></h1>
   </div>
   <div class="lang-zh">{content["zh"]}</div>
   <div class="lang-en">{content["en"]}</div>
@@ -514,15 +514,15 @@ def index_page(lesson_prefix="lessons/"):
 
     blocks = []
     for pz, pe in order:
-        blocks.append(f'<div class="toc-part">{bi(pz, pe)}</div>')
+        blocks.append(f'<div class="toc-part">{bi(esc(pz), esc(pe))}</div>')
         for num, fname, tz, te in groups[pz]:
             sz, se = SUBTITLES.get(fname, ("", ""))
             blocks.append(
                 f'<a href="{lesson_prefix}{fname}"><span class="n">{num:02d}</span>'
-                f'<span class="tt"><span class="lang-zh">{tz}</span>'
-                f'<span class="lang-en">{te}</span></span>'
-                f'<span class="ts"><span class="lang-zh">{sz}</span>'
-                f'<span class="lang-en">{se}</span></span></a>'
+                f'<span class="tt"><span class="lang-zh">{esc(tz)}</span>'
+                f'<span class="lang-en">{esc(te)}</span></span>'
+                f'<span class="ts"><span class="lang-zh">{esc(sz)}</span>'
+                f'<span class="lang-en">{esc(se)}</span></span></a>'
             )
     toc = "\n".join(blocks)
     total = len(PAGES)

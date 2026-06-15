@@ -968,7 +968,7 @@ pseudocode:</p>
 of "free blocks", finds the best fit when allocating, and merges adjacent free blocks when releasing. <strong>Because it saw the whole graph in advance, it reuses memory to the hilt</strong> - in
 practice peak memory is often a fraction of "each tensor its own block". This is <strong>one of the real payoffs</strong> of L09's "build first": without the complete graph, this global memory
 planning would be impossible.</p>
-<p>A everyday scene makes it click: imagine a long assembly line where each station produces a half-product handed to the next. The <strong>dumb way</strong> is to give every half-product its own
+<p>An everyday scene makes it click: imagine a long assembly line where each station produces a half-product handed to the next. The <strong>dumb way</strong> is to give every half-product its own
 dedicated shelf - the longer the line, the more shelves, until the warehouse overflows. The <strong>smart way</strong>: once a half-product is taken by the next station, its shelf frees immediately
 for later half-products - because you <strong>know in advance</strong> the whole line and when each half-product "retires". ggml-alloc is that smart warehouse manager, and L09's compute graph is the
 "<strong>full-process chart</strong>" in its hand. Without that chart, it could only use the dumb way.</p>
@@ -1010,7 +1010,7 @@ You filled in one number; it handled all the coordination for you.</p>
 graph, one device, computed straight front to back; the latter is the "<strong>multi-backend</strong>" conductor - it first splits the graph into segments, then hands each to
 <span class="mono">ggml_backend_graph_compute</span> to execute on its device. So sched is the <strong>higher-level</strong> coordinator, and single-backend execution is the basic tool in its hand. On CPU only
 you might use the former directly; to mix CPU/GPU you call in the latter. Get this containment straight and ggml's execution code will not dizzy you.</p>
-<p>Why multiple backends rather than just cramming everything onto the GPU? Because <strong>VRAM often cannot hold the whole model</strong>. A big model still tens of GB after quantization may only fit
+<p>Why multiple backends rather than just cramming everything onto the GPU? Because <strong>VRAM often cannot hold the whole model</strong>. A big model that is still tens of GB after quantization may only fit
 half its layers on your card; the rest must stay in CPU memory and compute on CPU. This "<strong>half GPU, half CPU</strong>" hybrid execution is the norm for running big models on consumer hardware, and
 the fundamental reason <span class="mono">ggml_backend_sched</span> exists. It lets you <strong>cut flexibly by VRAM size</strong>: more VRAM, put more layers on GPU; less, fewer, with the CPU as backstop, so
 it always runs - just faster the more layers go on GPU.</p>

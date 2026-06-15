@@ -145,9 +145,9 @@ def main():
         fname, tz, te = page[0], page[1], page[2]
         if fname not in idx:
             add("ERR", "index.html", f"TOC missing entry {fname}")
-        if tz not in idx:
+        if shell.esc(tz) not in idx:
             add("WARN", "index.html", f"TOC missing zh title {tz!r}")
-        if te not in idx:
+        if shell.esc(te) not in idx:
             add("WARN", "index.html", f"TOC missing en title {te!r}")
     m = re.search(r"共 (\d+) 课 · (\d+) 个部分", idx)
     if m:
