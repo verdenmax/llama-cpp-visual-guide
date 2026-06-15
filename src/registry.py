@@ -6,6 +6,7 @@ shell.PAGES.
 """
 import part1
 import part2
+import part3
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -16,4 +17,5 @@ CONTENT = {
     "05-tensors.html": part2.LESSON_05,
     "06-quantization-intro.html": part2.LESSON_06,
     "07-build-and-backends.html": part2.LESSON_07,
+    "08-ggml-core-objects.html": part3.LESSON_08,
 }

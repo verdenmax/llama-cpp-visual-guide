@@ -60,6 +60,8 @@ PAGES = [
      "第二部分 · 前置基础", "Part 2 · Foundations"),
     ("07-build-and-backends.html", "构建系统与后端", "Build system & backends",
      "第二部分 · 前置基础", "Part 2 · Foundations"),
+    ("08-ggml-core-objects.html", "ggml 核心对象", "ggml core objects",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -487,6 +489,8 @@ SUBTITLES = {
                                    "why quantize; block quantization; Q4_0/Q8_0/K-quant tour"),
     "07-build-and-backends.html": ("CMake 两步走 · 后端选项 · 产物在 build/bin · -ngl",
                                    "two-step CMake; backend options; build/bin outputs; -ngl"),
+    "08-ggml-core-objects.html": ("ggml_context · 内存池 arena · no-malloc bump 分配",
+                                  "ggml_context; the memory-pool arena; no-malloc bump allocation"),
 }
 
 

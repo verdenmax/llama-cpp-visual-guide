@@ -520,6 +520,56 @@ QUIZZES = {
             },
         ],
     },
+    "08-ggml-core-objects.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml 会为每个张量都单独 malloc 一次内存吗？",
+                    "en": "Does ggml malloc memory separately for every single tensor?",
+                },
+                "opts": [
+                    {
+                        "zh": "不会，张量从 ggml_context 预分配的 arena 里 bump 切出，不做 per-tensor malloc",
+                        "en": "No - tensors are bump-carved from the arena pre-allocated by ggml_context, with no per-tensor malloc",
+                    },
+                    {"zh": "会，每建一个张量就 malloc 一次", "en": "Yes, it mallocs once per tensor created"},
+                    {"zh": "用垃圾回收器自动管理", "en": "It uses a garbage collector"},
+                    {"zh": "把每个张量都存到磁盘", "en": "It stores each tensor to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_init 一次性备好一块 arena，ggml_new_object 在里面往后推游标就地放下；元数据和数据都从这块池子切，避免成千上万次 malloc。",
+                    "en": "ggml_init prepares one arena up front; ggml_new_object bumps a cursor and places in situ. Metadata and data are both carved from this pool, avoiding thousands of mallocs.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_init_params 里 no_alloc=true 意味着什么？",
+                    "en": "What does no_alloc=true in ggml_init_params mean?",
+                },
+                "opts": [
+                    {
+                        "zh": "只分配张量元数据、不分配数据缓冲，为“先建图、后由后端分配”铺路",
+                        "en": "Allocate tensor metadata only, no data buffer - paving the way for \"build the graph first, let the backend allocate later\"",
+                    },
+                    {"zh": "什么都不分配", "en": "Allocate nothing at all"},
+                    {"zh": "关闭量化", "en": "Turn off quantization"},
+                    {"zh": "把 context 设为只读", "en": "Make the context read-only"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "建计算图只需要形状和依赖，用不到真正的数据内存；no_alloc 让 ctx 只存元数据，数据等图建好后由后端统一分配（L10）。",
+                    "en": "Building a graph needs only shapes and dependencies, not real data memory; no_alloc keeps the ctx metadata-only, and the backend allocates data once the graph is built (L10).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 arena 满了 ggml 选择直接 abort，而不是自动扩容？这对使用者提出了什么要求？",
+                "en": "Why does ggml abort outright when the arena is full instead of auto-growing? What does that demand of the user?",
+            },
+        ],
+    },
 }
 
 
