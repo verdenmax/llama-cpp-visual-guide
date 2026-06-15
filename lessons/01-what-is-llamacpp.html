@@ -388,7 +388,7 @@ Python 代码——拿到一个 <span class="inline">.gguf</span>，引擎就知
 <h3>③ ggml：底层的张量计算引擎</h3>
 <p><span class="mono">ggml</span> 是 llama.cpp <strong>自研的张量库</strong>：定义张量、把一次推理描述成<strong>计算图</strong>，
 再把图里的算子（矩阵乘、softmax、rope……）派发到不同<strong>后端</strong>（CPU 的 SIMD、CUDA、Metal、Vulkan……）真正算出来。
-它<strong>零依赖、可嵌入、可移植</strong>，是整个项目能跑遍各种硬件的根本。</p>
+它把“<strong>描述运算</strong>”和“<strong>在硬件上执行</strong>”分开，于是同一套模型代码不改，就能跑遍 CPU 和各种 GPU。</p>
 
 <h2>整体结构图：四层自底向上</h2>
 <p>把上面三块支柱按"谁依赖谁"摞起来，llama.cpp 就是一座清晰的<strong>四层塔</strong>，从底层硬件一路往上到用户工具：</p>
@@ -489,7 +489,7 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
   <p style="margin:.5rem 0 0">这条主线（加载 -&gt; 分词 -&gt; 解码循环 -&gt; 采样）就是后面所有课的骨架，后面会专门用一课展开完整生命周期。</p>
 </div>
 <p>这里有个容易忽略的细节：解码循环每一轮只把<strong>上一个新 token</strong> 喂回去，而不是把整段历史重算一遍——靠的正是
-<strong>KV cache</strong> 把先前每个 token 算出的键/值缓存了下来。所以第一次吃下整段 prompt（<strong>prefill</strong>）相对慢，
+<strong>KV cache</strong> 把先前每个 token 算出的键/值缓存了下来。所以第一次要把整段 prompt 整体过一遍（<strong>prefill</strong>），<strong>首个字出现前要稍等一下</strong>（这就是“首 token 延迟”）；
 之后逐字生成（<strong>decode</strong>）却很快，每步只做一个 token 的前向。<span class="mono">llama_decode</span> 负责"前向算一步"，
 <span class="mono">llama_sampler_sample</span> 负责"按概率挑一个词"，两者一前一后交替，就织出了你看到的逐字输出。</p>
 
@@ -710,8 +710,8 @@ and paired with one executable it can move from the data center onto your laptop
 <p><span class="mono">ggml</span> is llama.cpp's <strong>in-house tensor library</strong>: it defines tensors,
 describes one inference run as a <strong>compute graph</strong>, then dispatches the ops in that graph
 (matmul, softmax, rope...) to different <strong>backends</strong> (CPU SIMD, CUDA, Metal, Vulkan...) to actually
-compute. It is <strong>zero-dependency, embeddable, and portable</strong> - the root reason the project runs
-across so much hardware.</p>
+compute. By separating "<strong>describing the math</strong>" from "<strong>running it on hardware</strong>", the same
+model code runs unchanged across CPU and all kinds of GPUs.</p>
 
 <h2>Structure map: four layers, bottom-up</h2>
 <p>Stack those three pillars by "who depends on whom" and llama.cpp becomes a clean <strong>four-layer tower</strong>,
@@ -831,8 +831,8 @@ llama_batch batch = <span class="fn">llama_batch_get_one</span>(tokens, n);
   a later lesson expands it into the full lifecycle.</p>
 </div>
 <p>One easily missed detail: each turn of the decode loop only feeds back the <strong>single new token</strong> rather than recomputing the whole
-history - thanks to the <strong>KV cache</strong>, which stores the keys/values already computed for every prior token. That is why digesting the whole
-prompt the first time (<strong>prefill</strong>) is relatively slow, while generating word by word afterward (<strong>decode</strong>) is fast, each step
+history - thanks to the <strong>KV cache</strong>, which stores the keys/values already computed for every prior token. That is why the <strong>first</strong>
+token only appears after the whole prompt has been passed through once (<strong>prefill</strong> - the "time to first token"), while generating word by word afterward (<strong>decode</strong>) is fast, each step
 doing the forward pass for just one token. <span class="mono">llama_decode</span> is "run one forward step" and
 <span class="mono">llama_sampler_sample</span> is "pick a word by probability"; the two alternate to weave the token-by-token output you see.</p>
 
