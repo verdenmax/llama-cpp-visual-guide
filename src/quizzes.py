@@ -640,6 +640,76 @@ QUIZZES = {
             },
         ],
     },
+    "10-graph-execution.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml-alloc 为什么能大幅复用内存、压低峰值？",
+                    "en": "Why can ggml-alloc reuse memory heavily and crush the peak?",
+                },
+                "opts": [
+                    {
+                        "zh": "因为惰性建图提供了完整的图，能预知每个张量的生命周期，用完即归还供后续复用",
+                        "en": "Because lazy building gives the complete graph, so it foresees each tensor's lifetime and returns memory once done for later reuse",
+                    },
+                    {"zh": "因为用了量化", "en": "Because it uses quantization"},
+                    {"zh": "因为内存很便宜", "en": "Because memory is cheap"},
+                    {"zh": "因为它不存任何中间结果", "en": "Because it stores no intermediate results"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "有了完整的图才能算出每个张量“最后一次被用”在哪，过了那点立刻回收；best-fit 复用 + 合并空闲块把峰值压到很低。",
+                    "en": "Only the complete graph lets it compute where each tensor is last used; past that it reclaims immediately, and best-fit reuse + merging free blocks crushes the peak.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_sched 主要负责什么？",
+                    "en": "What is ggml_backend_sched mainly responsible for?",
+                },
+                "opts": [
+                    {
+                        "zh": "把一张图拆开、把算子指派到合适的后端设备，并在设备间拷贝张量",
+                        "en": "Splitting a graph, assigning operators to suitable backend devices, and copying tensors between devices",
+                    },
+                    {"zh": "解析 GGUF 文件", "en": "Parsing GGUF files"},
+                    {"zh": "量化权重", "en": "Quantizing weights"},
+                    {"zh": "决定采样策略", "en": "Deciding the sampling strategy"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "sched 是“包工头”：拆图、按设备指派算子、在 CPU/GPU 边界自动插入拷贝——这正是 -ngl 把部分层放 GPU 的底层机制。",
+                    "en": "sched is the \"general contractor\": split, assign operators by device, and auto-insert copies at CPU/GPU boundaries - the mechanism behind -ngl putting some layers on GPU.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_graph_compute 执行一张图时，叶子（权重、输入）会被计算吗？",
+                    "en": "When ggml_backend_graph_compute runs a graph, are leafs (weights, inputs) computed?",
+                },
+                "opts": [
+                    {
+                        "zh": "不会，叶子是现成的数据，只被算子读取；只有节点（算子结果）才按拓扑序逐个计算",
+                        "en": "No - leafs are ready-made data, only read by operators; only nodes (operator results) are computed one by one in topological order",
+                    },
+                    {"zh": "会，每个张量都要算一遍", "en": "Yes, every tensor is computed"},
+                    {"zh": "只算叶子，不算节点", "en": "Only leafs are computed, not nodes"},
+                    {"zh": "随机选一半来算", "en": "A random half is computed"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "叶子是权重/输入等现成数据，执行时只被读取；执行引擎只对节点从头到尾算一遍。",
+                    "en": "Leafs are ready-made data like weights/inputs, only read at execution; the engine computes only the nodes, front to back.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "把模型一半层放 GPU、一半留 CPU（-ngl 设一半）时，ggml_backend_sched 在背后大概做了哪些事？",
+                "en": "When you put half the layers on GPU and keep half on CPU (-ngl set to half), what does ggml_backend_sched roughly do behind the scenes?",
+            },
+        ],
+    },
 }
 
 

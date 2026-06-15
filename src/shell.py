@@ -64,6 +64,8 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("09-compute-graph.html", "计算图：惰性构建", "The compute graph: lazy build",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("10-graph-execution.html", "图的执行与调度", "Graph execution & scheduling",
+     "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
 ]
 
 
@@ -495,6 +497,8 @@ SUBTITLES = {
                                   "ggml_context; the memory-pool arena; no-malloc bump allocation"),
     "09-compute-graph.html": ("先建图后执行 · op/src 反向指针 · nodes vs leafs",
                               "build-then-run; op/src back-pointers; nodes vs leafs"),
+    "10-graph-execution.html": ("backend 执行 · sched 多后端调度 · ggml-alloc 内存复用",
+                                "backend compute; multi-backend sched; ggml-alloc memory reuse"),
 }
 
 
