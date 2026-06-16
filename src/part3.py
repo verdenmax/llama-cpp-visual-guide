@@ -1168,21 +1168,24 @@ LESSON_11 = {
 GGML_ASSERT(a-&gt;ne[0] == b-&gt;ne[0]);          <span class="cm">// k 必须对上, 否则建图就报错</span>
 <span class="cm">// 结果形状: 取 a 的"另一维"、b 的"另一维", 高两维来自 b</span>
 ne = { a-&gt;ne[1], b-&gt;ne[1], b-&gt;ne[2], b-&gt;ne[3] };  <span class="cm">// 结果类型固定 F32</span></pre>
-<p>这里有个<strong>容易栽跟头</strong>的点：ggml 的形状规则，读起来和你数学课上学的"行 × 列"<strong>方向是反的</strong>。原因是 L05 讲过的——ggml <strong>行优先、ne[0] 是最内维</strong>，
-所以"内维相等"对应的其实是数学里"左矩阵的列数 == 右矩阵的行数"。只要牢记 L05 那句口诀"<strong>ne[0] 永远是最贴着内存、变化最快的那一维</strong>"，就不会把行当成列。
-此外，结果的高两维（<span class="mono">ne[2]</span>、<span class="mono">ne[3]</span>）来自 b，且支持<strong>广播</strong>（a 的对应维可以是 b 的整数分之一），这正是多头注意力里"一组权重作用于多个头"的实现方式。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这里有个<strong>容易栽跟头</strong>的点：ggml 的形状规则，读起来和你数学课上学的"行 × 列"<strong>方向是反的</strong>。原因是 L05 讲过的——ggml <strong>行优先、ne[0] 是最内维</strong>，所以"内维相等"对应的其实是数学里"左矩阵的列数 == 右矩阵的行数"。只要牢记 L05 那句口诀"<strong>ne[0] 永远是最贴着内存、变化最快的那一维</strong>"，就不会把行当成列。此外，结果的高两维（<span class="mono">ne[2]</span>、<span class="mono">ne[3]</span>）来自 b，且支持<strong>广播</strong>（a 的对应维可以是 b 的整数分之一），这正是多头注意力里"一组权重作用于多个头"的实现方式。
+</div>
 <p>为什么矩阵乘这么重要，值得单拎出来讲？因为它<strong>又重又频繁</strong>。一个 7B 模型，每生成一个 token，要做几百次矩阵乘，每次都是几千乘几千的大矩阵相乘——
 模型的绝大部分参数（那几个 GB 的权重）都是以"矩阵乘里的那个权重矩阵"的身份存在的。所以你之前学的所有东西，到头来几乎都在为矩阵乘服务：量化（L06）是为了让权重矩阵更小、搬得更快，
 后端（L07）是为了让矩阵乘算得更快，内存复用（L10）是为了腾地方装矩阵乘的中间结果。<strong>看懂 mul_mat，就看懂了推理的主战场。</strong></p>
-<p>再多说一句形状里那个"<strong>消去</strong>"。为什么内维相等、还被消去？因为矩阵乘的本质，就是拿 a 的一行和 b 的一行（在 ggml 的布局下）<strong>逐元素相乘再求和</strong>——
-那条被"相乘求和"吃掉的维，就是内维 k。它在结果里不复存在，只留下 a、b 各自的"另一维"组成结果的形状。理解了"k 被求和吃掉"，你就明白为什么两个 <span class="mono">[k, ...]</span>
-的张量乘出来是 <span class="mono">[m, n]</span>，而不是别的——这不是死记的规则，而是"求和把一维压没了"的自然结果。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  再多说一句形状里那个"<strong>消去</strong>"。为什么内维相等、还被消去？因为矩阵乘的本质，就是拿 a 的一行和 b 的一行（在 ggml 的布局下）<strong>逐元素相乘再求和</strong>——那条被"相乘求和"吃掉的维，就是内维 k。它在结果里不复存在，只留下 a、b 各自的"另一维"组成结果的形状。理解了"k 被求和吃掉"，你就明白为什么两个 <span class="mono">[k, ...]</span> 的张量乘出来是 <span class="mono">[m, n]</span>，而不是别的——这不是死记的规则，而是"求和把一维压没了"的自然结果。
+</div>
 <p>把矩阵乘的形状这条线收个尾：在 ggml 里你会反复看到形如 <span class="mono">cur = ggml_mul_mat(ctx, model.layers[i].wq, cur)</span> 的代码——拿这一层的 Q 权重矩阵去乘当前的隐藏状态，
 得到 Query。整座 transformer 的建图，骨架上就是一串这样的 mul_mat，中间穿插着归一化、rope、softmax。所以只要你能<strong>对着权重的形状，推出每个 mul_mat 的输出形状</strong>，
 你就能顺着代码把整个模型的数据流"走"一遍。这正是这一课开头说的"会读、会搭网络"的具体含义——而它的核心，就是 mul_mat 这条形状规则。</p>
-<p>这里也顺势点明 ggml 的一个取舍：它的算子不像有些框架那样"什么都能广播、什么形状都自动对齐"，而是<strong>把形状约束定得相当严格</strong>，对不上就当场断言失败。
-为什么宁可严格、也不要"智能地自动适配"？因为推理引擎最怕<strong>悄悄出错</strong>——一个被自动广播"凑合"过去的形状错误，可能让模型输出一堆看似正常实则错误的结果，极难排查。
-严格的断言把错误<strong>挡在建图阶段、暴露在第一现场</strong>，反而让整个系统更可靠。这是性能工程里常见的态度：<strong>宁可早失败、响亮地失败，也不要带病运行。</strong></p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里也顺势点明 ggml 的一个取舍：它的算子不像有些框架那样"什么都能广播、什么形状都自动对齐"，而是<strong>把形状约束定得相当严格</strong>，对不上就当场断言失败。为什么宁可严格、也不要"智能地自动适配"？因为推理引擎最怕<strong>悄悄出错</strong>——一个被自动广播"凑合"过去的形状错误，可能让模型输出一堆看似正常实则错误的结果，极难排查。严格的断言把错误<strong>挡在建图阶段、暴露在第一现场</strong>，反而让整个系统更可靠。这是性能工程里常见的态度：<strong>宁可早失败、响亮地失败，也不要带病运行。</strong>
+</div>
 
 <h2>三个常客：rms_norm / rope / soft_max_ext</h2>
 <p>除了矩阵乘，注意力层里还反复出现三个算子。把 L04 讲的注意力，用 ggml 算子串起来，大致是这样一条流水线：</p>
@@ -1203,16 +1206,17 @@ ne = { a-&gt;ne[1], b-&gt;ne[1], b-&gt;ne[2], b-&gt;ne[3] };  <span class="cm">/
 <p>逐个一句话：<span class="mono">rms_norm</span> 把一行向量按其均方根缩放到稳定范围，比 LayerNorm 更省（不用算均值）；<span class="mono">rope</span> 不是给位置加一个"序号向量"，
 而是<strong>按位置旋转</strong> Q、K，让注意力分数自带"两个 token 相距多远"的信息；<span class="mono">soft_max_ext</span> 是个<strong>融合算子</strong>，把"乘缩放系数 + 加掩码 + softmax"三步并成一次，
 省内存又省带宽。注意 <span class="mono">scale</span> 通常是 <span class="mono">1/sqrt(d)</span>（防止分数过大）、<span class="mono">mask</span> 装的就是因果掩码（未来位置为 -inf）。</p>
-<p>为什么要把这三个算子单独点出来？因为它们<strong>体现了 ggml 算子设计的两个常见手法</strong>。一是<strong>融合</strong>：<span class="mono">soft_max_ext</span> 把本可以拆成三四个算子的事（缩放、加掩码、求指数、归一）
-压成一个，少建几个中间张量、少搬几趟数据——在 decode 这种"带宽比算力更紧张"的场景（L04 说过），融合的收益尤其明显。二是<strong>专用化</strong>：transformer 几乎离不开归一化和位置编码，
-ggml 干脆为它们提供 <span class="mono">rms_norm</span>、<span class="mono">rope_ext</span> 这样的<strong>专用算子</strong>，而不是让你用一堆基础算子拼。专用算子既好读、又给了后端"整段优化"的机会。
-这两手——该融合的融合、该专用的专用——贯穿 ggml 的算子库。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  为什么要把这三个算子单独点出来？因为它们<strong>体现了 ggml 算子设计的两个常见手法</strong>。一是<strong>融合</strong>：<span class="mono">soft_max_ext</span> 把本可以拆成三四个算子的事（缩放、加掩码、求指数、归一）压成一个，少建几个中间张量、少搬几趟数据——在 decode 这种"带宽比算力更紧张"的场景（L04 说过），融合的收益尤其明显。二是<strong>专用化</strong>：transformer 几乎离不开归一化和位置编码，ggml 干脆为它们提供 <span class="mono">rms_norm</span>、<span class="mono">rope_ext</span> 这样的<strong>专用算子</strong>，而不是让你用一堆基础算子拼。专用算子既好读、又给了后端"整段优化"的机会。这两手——该融合的融合、该专用的专用——贯穿 ggml 的算子库。
+</div>
 <p>顺带澄清一个容易混的点：<span class="mono">ggml_rope</span> 和 <span class="mono">ggml_rope_ext</span> 是同一族，后者多了一串参数（<span class="mono">freq_base</span>、<span class="mono">freq_scale</span> 等），
 用来支持 YaRN 这类<strong>长上下文扩展</strong>技术——简单说，就是通过调整旋转的"频率"，让一个原本只在 4K 上下文训练的模型，也能在几万 token 的长上下文上工作。你现在不必深究这些参数，
 只要知道"<strong>位置编码也是可以调的，调它能换来更长的上下文</strong>"，这个认识就够了。</p>
-<p>把这三个算子和 mul_mat 放在一起，你就掌握了读懂任何 transformer 建图代码所需的"<strong>核心词汇表</strong>"：<span class="mono">mul_mat</span>（投影、注意力打分、汇总）、
-<span class="mono">rms_norm</span>（每个子层前的归一化）、<span class="mono">rope</span>（位置）、<span class="mono">soft_max_ext</span>（注意力权重）。再加上加法（残差）、逐元素乘（门控）这几个基础算子，
-一个 transformer block 的建图代码，<strong>九成的行你都能认出来在干什么</strong>。剩下的一成是各家模型的小花样，但万变不离这套核心算子——这正是这一课最实在的收获。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  把这三个算子和 mul_mat 放在一起，你就掌握了读懂任何 transformer 建图代码所需的"<strong>核心词汇表</strong>"：<span class="mono">mul_mat</span>（投影、注意力打分、汇总）、<span class="mono">rms_norm</span>（每个子层前的归一化）、<span class="mono">rope</span>（位置）、<span class="mono">soft_max_ext</span>（注意力权重）。再加上加法（残差）、逐元素乘（门控）这几个基础算子，一个 transformer block 的建图代码，<strong>九成的行你都能认出来在干什么</strong>。剩下的一成是各家模型的小花样，但万变不离这套核心算子——这正是这一课最实在的收获。
+</div>
 
 <h2>一个算子，两处代码</h2>
 <p>最后破除一个常见困惑：一个算子在 ggml 里其实有<strong>两处</strong>代码，分工明确。一处负责"建图"（定义形状、填 op/src，L09），另一处负责"真正算"（在某个后端上跑数）：</p>
@@ -1323,27 +1327,26 @@ result's shape is formed from each one's "other dim". In source (<span class="mo
 GGML_ASSERT(a-&gt;ne[0] == b-&gt;ne[0]);          <span class="cm">// k must match, else graph-build errors</span>
 <span class="cm">// result shape: take a's "other dim", b's "other dim", high dims from b</span>
 ne = { a-&gt;ne[1], b-&gt;ne[1], b-&gt;ne[2], b-&gt;ne[3] };  <span class="cm">// result type is always F32</span></pre>
-<p>There is a <strong>tripping point</strong> here: ggml's shape rule reads in the <strong>opposite direction</strong> from the "rows x columns" you learned in math class. The reason
-is from L05 - ggml is <strong>row-major, ne[0] is the innermost dim</strong>, so "inner dims equal" actually corresponds to math's "left matrix's columns == right matrix's rows".
-Just keep L05's mnemonic "<strong>ne[0] is always the memory-adjacent, fastest-changing dim</strong>" and you will not mistake rows for columns. Also, the result's high dims
-(<span class="mono">ne[2]</span>, <span class="mono">ne[3]</span>) come from b and support <strong>broadcasting</strong> (a's matching dim can be an integer fraction of b's) - exactly how
-"one set of weights applied to multiple heads" is implemented in multi-head attention.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  There is a <strong>tripping point</strong> here: ggml's shape rule reads in the <strong>opposite direction</strong> from the "rows x columns" you learned in math class. The reason is from L05 - ggml is <strong>row-major, ne[0] is the innermost dim</strong>, so "inner dims equal" actually corresponds to math's "left matrix's columns == right matrix's rows". Just keep L05's mnemonic "<strong>ne[0] is always the memory-adjacent, fastest-changing dim</strong>" and you will not mistake rows for columns. Also, the result's high dims (<span class="mono">ne[2]</span>, <span class="mono">ne[3]</span>) come from b and support <strong>broadcasting</strong> (a's matching dim can be an integer fraction of b's) - exactly how "one set of weights applied to multiple heads" is implemented in multi-head attention.
+</div>
 <p>Why is matmul so important it deserves its own section? Because it is <strong>both heavy and frequent</strong>. A 7B model does hundreds of matmuls per generated token, each a
 thousands-by-thousands matrix multiply - the vast majority of the model's parameters (those several GB of weights) exist as "the weight matrix in a matmul". So almost everything you have learned
 ultimately serves matmul: quantization (L06) to make weight matrices smaller and faster to move, backends (L07) to compute matmuls faster, memory reuse (L10) to make room for matmul intermediates.
 <strong>Understand mul_mat and you understand the main battlefield of inference.</strong></p>
-<p>One more word on that "<strong>elimination</strong>" in the shape. Why is the inner dim equal and then eliminated? Because matrix multiply is essentially taking a row of a and a row of b
-(under ggml's layout) and <strong>multiplying element-wise then summing</strong> - the dim eaten by that "multiply-and-sum" is the inner dim k. It is gone in the result, leaving only a's and b's
-"other dim" to form the result shape. Once you get "k is eaten by the sum", you see why two <span class="mono">[k, ...]</span> tensors multiply into <span class="mono">[m, n]</span> and nothing else
-- not a rule to memorize but the natural result of "summing collapses one dim".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  One more word on that "<strong>elimination</strong>" in the shape. Why is the inner dim equal and then eliminated? Because matrix multiply is essentially taking a row of a and a row of b (under ggml's layout) and <strong>multiplying element-wise then summing</strong> - the dim eaten by that "multiply-and-sum" is the inner dim k. It is gone in the result, leaving only a's and b's "other dim" to form the result shape. Once you get "k is eaten by the sum", you see why two <span class="mono">[k, ...]</span> tensors multiply into <span class="mono">[m, n]</span> and nothing else - not a rule to memorize but the natural result of "summing collapses one dim".
+</div>
 <p>To wrap up the matmul-shape thread: in ggml you will repeatedly see code like <span class="mono">cur = ggml_mul_mat(ctx, model.layers[i].wq, cur)</span> - multiplying this layer's Q weight matrix by
 the current hidden state to get the Query. The whole transformer's graph build is, skeletally, a string of such mul_mats interleaved with normalization, rope, softmax. So as long as you can <strong>derive
 each mul_mat's output shape from the weight shapes</strong>, you can "walk" the entire model's data flow through the code. This is the concrete meaning of "reading and building networks" from the lesson's
 opening - and at its core is this one mul_mat shape rule.</p>
-<p>This is also a good moment to note a ggml trade-off: its operators do not "broadcast anything, auto-align any shape" like some frameworks; instead it <strong>sets shape constraints quite
-strictly</strong>, asserting failure on the spot when things do not match. Why prefer strict over "smart auto-adaptation"? Because an inference engine fears <strong>silent errors</strong> most - a shape
-error papered over by auto-broadcast could make the model output a pile of plausible-looking but wrong results, extremely hard to trace. Strict assertions <strong>block errors at graph-build, exposing
-them at the first scene</strong>, making the whole system more reliable. This is a common attitude in performance engineering: <strong>fail early and loudly rather than run sick</strong>.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  This is also a good moment to note a ggml trade-off: its operators do not "broadcast anything, auto-align any shape" like some frameworks; instead it <strong>sets shape constraints quite strictly</strong>, asserting failure on the spot when things do not match. Why prefer strict over "smart auto-adaptation"? Because an inference engine fears <strong>silent errors</strong> most - a shape error papered over by auto-broadcast could make the model output a pile of plausible-looking but wrong results, extremely hard to trace. Strict assertions <strong>block errors at graph-build, exposing them at the first scene</strong>, making the whole system more reliable. This is a common attitude in performance engineering: <strong>fail early and loudly rather than run sick</strong>.
+</div>
 
 <h2>Three regulars: rms_norm / rope / soft_max_ext</h2>
 <p>Besides matmul, three operators recur in the attention layer. Stringing L04's attention with ggml operators gives roughly this pipeline:</p>
@@ -1366,19 +1369,18 @@ which is why understanding operators means understanding how a model lands as co
 <span class="mono">rope</span> does not add an "index vector" per position but <strong>rotates</strong> Q, K by position, so attention scores carry "how far apart two tokens are";
 <span class="mono">soft_max_ext</span> is a <strong>fused operator</strong> merging "multiply scale + add mask + softmax" into one, saving memory and bandwidth. Note <span class="mono">scale</span>
 is usually <span class="mono">1/sqrt(d)</span> (to keep scores from getting too large), and <span class="mono">mask</span> holds the causal mask (future positions at -inf).</p>
-<p>Why single out these three operators? Because they <strong>exemplify two common techniques of ggml operator design</strong>. One is <strong>fusion</strong>: <span class="mono">soft_max_ext</span>
-compresses what could be three or four operators (scale, add mask, exponentiate, normalize) into one, building fewer intermediate tensors and moving data fewer times - in decode, where "bandwidth is
-tighter than compute" (from L04), fusion's payoff is especially clear. The other is <strong>specialization</strong>: transformers can hardly do without normalization and position encoding, so ggml just
-provides <strong>dedicated operators</strong> like <span class="mono">rms_norm</span> and <span class="mono">rope_ext</span> rather than making you assemble them from basic ops. Dedicated operators are both
-readable and give the backend a chance to "optimize the whole segment". These two moves - fuse what should be fused, specialize what should be specialized - run through ggml's operator library.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Why single out these three operators? Because they <strong>exemplify two common techniques of ggml operator design</strong>. One is <strong>fusion</strong>: <span class="mono">soft_max_ext</span> compresses what could be three or four operators (scale, add mask, exponentiate, normalize) into one, building fewer intermediate tensors and moving data fewer times - in decode, where "bandwidth is tighter than compute" (from L04), fusion's payoff is especially clear. The other is <strong>specialization</strong>: transformers can hardly do without normalization and position encoding, so ggml just provides <strong>dedicated operators</strong> like <span class="mono">rms_norm</span> and <span class="mono">rope_ext</span> rather than making you assemble them from basic ops. Dedicated operators are both readable and give the backend a chance to "optimize the whole segment". These two moves - fuse what should be fused, specialize what should be specialized - run through ggml's operator library.
+</div>
 <p>A clarification in passing: <span class="mono">ggml_rope</span> and <span class="mono">ggml_rope_ext</span> are the same family, the latter with a string of extra parameters
 (<span class="mono">freq_base</span>, <span class="mono">freq_scale</span>, etc.) supporting long-context extension techniques like YaRN - in short, by adjusting the rotation "frequency", a model originally
 trained at 4K context can work at tens of thousands of tokens. You need not study these parameters now; just knowing "<strong>position encoding is tunable, and tuning it buys longer context</strong>" is
 enough.</p>
-<p>Put these three operators together with mul_mat and you have the "<strong>core vocabulary</strong>" needed to read any transformer's graph-build code: <span class="mono">mul_mat</span> (projection,
-attention scoring, summing), <span class="mono">rms_norm</span> (normalization before each sub-layer), <span class="mono">rope</span> (position), <span class="mono">soft_max_ext</span> (attention weights).
-Add a few basic operators like add (residual) and element-wise multiply (gating), and you can recognize <strong>ninety percent of the lines</strong> in a transformer block's graph-build code. The
-remaining ten percent are each model's little tweaks, but they never stray from this core operator set - exactly this lesson's most practical takeaway.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Put these three operators together with mul_mat and you have the "<strong>core vocabulary</strong>" needed to read any transformer's graph-build code: <span class="mono">mul_mat</span> (projection, attention scoring, summing), <span class="mono">rms_norm</span> (normalization before each sub-layer), <span class="mono">rope</span> (position), <span class="mono">soft_max_ext</span> (attention weights). Add a few basic operators like add (residual) and element-wise multiply (gating), and you can recognize <strong>ninety percent of the lines</strong> in a transformer block's graph-build code. The remaining ten percent are each model's little tweaks, but they never stray from this core operator set - exactly this lesson's most practical takeaway.
+</div>
 
 <h2>One operator, two pieces of code</h2>
 <p>Finally, dispel a common confusion: an operator in ggml actually has <strong>two</strong> pieces of code, with a clear division. One does "graph building" (define the shape, fill
@@ -1503,13 +1505,16 @@ LESSON_12 = {
 <p>逐个字段看：<span class="mono">d</span> 是那个块共享的 scale，<span class="mono">ggml_half</span> 就是 2 字节的半精度浮点（L06 说的"基准"）；<span class="mono">qs</span> 是量化值数组。
 q4_0 的 <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span>——32 个值只占 16 字节，因为每个值才 4 bit，<strong>两个挤进一个字节</strong>（一个放高 nibble、一个放低 nibble）。
 q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>——32 个值占满 32 字节，<strong>一个值独占一字节</strong>，不用拆位。</p>
-<p>有人会问：那个 scale 为什么用 2 字节的 <span class="mono">half</span>，而不是更精确的 4 字节 float？因为 scale <strong>每块才一个</strong>，它的精度对最终结果影响有限，却要乘进整块的体积里——
-用 half 省下的这 2 字节，摊到 32 个权重上虽小，乘以一个模型里成千上万个块，省下来的就很可观了。这是一个典型的工程取舍：在"几乎不影响精度"的地方<strong>能省则省</strong>，把字节预算留给真正重要的量化值。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  有人会问：那个 scale 为什么用 2 字节的 <span class="mono">half</span>，而不是更精确的 4 字节 float？因为 scale <strong>每块才一个</strong>，它的精度对最终结果影响有限，却要乘进整块的体积里——用 half 省下的这 2 字节，摊到 32 个权重上虽小，乘以一个模型里成千上万个块，省下来的就很可观了。这是一个典型的工程取舍：在"几乎不影响精度"的地方<strong>能省则省</strong>，把字节预算留给真正重要的量化值。
+</div>
 <p>为什么 q8_0 更准也更大？因为 4-bit 只能表示 16 个档位、8-bit 能表示 256 个档位，<strong>同一个权重，8-bit 能贴得更近</strong>，量化误差更小。代价是体积翻倍：每权重从 0.5 字节涨到 1 字节。
 这正是 L06 那张"显存对照表"背后的字节级真相——你在命令行里选 <span class="mono">Q4_0</span> 还是 <span class="mono">Q8_0</span>，本质就是在这两种 block 布局之间二选一。</p>
-<p>这里值得停下来想一个问题：为什么要<strong>分块</strong>，不干脆整个权重矩阵共享一个 scale？因为一个几千乘几千的大矩阵里，权重的大小范围差异很大——某些行很大、某些行很小。
-若全矩阵共用一个 scale，就得迁就那个最大值，小权重会被压得几乎只剩 0、精度全丢。分成 32 个一块后，<strong>每块各自找自己的 scale</strong>，大块用大 scale、小块用小 scale，量化误差立刻小一大截。
-这就是"块量化"四个字的全部用意：用"每块一个 scale"的少量开销，换回"局部精度"的大幅提升。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里值得停下来想一个问题：为什么要<strong>分块</strong>，不干脆整个权重矩阵共享一个 scale？因为一个几千乘几千的大矩阵里，权重的大小范围差异很大——某些行很大、某些行很小。若全矩阵共用一个 scale，就得迁就那个最大值，小权重会被压得几乎只剩 0、精度全丢。分成 32 个一块后，<strong>每块各自找自己的 scale</strong>，大块用大 scale、小块用小 scale，量化误差立刻小一大截。这就是"块量化"四个字的全部用意：用"每块一个 scale"的少量开销，换回"局部精度"的大幅提升。
+</div>
 <p>还有个常被忽略的细节：q4_0 一块 18 字节、装 32 个权重，平均每权重 <strong>4.5 bit</strong>，而不是正好 4 bit。多出来的 0.5 bit，就是那 2 字节 scale 摊到 32 个权重头上的开销。
 块越大，这份"管理开销"摊得越薄——这也为下一节 K-quant 用 256 的大超块埋下了伏笔。</p>
 
@@ -1536,14 +1541,17 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
 } block_q4_K;</pre>
 <p>把 q4_K 的字节数也算一下：2（d）+ 2（dmin）+ 12（scales）+ 128（qs）= <strong>144 字节</strong>装 256 个权重，平均每权重 144×8/256 = <strong>4.5 bit</strong>——和 q4_0 一样的位宽，精度却更高。
 这就是"两层 scale"最直接的回报：没多花一个 bit，纯靠结构更精巧把误差压了下去。</p>
-<p>注意 <span class="mono">q4_K</span> 里<strong>没有 qh</strong>——只有 d、dmin、scales、qs 四个字段，这点很容易记错（见深挖 2）。而 <span class="mono">q6_K</span> 就<strong>有 qh</strong>：6-bit 的量化值被拆成"低 4 位"放 <span class="mono">ql</span>、
-"高 2 位"放 <span class="mono">qh</span>，再配 16 个 8-bit 的子块 scale 和一个超块 d。不同 K-quant 的字段并不统一，<strong>别想当然套用</strong>。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  注意 <span class="mono">q4_K</span> 里<strong>没有 qh</strong>——只有 d、dmin、scales、qs 四个字段，这点很容易记错（见深挖 2）。而 <span class="mono">q6_K</span> 就<strong>有 qh</strong>：6-bit 的量化值被拆成"低 4 位"放 <span class="mono">ql</span>、"高 2 位"放 <span class="mono">qh</span>，再配 16 个 8-bit 的子块 scale 和一个超块 d。不同 K-quant 的字段并不统一，<strong>别想当然套用</strong>。
+</div>
 <p>顺带认识一下整个 K-quant 家族：从 <span class="mono">q2_K</span>、<span class="mono">q3_K</span> 一直到 <span class="mono">q6_K</span>，名字里的数字是大致的位宽，<strong>K</strong> 则代表都用"超块 + 两层 scale"这套结构。
 位宽越低（如 q2_K）压得越狠、精度越险，往往只敢用在不那么敏感的层上；位宽越高（如 q6_K）越接近原始精度。这也是为什么实际下载模型时，你会看到 <span class="mono">Q4_K_M</span>、<span class="mono">Q5_K_S</span> 这种带后缀的名字——
 它们是把<strong>不同层用不同 K-quant 档位</strong>混搭出来的方案，在体积和质量之间取不同的平衡点。</p>
-<p>多说一句那个 <span class="mono">dmin</span>。q4_0 只有一个 scale，量化是<strong>对称</strong>的（围绕 0）；而 q4_K 多了一个 min，做的是<strong>带偏移</strong>的量化——还原公式更像 <span class="mono">x = scale · q + min</span>
-（源码注释写的就是 "weight is represented as x = a·q + b"）。为什么要这个偏移？因为很多权重的分布并不以 0 为中心，有了 min 就能让量化区间<strong>整体平移</strong>去贴合真实分布，进一步压低误差。
-这是 K-quant 比 q4_0 更准的另一半原因：不只 scale 更细，连"零点"都能调。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  多说一句那个 <span class="mono">dmin</span>。q4_0 只有一个 scale，量化是<strong>对称</strong>的（围绕 0）；而 q4_K 多了一个 min，做的是<strong>带偏移</strong>的量化——还原公式更像 <span class="mono">x = scale · q + min</span>（源码注释写的就是 "weight is represented as x = a·q + b"）。为什么要这个偏移？因为很多权重的分布并不以 0 为中心，有了 min 就能让量化区间<strong>整体平移</strong>去贴合真实分布，进一步压低误差。这是 K-quant 比 q4_0 更准的另一半原因：不只 scale 更细，连"零点"都能调。
+</div>
 <p>为什么超块要选 256 这么大？因为超块越大，"整体 d/dmin"这份固定开销摊到的权重越多、每权重的开销越小；而局部精度由更细的子块 scale 兜底，不会因为块大而变糊。
 大块负责"高压缩"、子块负责"高精度"，两者兼得——这就是 K-quant 在相同位宽下能比 q4_0 更准的设计动机（详见深挖 1）。</p>
 
@@ -1567,15 +1575,18 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) · d</div></div>
 </div>
-<p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数（让 0 附近的权重对称分布），再乘上这块的 scale <span class="mono">d</span>，
+<p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数，再乘上这块的 scale <span class="mono">d</span>，
 就还原出近似的原始浮点。q8_0 更直接：<span class="mono">x = q * d</span>，因为 int8 本身就是有符号的，不用减偏移。</p>
-<p>那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。
-这样正负权重都能表示，且 0 附近分布得最密（量化最准），恰好契合"大多数权重都集中在 0 附近"的事实。一个小小的减法，背后是对权重分布的理解。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。这样正负权重都能表示，且 0 附近分布得最密（量化最准），恰好契合"大多数权重都集中在 0 附近"的事实。一个小小的减法，背后是对权重分布的理解。
+</div>
 <p>反过来，<strong>量化</strong>（把浮点压成字节）就是解量化的逆运算。q4_0 的参考实现 <span class="mono">quantize_row_q4_0_ref</span> 里，scale 取 <span class="mono">d = max / -8</span>——找出这块绝对值最大的权重，
 让它对应到量化区间的端点（-8），其余权重按比例缩放取整。<strong>除以 -8 而不是 8</strong> 是个容易看走眼的细节：它和解量化时的"减 8"配套，保证一来一回数值对得上。</p>
-<p>顺势说清一件事：解量化是<strong>有损</strong>的——还原出来的浮点和原始权重并不完全相等，差的那一点就是量化误差。但为什么模型还能照常工作？因为深度网络对权重的微小扰动相当<strong>宽容</strong>：
-单个权重差一点点，经过成百上千次累加和非线性，整体输出几乎察觉不到。量化格式的全部艺术，就是在"压得更狠"和"误差还能被模型容忍"之间找平衡——这也是为什么会有 q4_0、q4_K、q6_K 这么多档位，
-让你按对精度的需求挑一个合适的折中点。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  顺势说清一件事：解量化是<strong>有损</strong>的——还原出来的浮点和原始权重并不完全相等，差的那一点就是量化误差。但为什么模型还能照常工作？因为深度网络对权重的微小扰动相当<strong>宽容</strong>：单个权重差一点点，经过成百上千次累加和非线性，整体输出几乎察觉不到。量化格式的全部艺术，就是在"压得更狠"和"误差还能被模型容忍"之间找平衡——这也是为什么会有 q4_0、q4_K、q6_K 这么多档位，让你按对精度的需求挑一个合适的折中点。
+</div>
 <p>还有一点值得记住：解量化不一定<strong>提前一次性</strong>把整个权重张量铺开成浮点（那会占很多内存）。在矩阵乘这种热点里，ggml 常常是<strong>边算边解</strong>——在内层循环里即时把用到的那一小块还原成浮点、立刻参与点积，
 算完就丢。所以量化省的不只是显存，连"解压后的浮点"也大多不落地，带宽和缓存都跟着受益（呼应 L06 说的"省显存又提速"）。</p>
 
@@ -1690,15 +1701,17 @@ precondition for the "dequantize on the fly" mentioned earlier.</p>
 <p>Field by field: <span class="mono">d</span> is the block's shared scale, and <span class="mono">ggml_half</span> is exactly a 2-byte half-precision float (L06's "baseline"); <span class="mono">qs</span> is the array of quantized
 values. q4_0's <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span> - 32 values in only 16 bytes, because each value is just 4 bits, <strong>two squeezed into one byte</strong> (one high nibble, one low). q8_0's
 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span> - 32 values filling 32 bytes, <strong>one value per byte</strong>, no bit-splitting.</p>
-<p>One might ask: why is that scale a 2-byte <span class="mono">half</span> rather than a more precise 4-byte float? Because there is <strong>only one scale per block</strong>, its precision has limited impact on the final result, yet it
-counts against the whole block's size - the 2 bytes saved by using half, small per 32 weights, multiplied by the tens of thousands of blocks in a model, add up to a lot. This is a classic engineering trade-off: <strong>save wherever you
-can</strong> in places that "barely affect precision", leaving the byte budget for the quantized values that truly matter.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  One might ask: why is that scale a 2-byte <span class="mono">half</span> rather than a more precise 4-byte float? Because there is <strong>only one scale per block</strong>, its precision has limited impact on the final result, yet it counts against the whole block's size - the 2 bytes saved by using half, small per 32 weights, multiplied by the tens of thousands of blocks in a model, add up to a lot. This is a classic engineering trade-off: <strong>save wherever you can</strong> in places that "barely affect precision", leaving the byte budget for the quantized values that truly matter.
+</div>
 <p>Why is q8_0 both more accurate and larger? Because 4 bits can represent only 16 levels while 8 bits represent 256 levels, so for the same weight <strong>8-bit can sit much closer</strong>, with smaller
 quantization error. The cost is double the size: from 0.5 byte per weight to 1 byte. This is the byte-level truth behind L06's "VRAM table" - choosing <span class="mono">Q4_0</span> vs <span class="mono">Q8_0</span>
 on the command line is, in essence, picking between these two block layouts.</p>
-<p>It is worth pausing on one question here: why <strong>block</strong> at all, instead of sharing one scale across the whole weight matrix? Because in a matrix of thousands by thousands, weight magnitudes vary widely - some rows
-large, some small. With one scale for the whole matrix you must accommodate the largest value, and small weights get crushed almost to 0, losing all precision. Split into blocks of 32, <strong>each block finds its own scale</strong> -
-big blocks use a big scale, small blocks a small one - and quantization error drops sharply at once. That is the entire point of "block quantization": spend the small overhead of "one scale per block" to buy a large gain in local precision.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  It is worth pausing on one question here: why <strong>block</strong> at all, instead of sharing one scale across the whole weight matrix? Because in a matrix of thousands by thousands, weight magnitudes vary widely - some rows large, some small. With one scale for the whole matrix you must accommodate the largest value, and small weights get crushed almost to 0, losing all precision. Split into blocks of 32, <strong>each block finds its own scale</strong> - big blocks use a big scale, small blocks a small one - and quantization error drops sharply at once. That is the entire point of "block quantization": spend the small overhead of "one scale per block" to buy a large gain in local precision.
+</div>
 <p>One often-missed detail: a q4_0 block is 18 bytes for 32 weights, averaging <strong>4.5 bits</strong> per weight, not exactly 4. The extra 0.5 bit is the 2-byte scale amortized across 32 weights. The bigger the
 block, the thinner this "management overhead" spreads - which already foreshadows why the next section's K-quant uses a big 256-weight super-block.</p>
 
@@ -1727,15 +1740,18 @@ accurate": precision comes not from spending more bits, but from <strong>allocat
 } block_q4_K;</pre>
 <p>Compute q4_K's byte count too: 2 (d) + 2 (dmin) + 12 (scales) + 128 (qs) = <strong>144 bytes</strong> for 256 weights, averaging 144*8/256 = <strong>4.5 bits</strong> per weight - the same bit width as q4_0, yet higher precision. That is
 the most direct payoff of the "two-level scale": not one extra bit spent, error pushed down purely by a smarter structure.</p>
-<p>Note that <span class="mono">q4_K</span> has <strong>no qh</strong> - only the four fields d, dmin, scales, qs, which is easy to misremember (see Dig deeper 2). <span class="mono">q6_K</span>, by contrast, <strong>does have qh</strong>:
-its 6-bit values are split into "low 4 bits" in <span class="mono">ql</span> and "high 2 bits" in <span class="mono">qh</span>, plus 16 8-bit sub-block scales and one super-block d. Fields differ across K-quants, so <strong>do not assume</strong>.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  Note that <span class="mono">q4_K</span> has <strong>no qh</strong> - only the four fields d, dmin, scales, qs, which is easy to misremember (see Dig deeper 2). <span class="mono">q6_K</span>, by contrast, <strong>does have qh</strong>: its 6-bit values are split into "low 4 bits" in <span class="mono">ql</span> and "high 2 bits" in <span class="mono">qh</span>, plus 16 8-bit sub-block scales and one super-block d. Fields differ across K-quants, so <strong>do not assume</strong>.
+</div>
 <p>Worth meeting the whole K-quant family: from <span class="mono">q2_K</span> and <span class="mono">q3_K</span> up to <span class="mono">q6_K</span>, the number in the name is the rough bit width, while <strong>K</strong> means they all use this
 "super-block + two-level scale" structure. The lower the bit width (like q2_K) the harder the compression and the riskier the precision, so it is often used only on less sensitive layers; the higher (like q6_K) the closer to original
 precision. This is why, downloading real models, you see suffixed names like <span class="mono">Q4_K_M</span> and <span class="mono">Q5_K_S</span> - schemes that <strong>mix different K-quant levels across different layers</strong>, striking
 different balances between size and quality.</p>
-<p>A word on that <span class="mono">dmin</span>. q4_0 has only a scale, so its quantization is <strong>symmetric</strong> (around 0); q4_K adds a min, doing <strong>offset</strong> quantization - the restore formula is more like
-<span class="mono">x = scale * q + min</span> (the source comment reads "weight is represented as x = a*q + b"). Why the offset? Because many weight distributions are not centered on 0, and a min lets the quantization range <strong>shift as a
-whole</strong> to fit the real distribution, pushing error down further. This is the other half of why K-quant beats q4_0: not only finer scale, but even the "zero point" is adjustable.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  A word on that <span class="mono">dmin</span>. q4_0 has only a scale, so its quantization is <strong>symmetric</strong> (around 0); q4_K adds a min, doing <strong>offset</strong> quantization - the restore formula is more like <span class="mono">x = scale * q + min</span> (the source comment reads "weight is represented as x = a*q + b"). Why the offset? Because many weight distributions are not centered on 0, and a min lets the quantization range <strong>shift as a whole</strong> to fit the real distribution, pushing error down further. This is the other half of why K-quant beats q4_0: not only finer scale, but even the "zero point" is adjustable.
+</div>
 <p>Why pick a super-block as big as 256? Because the bigger the super-block, the more weights the fixed "overall d/dmin" overhead spreads across, and the smaller the per-weight overhead; meanwhile local precision is
 backstopped by the finer sub-block scales, so a big block does not get blurry. The big block handles "high compression", the sub-blocks handle "high precision", and you get both - this is the design motive for K-quant
 being more accurate than q4_0 at the same bit width (see Dig deeper 1).</p>
@@ -1760,17 +1776,19 @@ handled by each format's own <span class="mono">dequantize_row_*</span> function
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) * d</div></div>
 </div>
-<p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7 (so weights near zero sit symmetrically), then
+<p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7, then
 multiplying by this block's scale <span class="mono">d</span> restores the approximate original float. q8_0 is even more direct: <span class="mono">x = q * d</span>, since int8 is already signed and needs no offset.</p>
-<p>That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts
-0..15 into the <strong>roughly symmetric</strong> range -8..7. This represents both signs, and is densest (most accurate) near 0, matching the fact that "most weights cluster near 0". A tiny subtraction encodes an understanding of the weight
-distribution.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts 0..15 into the <strong>roughly symmetric</strong> range -8..7. This represents both signs, and is densest (most accurate) near 0, matching the fact that "most weights cluster near 0". A tiny subtraction encodes an understanding of the weight distribution.
+</div>
 <p>In reverse, <strong>quantization</strong> (compressing floats to bytes) is the inverse. In q4_0's reference implementation <span class="mono">quantize_row_q4_0_ref</span>, the scale is <span class="mono">d = max / -8</span> - find the
 weight with the largest magnitude in the block, map it to the endpoint of the quantization range (-8), and scale-and-round the rest proportionally. <strong>Dividing by -8 rather than 8</strong> is an easy-to-misread detail:
 it pairs with the "minus 8" at dequantize time, ensuring the round trip lines up numerically.</p>
-<p>To make one thing explicit: dequantization is <strong>lossy</strong> - the restored floats are not exactly equal to the original weights, and that small gap is the quantization error. So why does the model still work? Because deep
-networks are quite <strong>tolerant</strong> of tiny perturbations to weights: a single weight off by a hair, after hundreds or thousands of accumulations and nonlinearities, is almost imperceptible in the overall output. The whole art
-of a quantization format is balancing "compress harder" against "error the model can still tolerate" - which is exactly why there are so many levels like q4_0, q4_K, q6_K, letting you pick a suitable trade-off for your precision needs.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  To make one thing explicit: dequantization is <strong>lossy</strong> - the restored floats are not exactly equal to the original weights, and that small gap is the quantization error. So why does the model still work? Because deep networks are quite <strong>tolerant</strong> of tiny perturbations to weights: a single weight off by a hair, after hundreds or thousands of accumulations and nonlinearities, is almost imperceptible in the overall output. The whole art of a quantization format is balancing "compress harder" against "error the model can still tolerate" - which is exactly why there are so many levels like q4_0, q4_K, q6_K, letting you pick a suitable trade-off for your precision needs.
+</div>
 <p>One more thing worth remembering: dequantization does not necessarily <strong>expand the whole weight tensor to floats up front</strong> (that would cost a lot of memory). In hotspots like matmul, ggml often
 <strong>dequantizes on the fly</strong> - restoring just the small block it needs in the inner loop, feeding it into the dot product immediately, and discarding it. So quantization saves not only VRAM; even the "decompressed
 floats" mostly never land, benefiting bandwidth and cache too (echoing L06's "saves VRAM and speeds up").</p>
@@ -1903,14 +1921,18 @@ tensor_infos : [ (name:str, n_dims:u32, dims[]:i64, type, offset:u64), ... ]
 tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 L12 的量化块)</span></pre>
 <p>逐段看：<strong>magic + version</strong> 是"身份证"，加载器一上来就核对——magic 不是 "GGUF" 直接拒绝，version 不认识就报错。<strong>n_tensors / n_kv</strong> 是两个计数，
 告诉加载器"接下来要读多少条"。再往后两大块——metadata 和 tensor infos——是这一课的重点，分别回答"<strong>模型是什么</strong>"和"<strong>每个张量在哪</strong>"。</p>
-<p>还有个让 GGUF 能"到处跑"的底层细节：所有多字节的数都用<strong>固定的小端（little-endian）字节序</strong>写入，字符串则是"长度（u64）+ 内容"的形式存放、不带结尾的 \0。
-正因为字节序和编码方式是<strong>写死在格式里</strong>的，同一个 .gguf 文件在 x86、ARM、不同操作系统之间拷来拷去，读出来的数都一模一样——可移植性正是从这些不起眼的约定里来的。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  还有个让 GGUF 能"到处跑"的底层细节：所有多字节的数都用<strong>固定的小端（little-endian）字节序</strong>写入，字符串则是"长度（u64）+ 内容"的形式存放、不带结尾的 \0。正因为字节序和编码方式是<strong>写死在格式里</strong>的，同一个 .gguf 文件在 x86、ARM、不同操作系统之间拷来拷去，读出来的数都一模一样——可移植性正是从这些不起眼的约定里来的。
+</div>
 <p>顺便说说名字：<strong>GGUF</strong> 是 "GGML Universal File" 的意思，G-G-M-L 来自作者 Georgi Gerganov 的名字缩写（也是 ggml 库名的由来）。它的前身是更简单的 GGML/GGJT 等格式，
 因为不够灵活、扩展时老破坏兼容，才演进成今天这个带版本号、可自由扩展的 GGUF。了解这段渊源，能帮你看懂网上一些老教程里为什么会出现 ".bin"、"ggml-model" 这类旧叫法。</p>
 <p>也许你会问：为什么不直接用现成的格式（比如 PyTorch 的 .pt、或 safetensors）？因为 llama.cpp 要的东西很特别——它要把<strong>量化块</strong>（L12 那些 q4_K、q6_K）原样存进去、要能 <strong>mmap 零拷贝</strong>加载、
 还要把超参和词表<strong>自带</strong>在文件里，好让纯 C/C++ 端独立读取。这些需求叠加起来，催生了 GGUF 这个为"端侧推理"量身定做的格式。</p>
-<p>注意一个顺序上的讲究：<strong>所有"描述信息"都排在前面，真正的大块数据排在最后</strong>。这样加载器只要读文件开头一小段，就能把模型的全部结构搞清楚，而不必碰那几个 GB 的权重。
-这个"<strong>头部轻、尾部重</strong>"的布局，正是后面 mmap 零拷贝加载能成立的前提——先用头部信息建好张量清单，再把尾部数据按需映射进来。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  注意一个顺序上的讲究：<strong>所有"描述信息"都排在前面，真正的大块数据排在最后</strong>。这样加载器只要读文件开头一小段，就能把模型的全部结构搞清楚，而不必碰那几个 GB 的权重。这个"<strong>头部轻、尾部重</strong>"的布局，正是后面 mmap 零拷贝加载能成立的前提——先用头部信息建好张量清单，再把尾部数据按需映射进来。
+</div>
 
 <h2>元数据 KV：模型的"说明书"</h2>
 <p>metadata 是一串<strong>键值对</strong>，专门回答"这个模型是什么"。它最重要的特性是<strong>自描述</strong>——加载器不必去别处找配置文件、也不必"猜"模型结构，所有超参、词表、聊天模板<strong>全写在文件里</strong>。
@@ -1927,18 +1949,24 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 
 键名还带<strong>命名空间</strong>（<span class="mono">general.</span>、<span class="mono">llama.</span>、<span class="mono">tokenizer.</span>），架构相关的超参用架构名做前缀，于是同一套 GGUF 结构能装下任意模型。</p>
 <p>每个值都有一个 <span class="mono">gguf_type</span> 标明类型：u8/i8/u32/i32/f32/bool/string/array 等等（见 <span class="mono">ggml/include/gguf.h</span> 的 <span class="mono">enum gguf_type</span>）。
 正因为类型是写在文件里的，读取方不用预先知道"这个键是数还是字符串"，照着 type 解析即可——这就是"自描述"在字节层面的落实。</p>
-<p>一个真实模型的 metadata 往往有<strong>几十上百个 KV</strong>：除了上面几个，还有 RoPE 的频率参数、注意力头数 <span class="mono">llama.attention.head_count</span>、量化版本、训练信息等等。
-你可以用 <span class="mono">gguf-py</span> 里的脚本或 <span class="mono">llama-gguf</span> 工具把一个 .gguf 的所有 KV 打印出来——亲手翻一遍，会比看十遍讲解更有体感。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  一个真实模型的 metadata 往往有<strong>几十上百个 KV</strong>：除了上面几个，还有 RoPE 的频率参数、注意力头数 <span class="mono">llama.attention.head_count</span>、量化版本、训练信息等等。你可以用 <span class="mono">gguf-py</span> 里的脚本或 <span class="mono">llama-gguf</span> 工具把一个 .gguf 的所有 KV 打印出来——亲手翻一遍，会比看十遍讲解更有体感。
+</div>
 <p>还有一类 KV 专门描述"<strong>这个文件本身</strong>"：<span class="mono">general.name</span>（模型名）、<span class="mono">general.file_type</span>（整体量化档位，对应 L12 的 Q4_K_M 之类）、<span class="mono">general.quantization_version</span> 等。
 它们不影响怎么建图，却让工具能一眼报出"这是什么模型、量化到几 bit"——你在加载日志里看到的那些模型信息，多半就是从这些 KV 读出来的。</p>
-<p>特别值一提的是<strong>聊天模板</strong>（chat template）也存在 KV 里。它是一段 Jinja 模板字符串，规定"system / user / assistant 的对话怎么拼成模型输入"。把它放进 GGUF 的好处是：
-换一个模型，对话格式<strong>自动跟着变</strong>，使用方不用手动去查"这个模型该用什么提示词格式"——又一个"自描述"省心的例子。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  特别值一提的是<strong>聊天模板</strong>（chat template）也存在 KV 里。它是一段 Jinja 模板字符串，规定"system / user / assistant 的对话怎么拼成模型输入"。把它放进 GGUF 的好处是：换一个模型，对话格式<strong>自动跟着变</strong>，使用方不用手动去查"这个模型该用什么提示词格式"——又一个"自描述"省心的例子。
+</div>
 <p>再看 <span class="mono">gguf_type</span> 这套类型本身。它覆盖了从 8 位到 64 位的整数、32/64 位浮点、布尔、字符串，还有一个 <strong>array</strong> 表示"一串同类型的值"——词表 <span class="mono">tokenizer.ggml.tokens</span> 就是个字符串数组。
 有了这套类型系统，metadata 几乎能装下任意结构化的配置，而读取方只靠一个 type 标记就知道该怎么解析每个值。</p>
 <p>顺带一提，这套结构在 Python 侧由 <span class="mono">gguf-py</span> 读写（L02 的转换脚本就用它）：写入时先攒齐所有 KV 和 tensor info、算好对齐和 offset，再一次性落盘。所以一个 GGUF 文件总是<strong>头部完整、布局规整</strong>的，
 不会出现"写了一半结构不全"的情况——这也方便了 mmap 这种"信任头部、直接定位"的读取方式。</p>
-<p>自描述带来一个很实在的好处：<strong>一个 .gguf 文件就是全部</strong>。不像有的格式要外挂一个 config.json、一个 tokenizer.json、一个 generation_config……GGUF 把超参、词表、聊天模板全收进同一个文件。
-拷走一个文件，模型就能在任何 llama.cpp 上自己读懂自己、跑起来——这正是 L01 说的"一个文件到处跑"的格式基础。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  自描述带来一个很实在的好处：<strong>一个 .gguf 文件就是全部</strong>。不像有的格式要外挂一个 config.json、一个 tokenizer.json、一个 generation_config……GGUF 把超参、词表、聊天模板全收进同一个文件。拷走一个文件，模型就能在任何 llama.cpp 上自己读懂自己、跑起来——这正是 L01 说的"一个文件到处跑"的格式基础。
+</div>
 
 <h2>tensor info 与对齐：每个张量在哪</h2>
 <p>metadata 讲完"模型是什么"，tensor info 回答"<strong>每个张量在哪、长什么样</strong>"。每条 tensor info 记四样东西：<span class="mono">name</span>（张量名，如 <span class="mono">blk.0.attn_q.weight</span>）、
@@ -1947,16 +1975,22 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 
   <div class="cg-cap"><b>按 offset 定位张量</b>：tensor data 是一整段，每个张量从自己的 offset 处开始</div>
   <div class="cells"><span class="lab">data 段</span><span class="cell hl">张量A @0</span><span class="cell">张量B @offB</span><span class="cell">张量C @offC</span><span class="lab">...</span></div>
 </div>
-<p>关键在 <span class="mono">offset</span>：所有张量的原始字节<strong>首尾相连</strong>地排在 tensor data 段里，每个张量从自己的 offset 处开始。知道了"数据段起点 + 这个张量的 offset"，就能<strong>直接算出它在文件里的绝对位置</strong>，
-不用顺序扫描——这正是后面 mmap 能"指哪取哪"的基础。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  关键在 <span class="mono">offset</span>：所有张量的原始字节<strong>首尾相连</strong>地排在 tensor data 段里。知道了"数据段起点 + 这个张量的 offset"，就能<strong>直接算出它在文件里的绝对位置</strong>，不用顺序扫描——这正是后面 mmap 能"指哪取哪"的基础。
+</div>
 <p>为什么 <span class="mono">offset</span> 记的是"相对数据段起点"的偏移，而不是文件里的绝对位置？因为这样更<strong>稳健</strong>：头部（KV、tensor info）的长度会随模型不同而变，要是用绝对偏移，头部一变所有 offset 都得重算；
 用相对偏移，数据段内部的排布就和前面头部有多长<strong>解耦</strong>了——加载器把"数据段起点"算出来一次，再加上各张量的相对 offset 即可；这也是为什么往文件里追加张量时，已有张量的 offset 大多不用改动。</p>
-<p>还有个细节值得点出：读取 tensor info 和读取 tensor data 是<strong>分开的两件事</strong>。<span class="mono">gguf_init_from_file</span> 可以只把 name/dims/type/offset 这些"描述"读出来，先<strong>不</strong>碰真正的权重数据
-（靠一个 no_alloc 之类的选项控制）。正是这种"描述与数据解耦"，让"先建结构、再 mmap 数据"的两步加载成为可能——你能先知道模型多大、有哪些张量，再决定怎么把数据搬进来。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  还有个细节值得点出：读取 tensor info 和读取 tensor data 是<strong>分开的两件事</strong>。<span class="mono">gguf_init_from_file</span> 可以只把 name/dims/type/offset 这些"描述"读出来，先<strong>不</strong>碰真正的权重数据（靠一个 no_alloc 之类的选项控制）。正是这种"描述与数据解耦"，让"先建结构、再 mmap 数据"的两步加载成为可能——你能先知道模型多大、有哪些张量，再决定怎么把数据搬进来。
+</div>
 <p>张量的 <span class="mono">name</span> 不是随便起的，而是一套有规律的命名约定。比如 <span class="mono">blk.0.attn_q.weight</span> 表示"第 0 层（block 0）的注意力 Q 投影权重"，<span class="mono">token_embd.weight</span> 是词嵌入表。
 加载器正是<strong>靠这套名字</strong>把文件里的张量一一对应到 L08 建出的模型结构上——名字对不上，权重就装不进对应的位置。</p>
-<p>那个 <span class="mono">dims</span> 也藏着一个 L05 提过的坑：维度按 ggml 的<strong>行优先、ne[0] 最内</strong>来记，和 PyTorch 里的形状顺序常常是反的。所以同一个权重矩阵，转成 GGUF 后 dims 的写法可能和你在 PyTorch 里看到的不一样——
-这不是出错，而是 L05 那条"维度顺序相反"的约定在文件格式里的延续。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  那个 <span class="mono">dims</span> 也藏着一个 L05 提过的坑：维度按 ggml 的<strong>行优先、ne[0] 最内</strong>来记，和 PyTorch 里的形状顺序常常是反的。所以同一个权重矩阵，转成 GGUF 后 dims 的写法可能和你在 PyTorch 里看到的不一样——这不是出错，而是 L05 那条"维度顺序相反"的约定在文件格式里的延续。
+</div>
 <p>这里就用上了<strong>对齐</strong>。数据段的起点、以及每个张量的 offset，都会对齐到 <span class="mono">GGUF_DEFAULT_ALIGNMENT = 32</span> 字节（可被 <span class="mono">general.alignment</span> 覆盖）。
 为什么要对齐？因为 CPU/GPU 的 SIMD 指令按对齐地址读取最快，mmap 也按内存页管理；让数据落在整齐的边界上，后端读起来更高效、也更省事（详见深挖 1）。</p>
 
@@ -1976,8 +2010,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">张量 data 指针</div><div class="nd">直接指进映射<br>= 文件对应页</div></div>
 </div>
-<p>mmap 的妙处在于：它<strong>不把几 GB 权重先读进内存、再拷一遍</strong>，而是把文件"映射"进进程的地址空间——张量 <span class="mono">data</span> 指针看起来像普通内存指针，实际指向的是磁盘文件的对应页。
-真正读到哪一页，操作系统才把那一页从磁盘载入。于是启动时几乎不花时间在"搬数据"上，这就是大模型能<strong>秒加载</strong>的原因（实现见 <span class="mono">src/llama-mmap.cpp</span> 与 <span class="mono">src/llama-model-loader.cpp</span>）。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  mmap 的妙处在于：它<strong>不把几 GB 权重先读进内存、再拷一遍</strong>，而是把文件"映射"进进程的地址空间——张量 <span class="mono">data</span> 指针看起来像普通内存指针，实际指向的是磁盘文件的对应页。真正读到哪一页，操作系统才把那一页从磁盘载入。于是启动时几乎不花时间在"搬数据"上，这就是大模型能<strong>秒加载</strong>的原因（实现见 <span class="mono">src/llama-mmap.cpp</span> 与 <span class="mono">src/llama-model-loader.cpp</span>）。
+</div>
 <p>再串一遍整条加载链路，把第三部分前几课都接起来：<span class="mono">gguf_init_from_file</span> 读出超参（metadata）-> 按超参建出 L08 的 ggml_context 和张量结构 -> 张量的 data 指针指进 mmap 映射（权重零拷贝就位）->
 之后就是 L09 建图、L10 执行、L11 算子、L12 解量化。<strong>一个 .gguf 文件，就这样变成了一张能跑的计算图。</strong></p>
 
@@ -1985,8 +2021,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
 要是也老老实实读进来就太慢太占内存了，于是改用 mmap 把它<strong>留在磁盘上、按需取页</strong>。这种"小的实读、大的映射"的分工，是大模型加载又快又省的关键。</p>
 <p>当然 mmap 也不是没有代价。它依赖操作系统的页缓存，<strong>第一次</strong>真正用到某页时仍要从磁盘读，所以"秒加载"省的是"启动时的整体拷贝"，而不是把磁盘读取变没了。
 此外某些场景（如需要把权重整体搬上 GPU 显存）也未必用得上 mmap。但对"CPU 推理、内存就是权重所在地"的常见情形，mmap 几乎是免费的加速。</p>
-<p>最后，把这一课放回第三部分的大图里：L08 讲了张量和内存怎么组织，L09 讲了计算图怎么搭，L10 讲了图怎么调度执行，L11 讲了单个算子怎么算，L12 讲了权重以什么格式压缩存放，
-而这一课（L13）讲的是<strong>这一切怎么落进磁盘上的一个文件、又怎么被加载回来</strong>。至此，从"一个文件"到"一次推理"之间的每一环，你都看过了一遍。带着这张全景图再去翻 llama.cpp 的源码，你会发现每一块都能对上号、不再陌生。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  最后，把这一课放回第三部分的大图里：L08 讲了张量和内存怎么组织，L09 讲了计算图怎么搭，L10 讲了图怎么调度执行，L11 讲了单个算子怎么算，L12 讲了权重以什么格式压缩存放，而这一课（L13）讲的是<strong>这一切怎么落进磁盘上的一个文件、又怎么被加载回来</strong>。至此，从"一个文件"到"一次推理"之间的每一环，你都看过了一遍。带着这张全景图再去翻 llama.cpp 的源码，你会发现每一块都能对上号、不再陌生。
+</div>
 
 <details class="accordion">
   <summary><span class="badge-num">1</span> 为什么要对齐到 32 字节？ <span class="hint">点击展开</span></summary>
@@ -2074,15 +2112,18 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// weights (often
 <p>Section by section: <strong>magic + version</strong> are the "ID card", checked the moment the loader starts - if the magic is not "GGUF" it refuses outright, and an unknown version errors out. <strong>n_tensors / n_kv</strong>
 are two counts telling the loader "how many entries to read next". After them come the two big blocks - metadata and tensor infos - the focus of this lesson, answering "<strong>what the model is</strong>" and "<strong>where each
 tensor is</strong>" respectively.</p>
-<p>Another low-level detail that lets GGUF "run everywhere": all multi-byte numbers are written in a <strong>fixed little-endian byte order</strong>, and strings are stored as "length (u64) + content" with no trailing \0. Because the byte
-order and encoding are <strong>fixed by the format</strong>, the same .gguf file copied across x86, ARM, and different operating systems reads back identical numbers - portability comes from these unglamorous conventions.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Another low-level detail that lets GGUF "run everywhere": all multi-byte numbers are written in a <strong>fixed little-endian byte order</strong>, and strings are stored as "length (u64) + content" with no trailing \0. Because the byte order and encoding are <strong>fixed by the format</strong>, the same .gguf file copied across x86, ARM, and different operating systems reads back identical numbers - portability comes from these unglamorous conventions.
+</div>
 <p>A word on the name: <strong>GGUF</strong> stands for "GGML Universal File", and G-G-M-L comes from the initials of the author Georgi Gerganov (also the origin of the ggml library name). Its predecessors were simpler formats like GGML/GGJT,
 which were too inflexible and kept breaking compatibility when extended, so they evolved into today's versioned, freely-extensible GGUF. Knowing this lineage helps you understand why some old online tutorials mention ".bin" or "ggml-model" names.</p>
 <p>You might ask: why not use an existing format (PyTorch's .pt, or safetensors)? Because llama.cpp needs something special - it must store <strong>quantized blocks</strong> (L12's q4_K, q6_K) verbatim, load them <strong>mmap zero-copy</strong>,
 and <strong>carry</strong> hyperparameters and vocab inside the file so a pure C/C++ side can read them independently. These needs stacked together gave rise to GGUF, a format tailored for "on-device inference".</p>
-<p>Note a deliberate ordering: <strong>all the "descriptive info" comes first, and the actual bulk data comes last</strong>. This way the loader reads just a small stretch at the file's start to learn the model's entire structure,
-without touching those several GB of weights. This "<strong>light head, heavy tail</strong>" layout is the very precondition for the later mmap zero-copy load - build the tensor list from the header first, then map the tail data in on
-demand.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Note a deliberate ordering: <strong>all the "descriptive info" comes first, and the actual bulk data comes last</strong>. This way the loader reads just a small stretch at the file's start to learn the model's entire structure, without touching those several GB of weights. This "<strong>light head, heavy tail</strong>" layout is the very precondition for the later mmap zero-copy load - build the tensor list from the header first, then map the tail data in on demand.
+</div>
 
 <h2>Metadata KV: the model's "manual"</h2>
 <p>Metadata is a run of <strong>key-value pairs</strong> that answers "what this model is". Its most important property is being <strong>self-describing</strong> - the loader need not hunt for a config file elsewhere, nor "guess" the
@@ -2100,19 +2141,25 @@ carry a <strong>namespace</strong> (<span class="mono">general.</span>, <span cl
 structure can hold any model.</p>
 <p>Every value carries a <span class="mono">gguf_type</span> marking its type: u8/i8/u32/i32/f32/bool/string/array and so on (see <span class="mono">enum gguf_type</span> in <span class="mono">ggml/include/gguf.h</span>). Because the type
 is written in the file, the reader need not know in advance "is this key a number or a string"; it just parses per the type - this is "self-describing" realized at the byte level.</p>
-<p>A real model's metadata often has <strong>dozens to hundreds of KVs</strong>: besides the few above, there are RoPE frequency parameters, the attention head count <span class="mono">llama.attention.head_count</span>, quantization version, training
-info, and more. You can print all KVs of a .gguf with a script in <span class="mono">gguf-py</span> or the <span class="mono">llama-gguf</span> tool - flipping through them yourself gives more intuition than ten readings of an explanation.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  A real model's metadata often has <strong>dozens to hundreds of KVs</strong>: besides the few above, there are RoPE frequency parameters, the attention head count <span class="mono">llama.attention.head_count</span>, quantization version, training info, and more. You can print all KVs of a .gguf with a script in <span class="mono">gguf-py</span> or the <span class="mono">llama-gguf</span> tool - flipping through them yourself gives more intuition than ten readings of an explanation.
+</div>
 <p>Another class of KV describes "<strong>the file itself</strong>": <span class="mono">general.name</span> (model name), <span class="mono">general.file_type</span> (the overall quantization level, matching L12's Q4_K_M and the like),
 <span class="mono">general.quantization_version</span>, and so on. They do not affect how the graph is built, yet they let tools report at a glance "what model this is, quantized to how many bits" - the model info you see in load logs is mostly read
 from these KVs.</p>
-<p>Worth special mention: the <strong>chat template</strong> is also stored in a KV. It is a Jinja template string specifying "how system / user / assistant turns are assembled into the model input". The benefit of putting it in GGUF: switch
-models and the chat format <strong>changes automatically</strong>, so the caller need not manually look up "what prompt format this model uses" - another example of self-description saving effort.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Worth special mention: the <strong>chat template</strong> is also stored in a KV. It is a Jinja template string specifying "how system / user / assistant turns are assembled into the model input". The benefit of putting it in GGUF: switch models and the chat format <strong>changes automatically</strong>, so the caller need not manually look up "what prompt format this model uses" - another example of self-description saving effort.
+</div>
 <p>Look at the <span class="mono">gguf_type</span> system itself. It covers integers from 8 to 64 bits, 32/64-bit floats, bool, string, and an <strong>array</strong> meaning "a run of same-typed values" - the vocab <span class="mono">tokenizer.ggml.tokens</span>
 is a string array. With this type system, metadata can hold almost any structured config, while the reader needs only a type tag to know how to parse each value.</p>
 <p>By the way, this structure is read and written on the Python side by <span class="mono">gguf-py</span> (used by L02's conversion script): on write it first gathers all KVs and tensor infos, computes alignment and offsets, then flushes in one go.
 So a GGUF file is always <strong>complete-headered and tidily laid out</strong>, never "half-written with a partial structure" - which also suits mmap's "trust the header, address directly" style of reading.</p>
-<p>Self-description brings a very concrete benefit: <strong>one .gguf file is everything</strong>. Unlike formats that bolt on a config.json, a tokenizer.json, a generation_config..., GGUF folds hyperparameters, vocab, and chat template
-into the same file. Copy one file and the model can read and run itself on any llama.cpp - exactly the format-level basis for L01's "one file runs everywhere".</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Self-description brings a very concrete benefit: <strong>one .gguf file is everything</strong>. Unlike formats that bolt on a config.json, a tokenizer.json, a generation_config..., GGUF folds hyperparameters, vocab, and chat template into the same file. Copy one file and the model can read and run itself on any llama.cpp - exactly the format-level basis for L01's "one file runs everywhere".
+</div>
 
 <h2>Tensor info and alignment: where each tensor is</h2>
 <p>With metadata covering "what the model is", tensor info answers "<strong>where each tensor is and what it looks like</strong>". Each tensor info records four things: <span class="mono">name</span> (the tensor name, e.g.
@@ -2122,18 +2169,23 @@ relative offset within the data section).</p>
   <div class="cg-cap"><b>addressing tensors by offset</b>: tensor data is one big section, each tensor starting at its own offset</div>
   <div class="cells"><span class="lab">data section</span><span class="cell hl">tensor A @0</span><span class="cell">tensor B @offB</span><span class="cell">tensor C @offC</span><span class="lab">...</span></div>
 </div>
-<p>The key is <span class="mono">offset</span>: all tensors' raw bytes are laid out <strong>end to end</strong> in the tensor data section, each tensor starting at its own offset. Knowing "the data section's start + this tensor's offset"
-lets you <strong>compute its absolute position in the file directly</strong>, with no sequential scan - exactly the basis for the later mmap to "point and fetch".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  The key is <span class="mono">offset</span>: all tensors' raw bytes are laid out <strong>end to end</strong> in the tensor data section. Knowing "the data section's start + this tensor's offset" lets you <strong>compute its absolute position in the file directly</strong>, with no sequential scan - exactly the basis for the later mmap to "point and fetch".
+</div>
 <p>Why does <span class="mono">offset</span> record an offset "relative to the data section start" rather than an absolute file position? Because it is more <strong>robust</strong>: the header (KVs, tensor info) length varies by model, and with absolute
 offsets a header change would force recomputing every offset; with relative offsets, the data section's internal layout is <strong>decoupled</strong> from how long the header is - the loader computes the "data section start" once, then adds each tensor's
 relative offset. This is also why, when appending tensors to a file, most existing tensors' offsets need no change.</p>
-<p>One more detail worth calling out: reading tensor info and reading tensor data are <strong>two separate things</strong>. <span class="mono">gguf_init_from_file</span> can read just the "descriptions" - name/dims/type/offset - while <strong>not</strong>
-touching the actual weight data yet (controlled by a no_alloc-style option). This very "description-data decoupling" is what makes the two-step "build structure first, mmap data later" load possible - you can learn how big the model is and which
-tensors exist before deciding how to bring the data in.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One more detail worth calling out: reading tensor info and reading tensor data are <strong>two separate things</strong>. <span class="mono">gguf_init_from_file</span> can read just the "descriptions" - name/dims/type/offset - while <strong>not</strong> touching the actual weight data yet (controlled by a no_alloc-style option). This very "description-data decoupling" is what makes the two-step "build structure first, mmap data later" load possible - you can learn how big the model is and which tensors exist before deciding how to bring the data in.
+</div>
 <p>A tensor's <span class="mono">name</span> is not arbitrary but follows a regular naming convention. For example <span class="mono">blk.0.attn_q.weight</span> means "the attention Q-projection weight of layer 0 (block 0)", and <span class="mono">token_embd.weight</span>
 is the token-embedding table. The loader uses exactly these names to match the file's tensors one-to-one onto the model structure L08 builds - if a name does not match, the weight cannot be placed.</p>
-<p>That <span class="mono">dims</span> hides a pitfall L05 raised: dimensions are recorded in ggml's <strong>row-major, ne[0]-innermost</strong> order, often reversed from PyTorch's shape order. So the same weight matrix, converted to GGUF, may have its
-dims written differently from what you saw in PyTorch - not a bug, but L05's "reversed dimension order" convention carried into the file format.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  That <span class="mono">dims</span> hides a pitfall L05 raised: dimensions are recorded in ggml's <strong>row-major, ne[0]-innermost</strong> order, often reversed from PyTorch's shape order. So the same weight matrix, converted to GGUF, may have its dims written differently from what you saw in PyTorch - not a bug, but L05's "reversed dimension order" convention carried into the file format.
+</div>
 <p>This is where <strong>alignment</strong> comes in. The start of the data section, and each tensor's offset, are aligned to <span class="mono">GGUF_DEFAULT_ALIGNMENT = 32</span> bytes (overridable by <span class="mono">general.alignment</span>).
 Why align? Because CPU/GPU SIMD instructions read fastest from aligned addresses, and mmap manages memory in pages; letting data fall on tidy boundaries makes backend reads more efficient and simpler (see Dig deeper 1).</p>
 
@@ -2153,9 +2205,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">tensor data pointer</div><div class="nd">points into the map<br>= file's page</div></div>
 </div>
-<p>The beauty of mmap is that it <strong>does not read several GB of weights into memory and copy them once more</strong>; it "maps" the file into the process's address space - a tensor's <span class="mono">data</span> pointer looks like an
-ordinary memory pointer but actually points at the corresponding page of the disk file. Only when a page is actually read does the OS load that page from disk. So startup spends almost no time "moving data" - that is why a large model
-can <strong>load instantly</strong> (implementation in <span class="mono">src/llama-mmap.cpp</span> and <span class="mono">src/llama-model-loader.cpp</span>).</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  The beauty of mmap is that it <strong>does not read several GB of weights into memory and copy them once more</strong>; it "maps" the file into the process's address space - a tensor's <span class="mono">data</span> pointer looks like an ordinary memory pointer but actually points at the corresponding page of the disk file. Only when a page is actually read does the OS load that page from disk. So startup spends almost no time "moving data" - that is why a large model can <strong>load instantly</strong> (implementation in <span class="mono">src/llama-mmap.cpp</span> and <span class="mono">src/llama-model-loader.cpp</span>).
+</div>
 <p>Stringing the whole load path once more, tying together Part 3's earlier lessons: <span class="mono">gguf_init_from_file</span> reads the hyperparameters (metadata) -> builds L08's ggml_context and tensor structures per those
 hyperparameters -> tensors' data pointers point into the mmap mapping (weights in place, zero-copy) -> then comes L09 graph-building, L10 execution, L11 operators, L12 dequantization. <strong>A single .gguf file thus becomes a runnable
 compute graph.</strong></p>
@@ -2165,8 +2218,10 @@ memory</strong> is trivial; the data section is often several GB, and dutifully 
 large" division is the key to fast, frugal large-model loading.</p>
 <p>Of course mmap is not free. It relies on the OS page cache, and the <strong>first</strong> real touch of a page still reads from disk, so "instant load" saves "the whole copy at startup", not disk reads themselves. Some scenarios (like moving
 weights wholesale onto GPU VRAM) may not use mmap either. But for the common case of "CPU inference where memory is where the weights live", mmap is almost-free speedup.</p>
-<p>Finally, put this lesson back into Part 3's big picture: L08 covered how tensors and memory are organized, L09 how the compute graph is built, L10 how the graph is scheduled and executed, L11 how a single operator computes, L12 in what format
-weights are compressed and stored, and this lesson (L13) covers <strong>how all of it lands into a file on disk and is loaded back</strong>. By now you have seen every link between "one file" and "one inference". With this panorama in hand, going back to read llama.cpp's source, you will find every piece falls into place and no longer feels foreign.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Finally, put this lesson back into Part 3's big picture: L08 covered how tensors and memory are organized, L09 how the compute graph is built, L10 how the graph is scheduled and executed, L11 how a single operator computes, L12 in what format weights are compressed and stored, and this lesson (L13) covers <strong>how all of it lands into a file on disk and is loaded back</strong>. By now you have seen every link between "one file" and "one inference". With this panorama in hand, going back to read llama.cpp's source, you will find every piece falls into place and no longer feels foreign.
+</div>
 
 <details class="accordion">
   <summary><span class="badge-num">1</span> Why align to 32 bytes? <span class="hint">Click to expand</span></summary>

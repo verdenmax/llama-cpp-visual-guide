@@ -345,14 +345,18 @@ tensor_infos : [ (name:str, n_dims:u32, dims[]:i64, type, offset:u64), ... ]
 tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 L12 的量化块)</span></pre>
 <p>逐段看：<strong>magic + version</strong> 是"身份证"，加载器一上来就核对——magic 不是 "GGUF" 直接拒绝，version 不认识就报错。<strong>n_tensors / n_kv</strong> 是两个计数，
 告诉加载器"接下来要读多少条"。再往后两大块——metadata 和 tensor infos——是这一课的重点，分别回答"<strong>模型是什么</strong>"和"<strong>每个张量在哪</strong>"。</p>
-<p>还有个让 GGUF 能"到处跑"的底层细节：所有多字节的数都用<strong>固定的小端（little-endian）字节序</strong>写入，字符串则是"长度（u64）+ 内容"的形式存放、不带结尾的 \0。
-正因为字节序和编码方式是<strong>写死在格式里</strong>的，同一个 .gguf 文件在 x86、ARM、不同操作系统之间拷来拷去，读出来的数都一模一样——可移植性正是从这些不起眼的约定里来的。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  还有个让 GGUF 能"到处跑"的底层细节：所有多字节的数都用<strong>固定的小端（little-endian）字节序</strong>写入，字符串则是"长度（u64）+ 内容"的形式存放、不带结尾的 \0。正因为字节序和编码方式是<strong>写死在格式里</strong>的，同一个 .gguf 文件在 x86、ARM、不同操作系统之间拷来拷去，读出来的数都一模一样——可移植性正是从这些不起眼的约定里来的。
+</div>
 <p>顺便说说名字：<strong>GGUF</strong> 是 "GGML Universal File" 的意思，G-G-M-L 来自作者 Georgi Gerganov 的名字缩写（也是 ggml 库名的由来）。它的前身是更简单的 GGML/GGJT 等格式，
 因为不够灵活、扩展时老破坏兼容，才演进成今天这个带版本号、可自由扩展的 GGUF。了解这段渊源，能帮你看懂网上一些老教程里为什么会出现 ".bin"、"ggml-model" 这类旧叫法。</p>
 <p>也许你会问：为什么不直接用现成的格式（比如 PyTorch 的 .pt、或 safetensors）？因为 llama.cpp 要的东西很特别——它要把<strong>量化块</strong>（L12 那些 q4_K、q6_K）原样存进去、要能 <strong>mmap 零拷贝</strong>加载、
 还要把超参和词表<strong>自带</strong>在文件里，好让纯 C/C++ 端独立读取。这些需求叠加起来，催生了 GGUF 这个为"端侧推理"量身定做的格式。</p>
-<p>注意一个顺序上的讲究：<strong>所有"描述信息"都排在前面，真正的大块数据排在最后</strong>。这样加载器只要读文件开头一小段，就能把模型的全部结构搞清楚，而不必碰那几个 GB 的权重。
-这个"<strong>头部轻、尾部重</strong>"的布局，正是后面 mmap 零拷贝加载能成立的前提——先用头部信息建好张量清单，再把尾部数据按需映射进来。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  注意一个顺序上的讲究：<strong>所有"描述信息"都排在前面，真正的大块数据排在最后</strong>。这样加载器只要读文件开头一小段，就能把模型的全部结构搞清楚，而不必碰那几个 GB 的权重。这个"<strong>头部轻、尾部重</strong>"的布局，正是后面 mmap 零拷贝加载能成立的前提——先用头部信息建好张量清单，再把尾部数据按需映射进来。
+</div>
 
 <h2>元数据 KV：模型的"说明书"</h2>
 <p>metadata 是一串<strong>键值对</strong>，专门回答"这个模型是什么"。它最重要的特性是<strong>自描述</strong>——加载器不必去别处找配置文件、也不必"猜"模型结构，所有超参、词表、聊天模板<strong>全写在文件里</strong>。
@@ -369,18 +373,24 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 
 键名还带<strong>命名空间</strong>（<span class="mono">general.</span>、<span class="mono">llama.</span>、<span class="mono">tokenizer.</span>），架构相关的超参用架构名做前缀，于是同一套 GGUF 结构能装下任意模型。</p>
 <p>每个值都有一个 <span class="mono">gguf_type</span> 标明类型：u8/i8/u32/i32/f32/bool/string/array 等等（见 <span class="mono">ggml/include/gguf.h</span> 的 <span class="mono">enum gguf_type</span>）。
 正因为类型是写在文件里的，读取方不用预先知道"这个键是数还是字符串"，照着 type 解析即可——这就是"自描述"在字节层面的落实。</p>
-<p>一个真实模型的 metadata 往往有<strong>几十上百个 KV</strong>：除了上面几个，还有 RoPE 的频率参数、注意力头数 <span class="mono">llama.attention.head_count</span>、量化版本、训练信息等等。
-你可以用 <span class="mono">gguf-py</span> 里的脚本或 <span class="mono">llama-gguf</span> 工具把一个 .gguf 的所有 KV 打印出来——亲手翻一遍，会比看十遍讲解更有体感。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  一个真实模型的 metadata 往往有<strong>几十上百个 KV</strong>：除了上面几个，还有 RoPE 的频率参数、注意力头数 <span class="mono">llama.attention.head_count</span>、量化版本、训练信息等等。你可以用 <span class="mono">gguf-py</span> 里的脚本或 <span class="mono">llama-gguf</span> 工具把一个 .gguf 的所有 KV 打印出来——亲手翻一遍，会比看十遍讲解更有体感。
+</div>
 <p>还有一类 KV 专门描述"<strong>这个文件本身</strong>"：<span class="mono">general.name</span>（模型名）、<span class="mono">general.file_type</span>（整体量化档位，对应 L12 的 Q4_K_M 之类）、<span class="mono">general.quantization_version</span> 等。
 它们不影响怎么建图，却让工具能一眼报出"这是什么模型、量化到几 bit"——你在加载日志里看到的那些模型信息，多半就是从这些 KV 读出来的。</p>
-<p>特别值一提的是<strong>聊天模板</strong>（chat template）也存在 KV 里。它是一段 Jinja 模板字符串，规定"system / user / assistant 的对话怎么拼成模型输入"。把它放进 GGUF 的好处是：
-换一个模型，对话格式<strong>自动跟着变</strong>，使用方不用手动去查"这个模型该用什么提示词格式"——又一个"自描述"省心的例子。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  特别值一提的是<strong>聊天模板</strong>（chat template）也存在 KV 里。它是一段 Jinja 模板字符串，规定"system / user / assistant 的对话怎么拼成模型输入"。把它放进 GGUF 的好处是：换一个模型，对话格式<strong>自动跟着变</strong>，使用方不用手动去查"这个模型该用什么提示词格式"——又一个"自描述"省心的例子。
+</div>
 <p>再看 <span class="mono">gguf_type</span> 这套类型本身。它覆盖了从 8 位到 64 位的整数、32/64 位浮点、布尔、字符串，还有一个 <strong>array</strong> 表示"一串同类型的值"——词表 <span class="mono">tokenizer.ggml.tokens</span> 就是个字符串数组。
 有了这套类型系统，metadata 几乎能装下任意结构化的配置，而读取方只靠一个 type 标记就知道该怎么解析每个值。</p>
 <p>顺带一提，这套结构在 Python 侧由 <span class="mono">gguf-py</span> 读写（L02 的转换脚本就用它）：写入时先攒齐所有 KV 和 tensor info、算好对齐和 offset，再一次性落盘。所以一个 GGUF 文件总是<strong>头部完整、布局规整</strong>的，
 不会出现"写了一半结构不全"的情况——这也方便了 mmap 这种"信任头部、直接定位"的读取方式。</p>
-<p>自描述带来一个很实在的好处：<strong>一个 .gguf 文件就是全部</strong>。不像有的格式要外挂一个 config.json、一个 tokenizer.json、一个 generation_config……GGUF 把超参、词表、聊天模板全收进同一个文件。
-拷走一个文件，模型就能在任何 llama.cpp 上自己读懂自己、跑起来——这正是 L01 说的"一个文件到处跑"的格式基础。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  自描述带来一个很实在的好处：<strong>一个 .gguf 文件就是全部</strong>。不像有的格式要外挂一个 config.json、一个 tokenizer.json、一个 generation_config……GGUF 把超参、词表、聊天模板全收进同一个文件。拷走一个文件，模型就能在任何 llama.cpp 上自己读懂自己、跑起来——这正是 L01 说的"一个文件到处跑"的格式基础。
+</div>
 
 <h2>tensor info 与对齐：每个张量在哪</h2>
 <p>metadata 讲完"模型是什么"，tensor info 回答"<strong>每个张量在哪、长什么样</strong>"。每条 tensor info 记四样东西：<span class="mono">name</span>（张量名，如 <span class="mono">blk.0.attn_q.weight</span>）、
@@ -389,16 +399,22 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// 权重(常是 
   <div class="cg-cap"><b>按 offset 定位张量</b>：tensor data 是一整段，每个张量从自己的 offset 处开始</div>
   <div class="cells"><span class="lab">data 段</span><span class="cell hl">张量A @0</span><span class="cell">张量B @offB</span><span class="cell">张量C @offC</span><span class="lab">...</span></div>
 </div>
-<p>关键在 <span class="mono">offset</span>：所有张量的原始字节<strong>首尾相连</strong>地排在 tensor data 段里，每个张量从自己的 offset 处开始。知道了"数据段起点 + 这个张量的 offset"，就能<strong>直接算出它在文件里的绝对位置</strong>，
-不用顺序扫描——这正是后面 mmap 能"指哪取哪"的基础。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  关键在 <span class="mono">offset</span>：所有张量的原始字节<strong>首尾相连</strong>地排在 tensor data 段里。知道了"数据段起点 + 这个张量的 offset"，就能<strong>直接算出它在文件里的绝对位置</strong>，不用顺序扫描——这正是后面 mmap 能"指哪取哪"的基础。
+</div>
 <p>为什么 <span class="mono">offset</span> 记的是"相对数据段起点"的偏移，而不是文件里的绝对位置？因为这样更<strong>稳健</strong>：头部（KV、tensor info）的长度会随模型不同而变，要是用绝对偏移，头部一变所有 offset 都得重算；
 用相对偏移，数据段内部的排布就和前面头部有多长<strong>解耦</strong>了——加载器把"数据段起点"算出来一次，再加上各张量的相对 offset 即可；这也是为什么往文件里追加张量时，已有张量的 offset 大多不用改动。</p>
-<p>还有个细节值得点出：读取 tensor info 和读取 tensor data 是<strong>分开的两件事</strong>。<span class="mono">gguf_init_from_file</span> 可以只把 name/dims/type/offset 这些"描述"读出来，先<strong>不</strong>碰真正的权重数据
-（靠一个 no_alloc 之类的选项控制）。正是这种"描述与数据解耦"，让"先建结构、再 mmap 数据"的两步加载成为可能——你能先知道模型多大、有哪些张量，再决定怎么把数据搬进来。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  还有个细节值得点出：读取 tensor info 和读取 tensor data 是<strong>分开的两件事</strong>。<span class="mono">gguf_init_from_file</span> 可以只把 name/dims/type/offset 这些"描述"读出来，先<strong>不</strong>碰真正的权重数据（靠一个 no_alloc 之类的选项控制）。正是这种"描述与数据解耦"，让"先建结构、再 mmap 数据"的两步加载成为可能——你能先知道模型多大、有哪些张量，再决定怎么把数据搬进来。
+</div>
 <p>张量的 <span class="mono">name</span> 不是随便起的，而是一套有规律的命名约定。比如 <span class="mono">blk.0.attn_q.weight</span> 表示"第 0 层（block 0）的注意力 Q 投影权重"，<span class="mono">token_embd.weight</span> 是词嵌入表。
 加载器正是<strong>靠这套名字</strong>把文件里的张量一一对应到 L08 建出的模型结构上——名字对不上，权重就装不进对应的位置。</p>
-<p>那个 <span class="mono">dims</span> 也藏着一个 L05 提过的坑：维度按 ggml 的<strong>行优先、ne[0] 最内</strong>来记，和 PyTorch 里的形状顺序常常是反的。所以同一个权重矩阵，转成 GGUF 后 dims 的写法可能和你在 PyTorch 里看到的不一样——
-这不是出错，而是 L05 那条"维度顺序相反"的约定在文件格式里的延续。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  那个 <span class="mono">dims</span> 也藏着一个 L05 提过的坑：维度按 ggml 的<strong>行优先、ne[0] 最内</strong>来记，和 PyTorch 里的形状顺序常常是反的。所以同一个权重矩阵，转成 GGUF 后 dims 的写法可能和你在 PyTorch 里看到的不一样——这不是出错，而是 L05 那条"维度顺序相反"的约定在文件格式里的延续。
+</div>
 <p>这里就用上了<strong>对齐</strong>。数据段的起点、以及每个张量的 offset，都会对齐到 <span class="mono">GGUF_DEFAULT_ALIGNMENT = 32</span> 字节（可被 <span class="mono">general.alignment</span> 覆盖）。
 为什么要对齐？因为 CPU/GPU 的 SIMD 指令按对齐地址读取最快，mmap 也按内存页管理；让数据落在整齐的边界上，后端读起来更高效、也更省事（详见深挖 1）。</p>
 
@@ -418,8 +434,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">张量 data 指针</div><div class="nd">直接指进映射<br>= 文件对应页</div></div>
 </div>
-<p>mmap 的妙处在于：它<strong>不把几 GB 权重先读进内存、再拷一遍</strong>，而是把文件"映射"进进程的地址空间——张量 <span class="mono">data</span> 指针看起来像普通内存指针，实际指向的是磁盘文件的对应页。
-真正读到哪一页，操作系统才把那一页从磁盘载入。于是启动时几乎不花时间在"搬数据"上，这就是大模型能<strong>秒加载</strong>的原因（实现见 <span class="mono">src/llama-mmap.cpp</span> 与 <span class="mono">src/llama-model-loader.cpp</span>）。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  mmap 的妙处在于：它<strong>不把几 GB 权重先读进内存、再拷一遍</strong>，而是把文件"映射"进进程的地址空间——张量 <span class="mono">data</span> 指针看起来像普通内存指针，实际指向的是磁盘文件的对应页。真正读到哪一页，操作系统才把那一页从磁盘载入。于是启动时几乎不花时间在"搬数据"上，这就是大模型能<strong>秒加载</strong>的原因（实现见 <span class="mono">src/llama-mmap.cpp</span> 与 <span class="mono">src/llama-model-loader.cpp</span>）。
+</div>
 <p>再串一遍整条加载链路，把第三部分前几课都接起来：<span class="mono">gguf_init_from_file</span> 读出超参（metadata）-> 按超参建出 L08 的 ggml_context 和张量结构 -> 张量的 data 指针指进 mmap 映射（权重零拷贝就位）->
 之后就是 L09 建图、L10 执行、L11 算子、L12 解量化。<strong>一个 .gguf 文件，就这样变成了一张能跑的计算图。</strong></p>
 
@@ -427,8 +445,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
 要是也老老实实读进来就太慢太占内存了，于是改用 mmap 把它<strong>留在磁盘上、按需取页</strong>。这种"小的实读、大的映射"的分工，是大模型加载又快又省的关键。</p>
 <p>当然 mmap 也不是没有代价。它依赖操作系统的页缓存，<strong>第一次</strong>真正用到某页时仍要从磁盘读，所以"秒加载"省的是"启动时的整体拷贝"，而不是把磁盘读取变没了。
 此外某些场景（如需要把权重整体搬上 GPU 显存）也未必用得上 mmap。但对"CPU 推理、内存就是权重所在地"的常见情形，mmap 几乎是免费的加速。</p>
-<p>最后，把这一课放回第三部分的大图里：L08 讲了张量和内存怎么组织，L09 讲了计算图怎么搭，L10 讲了图怎么调度执行，L11 讲了单个算子怎么算，L12 讲了权重以什么格式压缩存放，
-而这一课（L13）讲的是<strong>这一切怎么落进磁盘上的一个文件、又怎么被加载回来</strong>。至此，从"一个文件"到"一次推理"之间的每一环，你都看过了一遍。带着这张全景图再去翻 llama.cpp 的源码，你会发现每一块都能对上号、不再陌生。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  最后，把这一课放回第三部分的大图里：L08 讲了张量和内存怎么组织，L09 讲了计算图怎么搭，L10 讲了图怎么调度执行，L11 讲了单个算子怎么算，L12 讲了权重以什么格式压缩存放，而这一课（L13）讲的是<strong>这一切怎么落进磁盘上的一个文件、又怎么被加载回来</strong>。至此，从"一个文件"到"一次推理"之间的每一环，你都看过了一遍。带着这张全景图再去翻 llama.cpp 的源码，你会发现每一块都能对上号、不再陌生。
+</div>
 
 <details class="accordion">
   <summary><span class="badge-num">1</span> 为什么要对齐到 32 字节？ <span class="hint">点击展开</span></summary>
@@ -563,15 +583,18 @@ tensor_data  : &lt;raw bytes&gt;              <span class="cm">// weights (often
 <p>Section by section: <strong>magic + version</strong> are the "ID card", checked the moment the loader starts - if the magic is not "GGUF" it refuses outright, and an unknown version errors out. <strong>n_tensors / n_kv</strong>
 are two counts telling the loader "how many entries to read next". After them come the two big blocks - metadata and tensor infos - the focus of this lesson, answering "<strong>what the model is</strong>" and "<strong>where each
 tensor is</strong>" respectively.</p>
-<p>Another low-level detail that lets GGUF "run everywhere": all multi-byte numbers are written in a <strong>fixed little-endian byte order</strong>, and strings are stored as "length (u64) + content" with no trailing \0. Because the byte
-order and encoding are <strong>fixed by the format</strong>, the same .gguf file copied across x86, ARM, and different operating systems reads back identical numbers - portability comes from these unglamorous conventions.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Another low-level detail that lets GGUF "run everywhere": all multi-byte numbers are written in a <strong>fixed little-endian byte order</strong>, and strings are stored as "length (u64) + content" with no trailing \0. Because the byte order and encoding are <strong>fixed by the format</strong>, the same .gguf file copied across x86, ARM, and different operating systems reads back identical numbers - portability comes from these unglamorous conventions.
+</div>
 <p>A word on the name: <strong>GGUF</strong> stands for "GGML Universal File", and G-G-M-L comes from the initials of the author Georgi Gerganov (also the origin of the ggml library name). Its predecessors were simpler formats like GGML/GGJT,
 which were too inflexible and kept breaking compatibility when extended, so they evolved into today's versioned, freely-extensible GGUF. Knowing this lineage helps you understand why some old online tutorials mention ".bin" or "ggml-model" names.</p>
 <p>You might ask: why not use an existing format (PyTorch's .pt, or safetensors)? Because llama.cpp needs something special - it must store <strong>quantized blocks</strong> (L12's q4_K, q6_K) verbatim, load them <strong>mmap zero-copy</strong>,
 and <strong>carry</strong> hyperparameters and vocab inside the file so a pure C/C++ side can read them independently. These needs stacked together gave rise to GGUF, a format tailored for "on-device inference".</p>
-<p>Note a deliberate ordering: <strong>all the "descriptive info" comes first, and the actual bulk data comes last</strong>. This way the loader reads just a small stretch at the file's start to learn the model's entire structure,
-without touching those several GB of weights. This "<strong>light head, heavy tail</strong>" layout is the very precondition for the later mmap zero-copy load - build the tensor list from the header first, then map the tail data in on
-demand.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Note a deliberate ordering: <strong>all the "descriptive info" comes first, and the actual bulk data comes last</strong>. This way the loader reads just a small stretch at the file's start to learn the model's entire structure, without touching those several GB of weights. This "<strong>light head, heavy tail</strong>" layout is the very precondition for the later mmap zero-copy load - build the tensor list from the header first, then map the tail data in on demand.
+</div>
 
 <h2>Metadata KV: the model's "manual"</h2>
 <p>Metadata is a run of <strong>key-value pairs</strong> that answers "what this model is". Its most important property is being <strong>self-describing</strong> - the loader need not hunt for a config file elsewhere, nor "guess" the
@@ -589,19 +612,25 @@ carry a <strong>namespace</strong> (<span class="mono">general.</span>, <span cl
 structure can hold any model.</p>
 <p>Every value carries a <span class="mono">gguf_type</span> marking its type: u8/i8/u32/i32/f32/bool/string/array and so on (see <span class="mono">enum gguf_type</span> in <span class="mono">ggml/include/gguf.h</span>). Because the type
 is written in the file, the reader need not know in advance "is this key a number or a string"; it just parses per the type - this is "self-describing" realized at the byte level.</p>
-<p>A real model's metadata often has <strong>dozens to hundreds of KVs</strong>: besides the few above, there are RoPE frequency parameters, the attention head count <span class="mono">llama.attention.head_count</span>, quantization version, training
-info, and more. You can print all KVs of a .gguf with a script in <span class="mono">gguf-py</span> or the <span class="mono">llama-gguf</span> tool - flipping through them yourself gives more intuition than ten readings of an explanation.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  A real model's metadata often has <strong>dozens to hundreds of KVs</strong>: besides the few above, there are RoPE frequency parameters, the attention head count <span class="mono">llama.attention.head_count</span>, quantization version, training info, and more. You can print all KVs of a .gguf with a script in <span class="mono">gguf-py</span> or the <span class="mono">llama-gguf</span> tool - flipping through them yourself gives more intuition than ten readings of an explanation.
+</div>
 <p>Another class of KV describes "<strong>the file itself</strong>": <span class="mono">general.name</span> (model name), <span class="mono">general.file_type</span> (the overall quantization level, matching L12's Q4_K_M and the like),
 <span class="mono">general.quantization_version</span>, and so on. They do not affect how the graph is built, yet they let tools report at a glance "what model this is, quantized to how many bits" - the model info you see in load logs is mostly read
 from these KVs.</p>
-<p>Worth special mention: the <strong>chat template</strong> is also stored in a KV. It is a Jinja template string specifying "how system / user / assistant turns are assembled into the model input". The benefit of putting it in GGUF: switch
-models and the chat format <strong>changes automatically</strong>, so the caller need not manually look up "what prompt format this model uses" - another example of self-description saving effort.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Worth special mention: the <strong>chat template</strong> is also stored in a KV. It is a Jinja template string specifying "how system / user / assistant turns are assembled into the model input". The benefit of putting it in GGUF: switch models and the chat format <strong>changes automatically</strong>, so the caller need not manually look up "what prompt format this model uses" - another example of self-description saving effort.
+</div>
 <p>Look at the <span class="mono">gguf_type</span> system itself. It covers integers from 8 to 64 bits, 32/64-bit floats, bool, string, and an <strong>array</strong> meaning "a run of same-typed values" - the vocab <span class="mono">tokenizer.ggml.tokens</span>
 is a string array. With this type system, metadata can hold almost any structured config, while the reader needs only a type tag to know how to parse each value.</p>
 <p>By the way, this structure is read and written on the Python side by <span class="mono">gguf-py</span> (used by L02's conversion script): on write it first gathers all KVs and tensor infos, computes alignment and offsets, then flushes in one go.
 So a GGUF file is always <strong>complete-headered and tidily laid out</strong>, never "half-written with a partial structure" - which also suits mmap's "trust the header, address directly" style of reading.</p>
-<p>Self-description brings a very concrete benefit: <strong>one .gguf file is everything</strong>. Unlike formats that bolt on a config.json, a tokenizer.json, a generation_config..., GGUF folds hyperparameters, vocab, and chat template
-into the same file. Copy one file and the model can read and run itself on any llama.cpp - exactly the format-level basis for L01's "one file runs everywhere".</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Self-description brings a very concrete benefit: <strong>one .gguf file is everything</strong>. Unlike formats that bolt on a config.json, a tokenizer.json, a generation_config..., GGUF folds hyperparameters, vocab, and chat template into the same file. Copy one file and the model can read and run itself on any llama.cpp - exactly the format-level basis for L01's "one file runs everywhere".
+</div>
 
 <h2>Tensor info and alignment: where each tensor is</h2>
 <p>With metadata covering "what the model is", tensor info answers "<strong>where each tensor is and what it looks like</strong>". Each tensor info records four things: <span class="mono">name</span> (the tensor name, e.g.
@@ -611,18 +640,23 @@ relative offset within the data section).</p>
   <div class="cg-cap"><b>addressing tensors by offset</b>: tensor data is one big section, each tensor starting at its own offset</div>
   <div class="cells"><span class="lab">data section</span><span class="cell hl">tensor A @0</span><span class="cell">tensor B @offB</span><span class="cell">tensor C @offC</span><span class="lab">...</span></div>
 </div>
-<p>The key is <span class="mono">offset</span>: all tensors' raw bytes are laid out <strong>end to end</strong> in the tensor data section, each tensor starting at its own offset. Knowing "the data section's start + this tensor's offset"
-lets you <strong>compute its absolute position in the file directly</strong>, with no sequential scan - exactly the basis for the later mmap to "point and fetch".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  The key is <span class="mono">offset</span>: all tensors' raw bytes are laid out <strong>end to end</strong> in the tensor data section. Knowing "the data section's start + this tensor's offset" lets you <strong>compute its absolute position in the file directly</strong>, with no sequential scan - exactly the basis for the later mmap to "point and fetch".
+</div>
 <p>Why does <span class="mono">offset</span> record an offset "relative to the data section start" rather than an absolute file position? Because it is more <strong>robust</strong>: the header (KVs, tensor info) length varies by model, and with absolute
 offsets a header change would force recomputing every offset; with relative offsets, the data section's internal layout is <strong>decoupled</strong> from how long the header is - the loader computes the "data section start" once, then adds each tensor's
 relative offset. This is also why, when appending tensors to a file, most existing tensors' offsets need no change.</p>
-<p>One more detail worth calling out: reading tensor info and reading tensor data are <strong>two separate things</strong>. <span class="mono">gguf_init_from_file</span> can read just the "descriptions" - name/dims/type/offset - while <strong>not</strong>
-touching the actual weight data yet (controlled by a no_alloc-style option). This very "description-data decoupling" is what makes the two-step "build structure first, mmap data later" load possible - you can learn how big the model is and which
-tensors exist before deciding how to bring the data in.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One more detail worth calling out: reading tensor info and reading tensor data are <strong>two separate things</strong>. <span class="mono">gguf_init_from_file</span> can read just the "descriptions" - name/dims/type/offset - while <strong>not</strong> touching the actual weight data yet (controlled by a no_alloc-style option). This very "description-data decoupling" is what makes the two-step "build structure first, mmap data later" load possible - you can learn how big the model is and which tensors exist before deciding how to bring the data in.
+</div>
 <p>A tensor's <span class="mono">name</span> is not arbitrary but follows a regular naming convention. For example <span class="mono">blk.0.attn_q.weight</span> means "the attention Q-projection weight of layer 0 (block 0)", and <span class="mono">token_embd.weight</span>
 is the token-embedding table. The loader uses exactly these names to match the file's tensors one-to-one onto the model structure L08 builds - if a name does not match, the weight cannot be placed.</p>
-<p>That <span class="mono">dims</span> hides a pitfall L05 raised: dimensions are recorded in ggml's <strong>row-major, ne[0]-innermost</strong> order, often reversed from PyTorch's shape order. So the same weight matrix, converted to GGUF, may have its
-dims written differently from what you saw in PyTorch - not a bug, but L05's "reversed dimension order" convention carried into the file format.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  That <span class="mono">dims</span> hides a pitfall L05 raised: dimensions are recorded in ggml's <strong>row-major, ne[0]-innermost</strong> order, often reversed from PyTorch's shape order. So the same weight matrix, converted to GGUF, may have its dims written differently from what you saw in PyTorch - not a bug, but L05's "reversed dimension order" convention carried into the file format.
+</div>
 <p>This is where <strong>alignment</strong> comes in. The start of the data section, and each tensor's offset, are aligned to <span class="mono">GGUF_DEFAULT_ALIGNMENT = 32</span> bytes (overridable by <span class="mono">general.alignment</span>).
 Why align? Because CPU/GPU SIMD instructions read fastest from aligned addresses, and mmap manages memory in pages; letting data fall on tidy boundaries makes backend reads more efficient and simpler (see Dig deeper 1).</p>
 
@@ -642,9 +676,10 @@ mapping = <span class="fn">mmap</span>(file, PROT_READ)          <span class="cm
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">tensor data pointer</div><div class="nd">points into the map<br>= file's page</div></div>
 </div>
-<p>The beauty of mmap is that it <strong>does not read several GB of weights into memory and copy them once more</strong>; it "maps" the file into the process's address space - a tensor's <span class="mono">data</span> pointer looks like an
-ordinary memory pointer but actually points at the corresponding page of the disk file. Only when a page is actually read does the OS load that page from disk. So startup spends almost no time "moving data" - that is why a large model
-can <strong>load instantly</strong> (implementation in <span class="mono">src/llama-mmap.cpp</span> and <span class="mono">src/llama-model-loader.cpp</span>).</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  The beauty of mmap is that it <strong>does not read several GB of weights into memory and copy them once more</strong>; it "maps" the file into the process's address space - a tensor's <span class="mono">data</span> pointer looks like an ordinary memory pointer but actually points at the corresponding page of the disk file. Only when a page is actually read does the OS load that page from disk. So startup spends almost no time "moving data" - that is why a large model can <strong>load instantly</strong> (implementation in <span class="mono">src/llama-mmap.cpp</span> and <span class="mono">src/llama-model-loader.cpp</span>).
+</div>
 <p>Stringing the whole load path once more, tying together Part 3's earlier lessons: <span class="mono">gguf_init_from_file</span> reads the hyperparameters (metadata) -> builds L08's ggml_context and tensor structures per those
 hyperparameters -> tensors' data pointers point into the mmap mapping (weights in place, zero-copy) -> then comes L09 graph-building, L10 execution, L11 operators, L12 dequantization. <strong>A single .gguf file thus becomes a runnable
 compute graph.</strong></p>
@@ -654,8 +689,10 @@ memory</strong> is trivial; the data section is often several GB, and dutifully 
 large" division is the key to fast, frugal large-model loading.</p>
 <p>Of course mmap is not free. It relies on the OS page cache, and the <strong>first</strong> real touch of a page still reads from disk, so "instant load" saves "the whole copy at startup", not disk reads themselves. Some scenarios (like moving
 weights wholesale onto GPU VRAM) may not use mmap either. But for the common case of "CPU inference where memory is where the weights live", mmap is almost-free speedup.</p>
-<p>Finally, put this lesson back into Part 3's big picture: L08 covered how tensors and memory are organized, L09 how the compute graph is built, L10 how the graph is scheduled and executed, L11 how a single operator computes, L12 in what format
-weights are compressed and stored, and this lesson (L13) covers <strong>how all of it lands into a file on disk and is loaded back</strong>. By now you have seen every link between "one file" and "one inference". With this panorama in hand, going back to read llama.cpp's source, you will find every piece falls into place and no longer feels foreign.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Finally, put this lesson back into Part 3's big picture: L08 covered how tensors and memory are organized, L09 how the compute graph is built, L10 how the graph is scheduled and executed, L11 how a single operator computes, L12 in what format weights are compressed and stored, and this lesson (L13) covers <strong>how all of it lands into a file on disk and is loaded back</strong>. By now you have seen every link between "one file" and "one inference". With this panorama in hand, going back to read llama.cpp's source, you will find every piece falls into place and no longer feels foreign.
+</div>
 
 <details class="accordion">
   <summary><span class="badge-num">1</span> Why align to 32 bytes? <span class="hint">Click to expand</span></summary>
