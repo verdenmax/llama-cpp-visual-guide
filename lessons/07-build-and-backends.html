@@ -361,15 +361,17 @@ cmake --build build --config Release -j</pre>
 <span class="mono">-D</span> 选项决定要编哪些后端，然后在 <span class="mono">build/</span> 目录里生成真正的构建文件。第二步 <span class="mono">cmake --build build</span> 才是
 <strong>真正编译</strong>，把源码变成库和可执行文件。<span class="mono">-j</span> 让它多核并行编、快很多；<span class="mono">--config Release</span> 表示编优化过的发布版
 （而非带调试信息、慢得多的 Debug 版）。整个过程对照前面那张流程图看，就很清楚了。</p>
-<p>第一次完整编译可能要几分钟到十几分钟（尤其带上 CUDA 这种大后端）；好在 CMake 支持<strong>增量编译</strong>——你改一两个文件后再
-<span class="mono">cmake --build build</span>，它只重编受影响的部分，通常几秒就好。想更快，可以让 CMake 用 <strong>Ninja</strong> 作为底层构建工具
-（<span class="mono">cmake -G Ninja -B build</span>），它的并行调度比传统 Make 更高效。这些都是"配置一次、反复构建"的日常。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  第一次完整编译可能要几分钟到十几分钟（尤其带上 CUDA 这种大后端）；好在 CMake 支持<strong>增量编译</strong>——你改一两个文件后再<span class="mono">cmake --build build</span>，它只重编受影响的部分，通常几秒就好。想更快，可以让 CMake 用 <strong>Ninja</strong> 作为底层构建工具（<span class="mono">cmake -G Ninja -B build</span>），它的并行调度比传统 Make 更高效。这些都是"配置一次、反复构建"的日常。
+</div>
 <p>顺便说：<strong>大多数人其实不用自己编</strong>。llama.cpp 官方在 GitHub Releases 提供了各平台的<strong>预编译包</strong>，下载解压即用；很多上层项目
 （如 Ollama、LM Studio）也都内置了它。那什么时候才需要自己从源码编？——当你要<strong>打开某个预编译包没带的后端</strong>（比如针对你这张特定显卡的 CUDA）、
 要<strong>用最新的开发版功能</strong>、或者要<strong>把库嵌进自己的程序</strong>时。这一课讲的就是这后一种"需要动手"的场景。</p>
-<p>再说说 <span class="mono">--config Release</span> 为什么重要。编译器在 Release 档会开启大量优化（向量化、内联、去掉断言和调试信息），跑起来可能比 Debug 档
-<strong>快好几倍</strong>。除非你在<strong>调试 llama.cpp 本身</strong>（要单步、看变量），否则平时一律用 Release。这也是为什么官方预编译包都是 Release 版——
-对"只是想跑模型"的人来说，没理由忍受 Debug 的慢。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  再说说 <span class="mono">--config Release</span> 为什么重要。编译器在 Release 档会开启大量优化（向量化、内联、去掉断言和调试信息），跑起来可能比 Debug 档<strong>快好几倍</strong>。除非你在<strong>调试 llama.cpp 本身</strong>（要单步、看变量），否则平时一律用 Release。这也是为什么官方预编译包都是 Release 版——对"只是想跑模型"的人来说，没理由忍受 Debug 的慢。
+</div>
 <p>真正动手前，强烈建议先扫一眼仓库里的 <span class="mono">docs/build.md</span>：它把每个平台、每种后端的具体编译命令和注意事项都列全了
 （包括 Windows、各家 GPU 的细节）。这一课给你的是"地图和直觉"，而 <span class="mono">docs/build.md</span> 是"逐条的操作手册"，两者配合着看，第一次编译就能少走很多弯路，遇到平台特有的问题也多半能在那里找到答案。</p>
 
@@ -408,9 +410,10 @@ option(GGML_VULKAN "ggml: use Vulkan"         OFF)
 课 01 说的"可嵌入"，靠的就是它们。另一类是<strong>可执行程序</strong>，就是你平时直接用的命令：<span class="mono">llama-cli</span>（命令行对话）、
 <span class="mono">llama-server</span>（起一个 HTTP 服务）、<span class="mono">llama-quantize</span>（课 06 用过的量化工具）、<span class="mono">llama-bench</span>（测速）、
 <span class="mono">llama-perplexity</span>（测质量）等等。</p>
-<p>前面说库可以"被别的程序链接"，具体怎么用？你的程序只要<strong>包含 <span class="mono">include/llama.h</span> 这个头文件、再链接上 <span class="mono">libllama</span></strong>，
-就能调用课 01 里那套 C API 来加载模型、跑推理。库可以编成<strong>静态库</strong>（直接打包进你的可执行文件，部署时是单个文件）或<strong>动态库</strong>
-（运行时再加载，多个程序可共享）。课 01 强调的"零依赖单文件可执行"，正是把 libllama 和后端<strong>静态链接</strong>进 llama-cli 的结果。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  前面说库可以"被别的程序链接"，具体怎么用？你的程序只要<strong>包含 <span class="mono">include/llama.h</span> 这个头文件、再链接上 <span class="mono">libllama</span></strong>，就能调用课 01 里那套 C API 来加载模型、跑推理。库可以编成<strong>静态库</strong>（直接打包进你的可执行文件，部署时是单个文件）或<strong>动态库</strong>（运行时再加载，多个程序可共享）。课 01 强调的"零依赖单文件可执行"，正是把 libllama 和后端<strong>静态链接</strong>进 llama-cli 的结果。
+</div>
 <p>这些可执行程序里，最常打交道的是两个：<span class="mono">llama-cli</span> 适合<strong>在命令行里快速试一把</strong>或写脚本；<span class="mono">llama-server</span>
 则会起一个<strong>常驻的 HTTP 服务</strong>，对外提供和 OpenAI 兼容的接口，适合给前端、应用或其它服务调用——你常用的各种本地大模型 App，背后往往就是它。
 两者用的是同一套 <span class="mono">libllama</span>，只是把"入口"包装成了不同形态。</p>
@@ -419,18 +422,20 @@ option(GGML_VULKAN "ggml: use Vulkan"         OFF)
 但当你想深入某个细节（比如"这个模型到底被分成哪些张量"）时，往往能在这里找到一个正好趁手的小工具。</p>
 <pre class="code"><span class="cm"># 跑起来: -ngl 把多少层卸载到 GPU</span>
 ./build/bin/llama-cli -m model.gguf -p "你好" -ngl 99</pre>
-<p>这里的 <span class="mono">-ngl</span>（即 <span class="mono">n-gpu-layers</span>）很关键：它决定把模型的多少层放到 GPU 上算、其余留在 CPU。显存够就尽量多放
-（<span class="mono">-ngl 99</span> 基本是"能放的全放"），显存不够就只放一部分，CPU / GPU 混合跑。这也正呼应前面的后端抽象：<strong>同一个模型、同一张图，
-能灵活地切在不同硬件上算</strong>。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  这里的 <span class="mono">-ngl</span>（即 <span class="mono">n-gpu-layers</span>）很关键：它决定把模型的多少层放到 GPU 上算、其余留在 CPU。显存够就尽量多放（<span class="mono">-ngl 99</span> 基本是"能放的全放"），显存不够就只放一部分，CPU / GPU 混合跑。这也正呼应前面的后端抽象：<strong>同一个模型、同一张图，能灵活地切在不同硬件上算</strong>。
+</div>
 <p>怎么确认 GPU 后端真的编进去、也真的用上了？最简单的办法是看<strong>启动日志</strong>。跑 <span class="mono">llama-cli</span> 时，它会打印检测到的设备和每层的分配情况——
 如果你看到类似 "offloaded 33/33 layers to GPU" 的字样，就说明层确实卸载到 GPU 上了。要是发现还在纯 CPU 跑，多半是 <span class="mono">-ngl</span> 没加、
 或者那个后端根本没编进去，回到配置那一步检查 <span class="mono">-D</span> 选项即可。</p>
 <p>把这一课和课 06 连起来看：你选的<strong>量化格式</strong>和你编的<strong>后端</strong>是要<strong>配合</strong>的。每个后端都为常见量化格式（如 Q4_K、Q8_0）写了专门的
 解量化 + 矩阵乘内核，能直接吃量化权重、在算的时候顺手解量化。所以"<strong>选什么量化</strong>"和"<strong>用什么后端</strong>"共同决定了你的实际速度——
 这也是为什么第六部分会专门去看这些内核到底怎么写。</p>
-<p>因为后端是可插拔的、依赖又轻，llama.cpp 还能<strong>交叉编译</strong>到很多目标上：编成安卓 / iOS 的库塞进手机 App、编成 WebAssembly 跑在浏览器里、
-甚至编到树莓派这类小板子上。换一个目标平台，往往只是换一套工具链、调一调 CMake 选项的事，核心代码不用动。这正是"<strong>用 C/C++ + 后端抽象</strong>"
-换来的可移植红利——课 01 说的"到处跑"，在构建层面就是这么实现的。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  因为后端是可插拔的、依赖又轻，llama.cpp 还能<strong>交叉编译</strong>到很多目标上：编成安卓 / iOS 的库塞进手机 App、编成 WebAssembly 跑在浏览器里、甚至编到树莓派这类小板子上。换一个目标平台，往往只是换一套工具链、调一调 CMake 选项的事，核心代码不用动。这正是"<strong>用 C/C++ + 后端抽象</strong>"换来的可移植红利——课 01 说的"到处跑"，在构建层面就是这么实现的。
+</div>
 <p>关于"可移植性"再多说一句，这里有个容易搞反的点。<strong>从源码自己编</strong>时，ggml 默认会打开 <span class="mono">GGML_NATIVE</span>（针对你这台机器的指令集做优化），
 所以默认编出来的二进制是"<strong>本机特化</strong>"的、跑得快，但<strong>不保证能拷到别的机器上跑</strong>（换台 CPU 可能直接"非法指令"崩掉）。反倒是<strong>官方预编译包</strong>
 为了"谁都能用"，特意关掉 native、改用更通用且运行时自适应的指令，所以它们才是<strong>可移植</strong>的那一档。这就是"<strong>预编译求通用、自编可求性能</strong>"的取舍——
@@ -440,9 +445,10 @@ option(GGML_VULKAN "ggml: use Vulkan"         OFF)
 <p>那为什么不干脆把<strong>所有后端</strong>都编进一个二进制、运行时谁有用谁？因为代价很大：每个 GPU 后端都<strong>拖着一大坨依赖</strong>（CUDA 要 CUDA 运行库、
 Vulkan 要 Vulkan SDK……），全编进来体积暴涨、还要求目标机器装齐这些库——这恰恰违背了 llama.cpp"<strong>零依赖、轻量</strong>"的初心。所以它选择让你
 <strong>按需挑选</strong>：纯 CPU 版可以小到拷哪都能跑，要加速时再单独编一个带某后端的版本。这正是本课末尾思考题的答案方向。</p>
-<p>顺便厘清一个容易混的点：<strong>有些东西是编译期定的，有些是运行期定的</strong>。"<strong>支持哪些硬件后端</strong>"是编译期用 <span class="mono">-D</span> 选项定死的；
-而"<strong>用多大上下文、放几层到 GPU、几个线程、用什么采样</strong>"这些都是<strong>运行时</strong>的命令行参数，换一换不用重编。搞清这条界线，你就不会犯
-"想换个上下文长度还跑去重新编译"这种冤枉错。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  顺便厘清一个容易混的点：<strong>有些东西是编译期定的，有些是运行期定的</strong>。"<strong>支持哪些硬件后端</strong>"是编译期用 <span class="mono">-D</span> 选项定死的；而"<strong>用多大上下文、放几层到 GPU、几个线程、用什么采样</strong>"这些都是<strong>运行时</strong>的命令行参数，换一换不用重编。搞清这条界线，你就不会犯"想换个上下文长度还跑去重新编译"这种冤枉错。
+</div>
 
 <h2>深入一点（选读）</h2>
 <p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
@@ -606,17 +612,18 @@ instruction set), decides which backends to build from your <span class="mono">-
 Step two <span class="mono">cmake --build build</span> is the <strong>actual compile</strong>, turning sources into libraries and executables. <span class="mono">-j</span>
 builds in parallel across cores (much faster); <span class="mono">--config Release</span> means an optimized release build (not the much slower, debug-info Debug build).
 Read it against the flow diagram above and it is clear.</p>
-<p>A first full build may take a few to a dozen-plus minutes (especially with a big backend like CUDA); fortunately CMake supports <strong>incremental builds</strong> -
-after changing a file or two, <span class="mono">cmake --build build</span> only recompiles what is affected, usually in seconds. For more speed, have CMake use
-<strong>Ninja</strong> as the underlying build tool (<span class="mono">cmake -G Ninja -B build</span>), whose parallel scheduling beats classic Make. This is the daily
-"configure once, build repeatedly".</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  A first full build may take a few to a dozen-plus minutes (especially with a big backend like CUDA); fortunately CMake supports <strong>incremental builds</strong> - after changing a file or two, <span class="mono">cmake --build build</span> only recompiles what is affected, usually in seconds. For more speed, have CMake use <strong>Ninja</strong> as the underlying build tool (<span class="mono">cmake -G Ninja -B build</span>), whose parallel scheduling beats classic Make. This is the daily "configure once, build repeatedly".
+</div>
 <p>By the way: <strong>most people do not build at all</strong>. The llama.cpp project ships <strong>prebuilt packages</strong> per platform on GitHub Releases -
 download, unzip, run; many higher-level projects (Ollama, LM Studio) bundle it too. So when do you build from source? When you need <strong>a backend the prebuilt
 package lacks</strong> (e.g. CUDA for your specific card), <strong>the latest dev-branch features</strong>, or to <strong>embed the library into your own
 program</strong>. This lesson is about that hands-on case.</p>
-<p>More on why <span class="mono">--config Release</span> matters. In Release the compiler turns on heavy optimization (vectorization, inlining, dropping asserts and
-debug info), often running <strong>several times faster</strong> than Debug. Unless you are <strong>debugging llama.cpp itself</strong> (stepping, inspecting variables),
-always use Release. That is why official prebuilt packages are Release - for someone who "just wants to run a model", there is no reason to suffer Debug's slowness.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  More on why <span class="mono">--config Release</span> matters. In Release the compiler turns on heavy optimization (vectorization, inlining, dropping asserts and debug info), often running <strong>several times faster</strong> than Debug. Unless you are <strong>debugging llama.cpp itself</strong> (stepping, inspecting variables), always use Release. That is why official prebuilt packages are Release - for someone who "just wants to run a model", there is no reason to suffer Debug's slowness.
+</div>
 <p>Before getting hands-on, skim the repo's <span class="mono">docs/build.md</span>: it lists the exact build commands and caveats for every platform and backend
 (including Windows and each GPU's details). This lesson gives you "the map and the intuition", while <span class="mono">docs/build.md</span> is "the step-by-step
 manual"; reading both together saves a lot of first-build detours, and most platform-specific snags have an answer there.</p>
@@ -657,10 +664,10 @@ install it as prompted - most issues resolve by following the error message.</p>
 itself", which other programs can link against; lesson 01's "embeddable" rests on these. The other kind is <strong>executables</strong>, the commands you use directly:
 <span class="mono">llama-cli</span> (command-line chat), <span class="mono">llama-server</span> (starts an HTTP service), <span class="mono">llama-quantize</span> (the
 quantizer from lesson 06), <span class="mono">llama-bench</span> (speed), <span class="mono">llama-perplexity</span> (quality), and more.</p>
-<p>We said the libraries can "be linked by other programs" - how exactly? Your program just <strong>includes the <span class="mono">include/llama.h</span> header and links
-<span class="mono">libllama</span></strong> to call the C API from lesson 01 to load a model and run inference. The libraries can be built <strong>static</strong> (baked into
-your executable, a single file to deploy) or <strong>dynamic</strong> (loaded at runtime, shareable across programs). Lesson 01's "zero-dependency single-file
-executable" is exactly the result of <strong>statically linking</strong> libllama and the backends into llama-cli.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  We said the libraries can "be linked by other programs" - how exactly? Your program just <strong>includes the <span class="mono">include/llama.h</span> header and links <span class="mono">libllama</span></strong> to call the C API from lesson 01 to load a model and run inference. The libraries can be built <strong>static</strong> (baked into your executable, a single file to deploy) or <strong>dynamic</strong> (loaded at runtime, shareable across programs). Lesson 01's "zero-dependency single-file executable" is exactly the result of <strong>statically linking</strong> libllama and the backends into llama-cli.
+</div>
 <p>Of these executables, two you will use most: <span class="mono">llama-cli</span> suits <strong>a quick command-line try</strong> or scripting;
 <span class="mono">llama-server</span> starts a <strong>long-running HTTP service</strong> with an OpenAI-compatible API, for front-ends, apps, or other services to call -
 the local-LLM apps you use are often it under the hood. Both use the same <span class="mono">libllama</span>, just wrapping the "entry point" in different forms.</p>
@@ -670,9 +677,10 @@ from <span class="mono">examples/</span>. You can ignore them day to day, but wh
 often a handy little tool right here.</p>
 <pre class="code"><span class="cm"># run it: -ngl offloads how many layers to the GPU</span>
 ./build/bin/llama-cli -m model.gguf -p "Hello" -ngl 99</pre>
-<p>Here <span class="mono">-ngl</span> (i.e. <span class="mono">n-gpu-layers</span>) is key: it decides how many of the model's layers run on the GPU, the rest on CPU.
-With enough VRAM put as many as you can (<span class="mono">-ngl 99</span> is basically "all that fit"); with too little, put only some and run CPU / GPU mixed. This
-echoes the backend abstraction: <strong>the same model, the same graph, flexibly split across different hardware</strong>.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  Here <span class="mono">-ngl</span> (i.e. <span class="mono">n-gpu-layers</span>) is key: it decides how many of the model's layers run on the GPU, the rest on CPU. With enough VRAM put as many as you can (<span class="mono">-ngl 99</span> is basically "all that fit"); with too little, put only some and run CPU / GPU mixed. This echoes the backend abstraction: <strong>the same model, the same graph, flexibly split across different hardware</strong>.
+</div>
 <p>How do you confirm the GPU backend was really compiled in and is really being used? The simplest way is the <strong>startup log</strong>. When running
 <span class="mono">llama-cli</span> it prints the detected devices and per-layer placement - if you see something like "offloaded 33/33 layers to GPU", layers really went
 to the GPU. If it is still CPU-only, likely <span class="mono">-ngl</span> was omitted or that backend was not compiled in; go back to configure and check the
@@ -680,9 +688,10 @@ to the GPU. If it is still CPU-only, likely <span class="mono">-ngl</span> was o
 <p>Tying this lesson to lesson 06: the <strong>quantization format</strong> you pick and the <strong>backend</strong> you build must <strong>work together</strong>. Each
 backend has dedicated dequant + matmul kernels for common quant formats (Q4_K, Q8_0), consuming quantized weights directly and dequantizing on the fly. So "<strong>which
 quantization</strong>" and "<strong>which backend</strong>" jointly decide your real-world speed - which is why Part 6 goes to look at how those kernels are actually written.</p>
-<p>Because backends are pluggable and dependencies are light, llama.cpp can also <strong>cross-compile</strong> to many targets: a library for Android / iOS apps,
-WebAssembly to run in the browser, even small boards like a Raspberry Pi. Switching target platform is often just a different toolchain and a few CMake tweaks; the core
-code stays put. This is the portability dividend of "<strong>C/C++ plus a backend abstraction</strong>" - lesson 01's "run anywhere", realized at the build level.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Because backends are pluggable and dependencies are light, llama.cpp can also <strong>cross-compile</strong> to many targets: a library for Android / iOS apps, WebAssembly to run in the browser, even small boards like a Raspberry Pi. Switching target platform is often just a different toolchain and a few CMake tweaks; the core code stays put. This is the portability dividend of "<strong>C/C++ plus a backend abstraction</strong>" - lesson 01's "run anywhere", realized at the build level.
+</div>
 <p>One more word on "portability", with an easy-to-get-backwards point. When you <strong>build from source</strong>, ggml turns on <span class="mono">GGML_NATIVE</span> by
 default (optimizing for your machine's instruction set), so the default binary is <strong>machine-tuned</strong> and fast, but <strong>not guaranteed to run on other
 machines</strong> (a different CPU may crash with "illegal instruction"). It is the <strong>official prebuilt packages</strong> that, to be "usable by everyone", turn
@@ -695,9 +704,10 @@ it, and you have truly started using the llama.cpp API.</p>
 dependencies</strong> (CUDA needs the CUDA runtime, Vulkan the Vulkan SDK...), so compiling them all balloons the size and demands the target machine have all those
 libraries - which contradicts llama.cpp's "<strong>zero-dependency, lightweight</strong>" ethos. So it lets you <strong>pick what you need</strong>: a CPU-only build can
 be tiny and copy-anywhere, and you build a backend-specific version separately when you want acceleration. That is the direction of this lesson's closing question.</p>
-<p>One easily-confused point: <strong>some things are set at compile time, others at runtime</strong>. "<strong>Which hardware backends</strong>" is fixed at compile time
-with <span class="mono">-D</span> options; but "<strong>context size, how many layers on GPU, thread count, sampling</strong>" are all <strong>runtime</strong> command-line
-flags, changeable without recompiling. Get this line straight and you will not make the mistake of "rebuilding just to change the context length".</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  One easily-confused point: <strong>some things are set at compile time, others at runtime</strong>. "<strong>Which hardware backends</strong>" is fixed at compile time with <span class="mono">-D</span> options; but "<strong>context size, how many layers on GPU, thread count, sampling</strong>" are all <strong>runtime</strong> command-line flags, changeable without recompiling. Get this line straight and you will not make the mistake of "rebuilding just to change the context length".
+</div>
 
 <h2>Going deeper (optional)</h2>
 <p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
