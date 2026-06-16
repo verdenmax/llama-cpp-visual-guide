@@ -405,6 +405,11 @@ KV cache（L19）按层数和 KV 头数算该开多大。可以说，hparams 是
 <p>把三样东西连起来看，L13 说的"<strong>自描述</strong>"就在架构层完整兑现了：<span class="mono">general.architecture</span> 选定 arch；带 <span class="mono">%s</span> 的 KV 键（如 <span class="mono">llama.block_count</span>）用架构名填模板、由 <span class="mono">get_key</span> 读出超参；
 张量按 <span class="mono">LLM_TENSOR_NAMES</span> 命名一一对上。三套约定一咬合，loader 读出的"一堆张量"就成了"一个有名有姓、有形有状的具体模型"，随时可以交给 L16 建图。</p>
 <p>值得回味的是这种设计的"<strong>表驱动</strong>"味道：架构是一张名字表、键是一张键名表、张量是一张张量名表。引擎的主干代码不写死任何一种模型，而是"照表办事"。于是支持一个新模型，多半不是改引擎，而是<strong>往这几张表里加几行 + 写一份建图</strong>（L16）。</p>
+<div class="cols">
+  <div class="col"><h4>架构名表</h4><p><span class="mono">LLM_ARCH_NAMES</span>：<span class="mono">"llama"</span> -&gt; <span class="mono">LLM_ARCH_LLAMA</span>。先认出"是什么模型"。</p></div>
+  <div class="col"><h4>键名表</h4><p><span class="mono">LLM_KV</span>：<span class="mono">llama.block_count</span> 等 -&gt; 由 <span class="mono">get_key</span> 读成超参。再量出"有多大"。</p></div>
+  <div class="col"><h4>张量名表</h4><p><span class="mono">LLM_TENSOR_NAMES</span>：<span class="mono">blk.N.attn_q</span> 等 -&gt; 对上每块权重。最后"零件对号入座"。</p></div>
+</div>
 <p>设想一下如果<strong>不</strong>用表驱动会怎样：每支持一种新模型，就得在引擎主干里写一堆 <span class="mono">if (arch == "llama") ... else if (arch == "qwen2") ...</span> 的分支，读超参、命名张量、建图处处都要改。模型一多，这些分支就会织成一张谁也不敢动的网。
 表驱动把这些差异从"散落在代码各处的 if"收进"集中的几张表 + 一份建图文件"，于是主干代码读起来始终是"照表办事"，清清爽爽。</p>
 <p>这套"<strong>识别架构 -&gt; 读超参 -&gt; 按名取张量</strong>"的三步，其实是任何"通用模型加载器"都绕不开的骨架：先搞清是什么、再量出多大、最后把零件对号入座。llama.cpp 把这三步做得极其干净，正是它能在短时间内追上一个又一个新模型的工程根基。
@@ -601,6 +606,11 @@ The naming convention plus knowledge of "which are required, which optional" tog
 <p>Connect the three things and L13's "<strong>self-description</strong>" cashes out fully at the architecture layer: <span class="mono">general.architecture</span> selects the arch; <span class="mono">%s</span> keys (like <span class="mono">llama.block_count</span>) fill the template with the arch name and are read by <span class="mono">get_key</span> into hyperparameters;
 tensors line up by their <span class="mono">LLM_TENSOR_NAMES</span> names. Once the three conventions mesh, the loader's "pile of tensors" becomes "a concrete model with names, shapes, and sizes", ready to hand to L16 for graph-building.</p>
 <p>What is worth savoring is the <strong>table-driven</strong> flavor of this design: architecture is a name table, keys are a key-name table, tensors are a tensor-name table. The engine's trunk hard-codes no single model; it "acts by the tables". So supporting a new model is mostly not editing the engine, but <strong>adding a few rows to these tables + writing one graph builder</strong> (L16).</p>
+<div class="cols">
+  <div class="col"><h4>Arch-name table</h4><p><span class="mono">LLM_ARCH_NAMES</span>: <span class="mono">"llama"</span> -&gt; <span class="mono">LLM_ARCH_LLAMA</span>. First recognize "which model".</p></div>
+  <div class="col"><h4>Key-name table</h4><p><span class="mono">LLM_KV</span>: <span class="mono">llama.block_count</span> etc. -&gt; read into hyperparameters by <span class="mono">get_key</span>. Then measure "how big".</p></div>
+  <div class="col"><h4>Tensor-name table</h4><p><span class="mono">LLM_TENSOR_NAMES</span>: <span class="mono">blk.N.attn_q</span> etc. -&gt; line up each weight. Finally "slot the parts into place".</p></div>
+</div>
 <p>Imagine if it were <strong>not</strong> table-driven: every new model would mean a pile of <span class="mono">if (arch == "llama") ... else if (arch == "qwen2") ...</span> branches in the engine trunk - reading hyperparameters, naming tensors, building graphs, all needing edits everywhere. With enough models, those branches weave into a web no one dares touch.
 Table-driven design gathers these differences from "ifs scattered through the code" into "a few centralized tables + one graph file", so the trunk code always reads as "act by the tables" - clean and clear.</p>
 <p>These three steps - "<strong>recognize the architecture -&gt; read hyperparameters -&gt; fetch tensors by name</strong>" - are really the inescapable skeleton of any "general model loader": first figure out what it is, then measure how big, finally slot the parts into place. llama.cpp does these three exceptionally cleanly, the engineering basis for it catching up to one new model after another so quickly.
