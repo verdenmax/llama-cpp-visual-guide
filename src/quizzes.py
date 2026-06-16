@@ -1565,6 +1565,67 @@ QUIZZES = {
             },
         ],
     },
+    "24-lora-adapters.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "LoRA 怎么改变模型行为？",
+                    "en": "How does LoRA change model behavior?",
+                },
+                "opts": [
+                    {"zh": "冻结原权重，用两个小矩阵 A、B 给权重加一个低秩增量 scale·B·A", "en": "freeze the original weights and add a low-rank delta scale*B*A via two small matrices A, B"},
+                    {"zh": "重训全部权重", "en": "retrain all the weights"},
+                    {"zh": "换一个词表", "en": "swap the vocabulary"},
+                    {"zh": "改采样温度", "en": "change the sampling temperature"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LoRA 冻结原权重 W，只学小矩阵 A、B，输出 = W·x + scale·B·A·x。适配器只有几 MB，远比重训全部权重轻；它和换词表、调温度是完全不同的事。",
+                    "en": "LoRA freezes the original W and learns only small matrices A, B; output = W*x + scale*B*A*x. The adapter is just a few MB, far lighter than retraining all weights; it is wholly different from swapping the vocab or tuning temperature.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "当前 llama.cpp 给上下文挂载 LoRA 用哪个 API？",
+                    "en": "Which API attaches a LoRA to the context in current llama.cpp?",
+                },
+                "opts": [
+                    {"zh": "批量的 llama_set_adapters_lora（单数 set/rm/clear 已移除，n=0 清空）", "en": "the batched llama_set_adapters_lora (singular set/rm/clear removed, n=0 clears)"},
+                    {"zh": "单数的 llama_set_adapter_lora", "en": "the singular llama_set_adapter_lora"},
+                    {"zh": "llama_lora_apply", "en": "llama_lora_apply"},
+                    {"zh": "重新加载模型", "en": "reload the model"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "当前 API 是复数批量的 llama_set_adapters_lora（一次可挂多个、各带 scale，n=0 清空）；早期单数的 set/rm/clear 三件套已被它取代、不复存在。",
+                    "en": "The current API is the plural, batched llama_set_adapters_lora (attach several at once, each with a scale; n=0 clears); the early singular set/rm/clear trio is replaced by it and no longer exists.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "LoRA 和控制向量（control vector）的主要区别？",
+                    "en": "The main difference between LoRA and a control vector?",
+                },
+                "opts": [
+                    {"zh": "LoRA 给权重加低秩增量（改 matmul），控制向量沿固定方向平移激活（加进残差流）", "en": "LoRA adds a low-rank delta to weights (changing matmul); a control vector shifts activations along a fixed direction (added to the residual stream)"},
+                    {"zh": "两者完全一样", "en": "they are exactly the same"},
+                    {"zh": "LoRA 改词表、cvec 改采样", "en": "LoRA changes the vocab, cvec changes sampling"},
+                    {"zh": "都要重训模型", "en": "both require retraining the model"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LoRA 动权重（低秩增量折进 matmul，build_lora_mm），控制向量动激活（沿方向平移残差流，set_adapter_cvec）。两者都不碰基础权重、即插即用，但层面不同。",
+                    "en": "LoRA acts on weights (a low-rank delta folded into matmul, build_lora_mm); a control vector acts on activations (shifting the residual stream along a direction, set_adapter_cvec). Both leave base weights untouched and are plug-and-play, but at different levels.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L16，说说为什么挂上 LoRA 能'不复制权重'就生效——build_lora_mm 在建图的哪一步把增量加进来。",
+                "en": "Drawing on L16, explain why attaching a LoRA takes effect 'without copying weights' - at which graph-build step build_lora_mm adds the delta.",
+            },
+        ],
+    },
 }
 
 

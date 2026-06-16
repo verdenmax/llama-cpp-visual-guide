@@ -92,6 +92,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("23-grammar.html", "语法约束", "Grammar (GBNF)",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("24-lora-adapters.html", "LoRA 适配器", "LoRA adapters",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -551,6 +553,8 @@ SUBTITLES = {
                                "llm_chat_template; built-in vs Jinja; ChatML/Llama/Gemma"),
     "23-grammar.html": ("GBNF · llama_grammar · 掩码采样(-inf) · root 规则",
                         "GBNF; llama_grammar; mask sampling(-inf); root rule"),
+    "24-lora-adapters.html": ("LoRA 低秩增量 scale·B·A · llama_set_adapters_lora · 控制向量",
+                              "LoRA low-rank delta scale*B*A; llama_set_adapters_lora; control vectors"),
 }
 
 
