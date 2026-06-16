@@ -341,13 +341,16 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>逐个字段看：<span class="mono">d</span> 是那个块共享的 scale，<span class="mono">ggml_half</span> 就是 2 字节的半精度浮点（L06 说的"基准"）；<span class="mono">qs</span> 是量化值数组。
 q4_0 的 <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span>——32 个值只占 16 字节，因为每个值才 4 bit，<strong>两个挤进一个字节</strong>（一个放高 nibble、一个放低 nibble）。
 q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>——32 个值占满 32 字节，<strong>一个值独占一字节</strong>，不用拆位。</p>
-<p>有人会问：那个 scale 为什么用 2 字节的 <span class="mono">half</span>，而不是更精确的 4 字节 float？因为 scale <strong>每块才一个</strong>，它的精度对最终结果影响有限，却要乘进整块的体积里——
-用 half 省下的这 2 字节，摊到 32 个权重上虽小，乘以一个模型里成千上万个块，省下来的就很可观了。这是一个典型的工程取舍：在"几乎不影响精度"的地方<strong>能省则省</strong>，把字节预算留给真正重要的量化值。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  有人会问：那个 scale 为什么用 2 字节的 <span class="mono">half</span>，而不是更精确的 4 字节 float？因为 scale <strong>每块才一个</strong>，它的精度对最终结果影响有限，却要乘进整块的体积里——用 half 省下的这 2 字节，摊到 32 个权重上虽小，乘以一个模型里成千上万个块，省下来的就很可观了。这是一个典型的工程取舍：在"几乎不影响精度"的地方<strong>能省则省</strong>，把字节预算留给真正重要的量化值。
+</div>
 <p>为什么 q8_0 更准也更大？因为 4-bit 只能表示 16 个档位、8-bit 能表示 256 个档位，<strong>同一个权重，8-bit 能贴得更近</strong>，量化误差更小。代价是体积翻倍：每权重从 0.5 字节涨到 1 字节。
 这正是 L06 那张"显存对照表"背后的字节级真相——你在命令行里选 <span class="mono">Q4_0</span> 还是 <span class="mono">Q8_0</span>，本质就是在这两种 block 布局之间二选一。</p>
-<p>这里值得停下来想一个问题：为什么要<strong>分块</strong>，不干脆整个权重矩阵共享一个 scale？因为一个几千乘几千的大矩阵里，权重的大小范围差异很大——某些行很大、某些行很小。
-若全矩阵共用一个 scale，就得迁就那个最大值，小权重会被压得几乎只剩 0、精度全丢。分成 32 个一块后，<strong>每块各自找自己的 scale</strong>，大块用大 scale、小块用小 scale，量化误差立刻小一大截。
-这就是"块量化"四个字的全部用意：用"每块一个 scale"的少量开销，换回"局部精度"的大幅提升。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里值得停下来想一个问题：为什么要<strong>分块</strong>，不干脆整个权重矩阵共享一个 scale？因为一个几千乘几千的大矩阵里，权重的大小范围差异很大——某些行很大、某些行很小。若全矩阵共用一个 scale，就得迁就那个最大值，小权重会被压得几乎只剩 0、精度全丢。分成 32 个一块后，<strong>每块各自找自己的 scale</strong>，大块用大 scale、小块用小 scale，量化误差立刻小一大截。这就是"块量化"四个字的全部用意：用"每块一个 scale"的少量开销，换回"局部精度"的大幅提升。
+</div>
 <p>还有个常被忽略的细节：q4_0 一块 18 字节、装 32 个权重，平均每权重 <strong>4.5 bit</strong>，而不是正好 4 bit。多出来的 0.5 bit，就是那 2 字节 scale 摊到 32 个权重头上的开销。
 块越大，这份"管理开销"摊得越薄——这也为下一节 K-quant 用 256 的大超块埋下了伏笔。</p>
 
@@ -374,14 +377,17 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
 } block_q4_K;</pre>
 <p>把 q4_K 的字节数也算一下：2（d）+ 2（dmin）+ 12（scales）+ 128（qs）= <strong>144 字节</strong>装 256 个权重，平均每权重 144×8/256 = <strong>4.5 bit</strong>——和 q4_0 一样的位宽，精度却更高。
 这就是"两层 scale"最直接的回报：没多花一个 bit，纯靠结构更精巧把误差压了下去。</p>
-<p>注意 <span class="mono">q4_K</span> 里<strong>没有 qh</strong>——只有 d、dmin、scales、qs 四个字段，这点很容易记错（见深挖 2）。而 <span class="mono">q6_K</span> 就<strong>有 qh</strong>：6-bit 的量化值被拆成"低 4 位"放 <span class="mono">ql</span>、
-"高 2 位"放 <span class="mono">qh</span>，再配 16 个 8-bit 的子块 scale 和一个超块 d。不同 K-quant 的字段并不统一，<strong>别想当然套用</strong>。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  注意 <span class="mono">q4_K</span> 里<strong>没有 qh</strong>——只有 d、dmin、scales、qs 四个字段，这点很容易记错（见深挖 2）。而 <span class="mono">q6_K</span> 就<strong>有 qh</strong>：6-bit 的量化值被拆成"低 4 位"放 <span class="mono">ql</span>、"高 2 位"放 <span class="mono">qh</span>，再配 16 个 8-bit 的子块 scale 和一个超块 d。不同 K-quant 的字段并不统一，<strong>别想当然套用</strong>。
+</div>
 <p>顺带认识一下整个 K-quant 家族：从 <span class="mono">q2_K</span>、<span class="mono">q3_K</span> 一直到 <span class="mono">q6_K</span>，名字里的数字是大致的位宽，<strong>K</strong> 则代表都用"超块 + 两层 scale"这套结构。
 位宽越低（如 q2_K）压得越狠、精度越险，往往只敢用在不那么敏感的层上；位宽越高（如 q6_K）越接近原始精度。这也是为什么实际下载模型时，你会看到 <span class="mono">Q4_K_M</span>、<span class="mono">Q5_K_S</span> 这种带后缀的名字——
 它们是把<strong>不同层用不同 K-quant 档位</strong>混搭出来的方案，在体积和质量之间取不同的平衡点。</p>
-<p>多说一句那个 <span class="mono">dmin</span>。q4_0 只有一个 scale，量化是<strong>对称</strong>的（围绕 0）；而 q4_K 多了一个 min，做的是<strong>带偏移</strong>的量化——还原公式更像 <span class="mono">x = scale · q + min</span>
-（源码注释写的就是 "weight is represented as x = a·q + b"）。为什么要这个偏移？因为很多权重的分布并不以 0 为中心，有了 min 就能让量化区间<strong>整体平移</strong>去贴合真实分布，进一步压低误差。
-这是 K-quant 比 q4_0 更准的另一半原因：不只 scale 更细，连"零点"都能调。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  多说一句那个 <span class="mono">dmin</span>。q4_0 只有一个 scale，量化是<strong>对称</strong>的（围绕 0）；而 q4_K 多了一个 min，做的是<strong>带偏移</strong>的量化——还原公式更像 <span class="mono">x = scale · q + min</span>（源码注释写的就是 "weight is represented as x = a·q + b"）。为什么要这个偏移？因为很多权重的分布并不以 0 为中心，有了 min 就能让量化区间<strong>整体平移</strong>去贴合真实分布，进一步压低误差。这是 K-quant 比 q4_0 更准的另一半原因：不只 scale 更细，连"零点"都能调。
+</div>
 <p>为什么超块要选 256 这么大？因为超块越大，"整体 d/dmin"这份固定开销摊到的权重越多、每权重的开销越小；而局部精度由更细的子块 scale 兜底，不会因为块大而变糊。
 大块负责"高压缩"、子块负责"高精度"，两者兼得——这就是 K-quant 在相同位宽下能比 q4_0 更准的设计动机（详见深挖 1）。</p>
 
@@ -405,15 +411,18 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) · d</div></div>
 </div>
-<p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数（让 0 附近的权重对称分布），再乘上这块的 scale <span class="mono">d</span>，
+<p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数，再乘上这块的 scale <span class="mono">d</span>，
 就还原出近似的原始浮点。q8_0 更直接：<span class="mono">x = q * d</span>，因为 int8 本身就是有符号的，不用减偏移。</p>
-<p>那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。
-这样正负权重都能表示，且 0 附近分布得最密（量化最准），恰好契合"大多数权重都集中在 0 附近"的事实。一个小小的减法，背后是对权重分布的理解。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  那个"<strong>减 8</strong>"也值得多想一层。4-bit 能存 0..15 共 16 个数，但权重有正有负，所以约定让 8 代表"0"、比 8 小的是负、比 8 大的是正——减去 8，就把 0..15 平移成 -8..7 这个<strong>大致对称</strong>的区间。这样正负权重都能表示，且 0 附近分布得最密（量化最准），恰好契合"大多数权重都集中在 0 附近"的事实。一个小小的减法，背后是对权重分布的理解。
+</div>
 <p>反过来，<strong>量化</strong>（把浮点压成字节）就是解量化的逆运算。q4_0 的参考实现 <span class="mono">quantize_row_q4_0_ref</span> 里，scale 取 <span class="mono">d = max / -8</span>——找出这块绝对值最大的权重，
 让它对应到量化区间的端点（-8），其余权重按比例缩放取整。<strong>除以 -8 而不是 8</strong> 是个容易看走眼的细节：它和解量化时的"减 8"配套，保证一来一回数值对得上。</p>
-<p>顺势说清一件事：解量化是<strong>有损</strong>的——还原出来的浮点和原始权重并不完全相等，差的那一点就是量化误差。但为什么模型还能照常工作？因为深度网络对权重的微小扰动相当<strong>宽容</strong>：
-单个权重差一点点，经过成百上千次累加和非线性，整体输出几乎察觉不到。量化格式的全部艺术，就是在"压得更狠"和"误差还能被模型容忍"之间找平衡——这也是为什么会有 q4_0、q4_K、q6_K 这么多档位，
-让你按对精度的需求挑一个合适的折中点。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  顺势说清一件事：解量化是<strong>有损</strong>的——还原出来的浮点和原始权重并不完全相等，差的那一点就是量化误差。但为什么模型还能照常工作？因为深度网络对权重的微小扰动相当<strong>宽容</strong>：单个权重差一点点，经过成百上千次累加和非线性，整体输出几乎察觉不到。量化格式的全部艺术，就是在"压得更狠"和"误差还能被模型容忍"之间找平衡——这也是为什么会有 q4_0、q4_K、q6_K 这么多档位，让你按对精度的需求挑一个合适的折中点。
+</div>
 <p>还有一点值得记住：解量化不一定<strong>提前一次性</strong>把整个权重张量铺开成浮点（那会占很多内存）。在矩阵乘这种热点里，ggml 常常是<strong>边算边解</strong>——在内层循环里即时把用到的那一小块还原成浮点、立刻参与点积，
 算完就丢。所以量化省的不只是显存，连"解压后的浮点"也大多不落地，带宽和缓存都跟着受益（呼应 L06 说的"省显存又提速"）。</p>
 
@@ -575,15 +584,17 @@ precondition for the "dequantize on the fly" mentioned earlier.</p>
 <p>Field by field: <span class="mono">d</span> is the block's shared scale, and <span class="mono">ggml_half</span> is exactly a 2-byte half-precision float (L06's "baseline"); <span class="mono">qs</span> is the array of quantized
 values. q4_0's <span class="mono">qs[QK4_0/2]</span>=<span class="mono">qs[16]</span> - 32 values in only 16 bytes, because each value is just 4 bits, <strong>two squeezed into one byte</strong> (one high nibble, one low). q8_0's
 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span> - 32 values filling 32 bytes, <strong>one value per byte</strong>, no bit-splitting.</p>
-<p>One might ask: why is that scale a 2-byte <span class="mono">half</span> rather than a more precise 4-byte float? Because there is <strong>only one scale per block</strong>, its precision has limited impact on the final result, yet it
-counts against the whole block's size - the 2 bytes saved by using half, small per 32 weights, multiplied by the tens of thousands of blocks in a model, add up to a lot. This is a classic engineering trade-off: <strong>save wherever you
-can</strong> in places that "barely affect precision", leaving the byte budget for the quantized values that truly matter.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  One might ask: why is that scale a 2-byte <span class="mono">half</span> rather than a more precise 4-byte float? Because there is <strong>only one scale per block</strong>, its precision has limited impact on the final result, yet it counts against the whole block's size - the 2 bytes saved by using half, small per 32 weights, multiplied by the tens of thousands of blocks in a model, add up to a lot. This is a classic engineering trade-off: <strong>save wherever you can</strong> in places that "barely affect precision", leaving the byte budget for the quantized values that truly matter.
+</div>
 <p>Why is q8_0 both more accurate and larger? Because 4 bits can represent only 16 levels while 8 bits represent 256 levels, so for the same weight <strong>8-bit can sit much closer</strong>, with smaller
 quantization error. The cost is double the size: from 0.5 byte per weight to 1 byte. This is the byte-level truth behind L06's "VRAM table" - choosing <span class="mono">Q4_0</span> vs <span class="mono">Q8_0</span>
 on the command line is, in essence, picking between these two block layouts.</p>
-<p>It is worth pausing on one question here: why <strong>block</strong> at all, instead of sharing one scale across the whole weight matrix? Because in a matrix of thousands by thousands, weight magnitudes vary widely - some rows
-large, some small. With one scale for the whole matrix you must accommodate the largest value, and small weights get crushed almost to 0, losing all precision. Split into blocks of 32, <strong>each block finds its own scale</strong> -
-big blocks use a big scale, small blocks a small one - and quantization error drops sharply at once. That is the entire point of "block quantization": spend the small overhead of "one scale per block" to buy a large gain in local precision.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  It is worth pausing on one question here: why <strong>block</strong> at all, instead of sharing one scale across the whole weight matrix? Because in a matrix of thousands by thousands, weight magnitudes vary widely - some rows large, some small. With one scale for the whole matrix you must accommodate the largest value, and small weights get crushed almost to 0, losing all precision. Split into blocks of 32, <strong>each block finds its own scale</strong> - big blocks use a big scale, small blocks a small one - and quantization error drops sharply at once. That is the entire point of "block quantization": spend the small overhead of "one scale per block" to buy a large gain in local precision.
+</div>
 <p>One often-missed detail: a q4_0 block is 18 bytes for 32 weights, averaging <strong>4.5 bits</strong> per weight, not exactly 4. The extra 0.5 bit is the 2-byte scale amortized across 32 weights. The bigger the
 block, the thinner this "management overhead" spreads - which already foreshadows why the next section's K-quant uses a big 256-weight super-block.</p>
 
@@ -612,15 +623,18 @@ accurate": precision comes not from spending more bits, but from <strong>allocat
 } block_q4_K;</pre>
 <p>Compute q4_K's byte count too: 2 (d) + 2 (dmin) + 12 (scales) + 128 (qs) = <strong>144 bytes</strong> for 256 weights, averaging 144*8/256 = <strong>4.5 bits</strong> per weight - the same bit width as q4_0, yet higher precision. That is
 the most direct payoff of the "two-level scale": not one extra bit spent, error pushed down purely by a smarter structure.</p>
-<p>Note that <span class="mono">q4_K</span> has <strong>no qh</strong> - only the four fields d, dmin, scales, qs, which is easy to misremember (see Dig deeper 2). <span class="mono">q6_K</span>, by contrast, <strong>does have qh</strong>:
-its 6-bit values are split into "low 4 bits" in <span class="mono">ql</span> and "high 2 bits" in <span class="mono">qh</span>, plus 16 8-bit sub-block scales and one super-block d. Fields differ across K-quants, so <strong>do not assume</strong>.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  Note that <span class="mono">q4_K</span> has <strong>no qh</strong> - only the four fields d, dmin, scales, qs, which is easy to misremember (see Dig deeper 2). <span class="mono">q6_K</span>, by contrast, <strong>does have qh</strong>: its 6-bit values are split into "low 4 bits" in <span class="mono">ql</span> and "high 2 bits" in <span class="mono">qh</span>, plus 16 8-bit sub-block scales and one super-block d. Fields differ across K-quants, so <strong>do not assume</strong>.
+</div>
 <p>Worth meeting the whole K-quant family: from <span class="mono">q2_K</span> and <span class="mono">q3_K</span> up to <span class="mono">q6_K</span>, the number in the name is the rough bit width, while <strong>K</strong> means they all use this
 "super-block + two-level scale" structure. The lower the bit width (like q2_K) the harder the compression and the riskier the precision, so it is often used only on less sensitive layers; the higher (like q6_K) the closer to original
 precision. This is why, downloading real models, you see suffixed names like <span class="mono">Q4_K_M</span> and <span class="mono">Q5_K_S</span> - schemes that <strong>mix different K-quant levels across different layers</strong>, striking
 different balances between size and quality.</p>
-<p>A word on that <span class="mono">dmin</span>. q4_0 has only a scale, so its quantization is <strong>symmetric</strong> (around 0); q4_K adds a min, doing <strong>offset</strong> quantization - the restore formula is more like
-<span class="mono">x = scale * q + min</span> (the source comment reads "weight is represented as x = a*q + b"). Why the offset? Because many weight distributions are not centered on 0, and a min lets the quantization range <strong>shift as a
-whole</strong> to fit the real distribution, pushing error down further. This is the other half of why K-quant beats q4_0: not only finer scale, but even the "zero point" is adjustable.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  A word on that <span class="mono">dmin</span>. q4_0 has only a scale, so its quantization is <strong>symmetric</strong> (around 0); q4_K adds a min, doing <strong>offset</strong> quantization - the restore formula is more like <span class="mono">x = scale * q + min</span> (the source comment reads "weight is represented as x = a*q + b"). Why the offset? Because many weight distributions are not centered on 0, and a min lets the quantization range <strong>shift as a whole</strong> to fit the real distribution, pushing error down further. This is the other half of why K-quant beats q4_0: not only finer scale, but even the "zero point" is adjustable.
+</div>
 <p>Why pick a super-block as big as 256? Because the bigger the super-block, the more weights the fixed "overall d/dmin" overhead spreads across, and the smaller the per-weight overhead; meanwhile local precision is
 backstopped by the finer sub-block scales, so a big block does not get blurry. The big block handles "high compression", the sub-blocks handle "high precision", and you get both - this is the design motive for K-quant
 being more accurate than q4_0 at the same bit width (see Dig deeper 1).</p>
@@ -645,17 +659,19 @@ handled by each format's own <span class="mono">dequantize_row_*</span> function
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) * d</div></div>
 </div>
-<p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7 (so weights near zero sit symmetrically), then
+<p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7, then
 multiplying by this block's scale <span class="mono">d</span> restores the approximate original float. q8_0 is even more direct: <span class="mono">x = q * d</span>, since int8 is already signed and needs no offset.</p>
-<p>That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts
-0..15 into the <strong>roughly symmetric</strong> range -8..7. This represents both signs, and is densest (most accurate) near 0, matching the fact that "most weights cluster near 0". A tiny subtraction encodes an understanding of the weight
-distribution.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  That "<strong>minus 8</strong>" deserves a second thought too. 4 bits store 0..15, sixteen values, but weights are both positive and negative, so the convention makes 8 mean "0", below 8 negative, above 8 positive - subtracting 8 shifts 0..15 into the <strong>roughly symmetric</strong> range -8..7. This represents both signs, and is densest (most accurate) near 0, matching the fact that "most weights cluster near 0". A tiny subtraction encodes an understanding of the weight distribution.
+</div>
 <p>In reverse, <strong>quantization</strong> (compressing floats to bytes) is the inverse. In q4_0's reference implementation <span class="mono">quantize_row_q4_0_ref</span>, the scale is <span class="mono">d = max / -8</span> - find the
 weight with the largest magnitude in the block, map it to the endpoint of the quantization range (-8), and scale-and-round the rest proportionally. <strong>Dividing by -8 rather than 8</strong> is an easy-to-misread detail:
 it pairs with the "minus 8" at dequantize time, ensuring the round trip lines up numerically.</p>
-<p>To make one thing explicit: dequantization is <strong>lossy</strong> - the restored floats are not exactly equal to the original weights, and that small gap is the quantization error. So why does the model still work? Because deep
-networks are quite <strong>tolerant</strong> of tiny perturbations to weights: a single weight off by a hair, after hundreds or thousands of accumulations and nonlinearities, is almost imperceptible in the overall output. The whole art
-of a quantization format is balancing "compress harder" against "error the model can still tolerate" - which is exactly why there are so many levels like q4_0, q4_K, q6_K, letting you pick a suitable trade-off for your precision needs.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  To make one thing explicit: dequantization is <strong>lossy</strong> - the restored floats are not exactly equal to the original weights, and that small gap is the quantization error. So why does the model still work? Because deep networks are quite <strong>tolerant</strong> of tiny perturbations to weights: a single weight off by a hair, after hundreds or thousands of accumulations and nonlinearities, is almost imperceptible in the overall output. The whole art of a quantization format is balancing "compress harder" against "error the model can still tolerate" - which is exactly why there are so many levels like q4_0, q4_K, q6_K, letting you pick a suitable trade-off for your precision needs.
+</div>
 <p>One more thing worth remembering: dequantization does not necessarily <strong>expand the whole weight tensor to floats up front</strong> (that would cost a lot of memory). In hotspots like matmul, ggml often
 <strong>dequantizes on the fly</strong> - restoring just the small block it needs in the inner loop, feeding it into the dot product immediately, and discarding it. So quantization saves not only VRAM; even the "decompressed
 floats" mostly never land, benefiting bandwidth and cache too (echoing L06's "saves VRAM and speeds up").</p>

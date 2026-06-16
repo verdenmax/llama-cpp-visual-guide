@@ -366,14 +366,16 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
 它就自己 <span class="mono">ggml_aligned_malloc(mem_size)</span> 要一块对齐过的内存（源码见 <span class="mono">ggml/src/ggml.c</span>）。
 <span class="mono">ggml_free</span> 则把这块 arena 整体还掉（只有当这块内存是 ggml 自己分配的、即 <span class="mono">mem_buffer_owned</span> 时才释放）。
 "<strong>能让你传入 mem_buffer</strong>"这一点很重要：它意味着 ggml 可以在别人给的内存上工作，方便嵌入到各种环境、或复用一块缓冲反复建图。</p>
-<p>顺带说说<strong>对齐</strong>。<span class="mono">ggml_aligned_malloc</span> 要的不是普通内存，而是<strong>对齐到特定边界</strong>的内存——因为后端的 SIMD 指令
-（AVX、NEON 等，L07 提过）往往要求数据地址对齐才能高效甚至正确地读取。arena 内部每切一个对象，也会按 <span class="mono">GGML_MEM_ALIGN</span> 对齐。
-你可以把 arena 理解成一条<strong>带刻度的尺子</strong>，每个对象都落在整齐的刻度上，而不是随手乱放——这点整齐，换来的是计算时的速度。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  顺带说说<strong>对齐</strong>。<span class="mono">ggml_aligned_malloc</span> 要的不是普通内存，而是<strong>对齐到特定边界</strong>的内存——因为后端的 SIMD 指令（AVX、NEON 等，L07 提过）往往要求数据地址对齐才能高效甚至正确地读取。arena 内部每切一个对象，也会按 <span class="mono">GGML_MEM_ALIGN</span> 对齐。你可以把 arena 理解成一条<strong>带刻度的尺子</strong>，每个对象都落在整齐的刻度上，而不是随手乱放——这点整齐，换来的是计算时的速度。
+</div>
 <p>所以严格说，<span class="mono">ggml_aligned_malloc</span> 与普通 <span class="mono">malloc</span> 的区别就在"<strong>对齐</strong>"二字：普通 malloc 只保证够大、不保证地址落在某个边界上；
 而 ggml 要的内存，起始地址必须是某个对齐值（如 16 或 32 字节）的整数倍，这样后端才能放心地用对齐版的 SIMD 加载指令一次搬一大批数。对齐这件小事，体现的是 ggml"<strong>处处为后端计算让路</strong>"的取向。</p>
-<p>还有一个常被问到的问题：<strong>一个程序里能开几个 <span class="mono">ggml_context</span>？</strong>答案是<strong>多个</strong>，而且这很常见。
-比如可以用一个 ctx 装<strong>模型权重</strong>（活得久，整个推理期间都在）、另一个 ctx 装<strong>每步推理的计算图</strong>（活得短，算完就清）。
-不同生命周期的东西放进不同的池子，<strong>该长留的长留、该速清的速清</strong>，互不干扰——这也是 arena 模型带来的便利：一次 <span class="mono">ggml_free</span> 就能精准回收一整批同寿命的对象。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  还有一个常被问到的问题：<strong>一个程序里能开几个 <span class="mono">ggml_context</span>？</strong>答案是<strong>多个</strong>，而且这很常见。比如可以用一个 ctx 装<strong>模型权重</strong>（活得久，整个推理期间都在）、另一个 ctx 装<strong>每步推理的计算图</strong>（活得短，算完就清）。不同生命周期的东西放进不同的池子，<strong>该长留的长留、该速清的速清</strong>，互不干扰——这也是 arena 模型带来的便利：一次 <span class="mono">ggml_free</span> 就能精准回收一整批同寿命的对象。
+</div>
 <p>这套机制在 llama.cpp 里随处可见。加载一个模型时，loader 会先按 GGUF 头里记的张量数量和大小，<strong>估出需要多大的元数据 arena</strong>，
 <span class="mono">ggml_init</span> 出一个（通常 <span class="mono">no_alloc=true</span> 的）context，再把每个权重张量在里面登记一遍；权重的真正数据则由后端缓冲承接（甚至直接 mmap 自文件，见 L13）。
 每跑一步推理，又会用另一个 context 临时搭出这一步的计算图、算完即弃。所以你大可以把 <span class="mono">ggml_context</span> 想成 ggml 世界里<strong>最基本的"工作台"</strong>：
@@ -392,9 +394,10 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
 <p>多说一句那个 <span class="mono">ggml_object</span> 头里到底装了什么：自己在 arena 里的<strong>偏移</strong> <span class="mono">offs</span>、占用的<strong>大小</strong> <span class="mono">size</span>、
 指向<strong>下一个对象</strong>的指针 <span class="mono">next</span>，外加一个标记"这是张量还是图"的类型字段。<span class="mono">ggml_context</span> 自己则记着链表的头尾
 （<span class="mono">objects_begin</span> / <span class="mono">objects_end</span>）和已放对象数 <span class="mono">n_objects</span>。有了尾指针，"在末尾追加"就是 O(1)，这是 bump 快的又一面。</p>
-<p>为什么这种"只加不减"的游标能行得通？因为<strong>建图阶段几乎只增不删</strong>——你是在一口气把整张计算图搭出来，中途很少需要单独释放某个张量。
-既然没有"挖东墙补西墙"的需求，那最简单的分配器（一个往前推的游标）就够用了，连记录空闲块、合并碎片这些复杂逻辑都省了。
-这是一种典型的"<strong>用使用场景的特点，换分配器的极致简单</strong>"：等到 L10 真正要<strong>复用</strong>内存时，才会上更聪明的分配器；而这里的建图阶段，朴素的 bump 反而最合适。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  为什么这种"只加不减"的游标能行得通？因为<strong>建图阶段几乎只增不删</strong>——你是在一口气把整张计算图搭出来，中途很少需要单独释放某个张量。既然没有"挖东墙补西墙"的需求，那最简单的分配器（一个往前推的游标）就够用了，连记录空闲块、合并碎片这些复杂逻辑都省了。这是一种典型的"<strong>用使用场景的特点，换分配器的极致简单</strong>"：等到 L10 真正要<strong>复用</strong>内存时，才会上更聪明的分配器；而这里的建图阶段，朴素的 bump 反而最合适。
+</div>
 <pre class="code"><span class="cm"># 对应 ggml/src/ggml.c 的 ggml_new_object / ggml_new_tensor_impl</span>
 <span class="kw">def</span> <span class="fn">new_object</span>(ctx, size):
     cur = ctx.objects_end.offs + ctx.objects_end.size   <span class="cm"># 当前游标</span>
@@ -403,10 +406,10 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
     obj = place_at(ctx.mem_buffer + cur)                <span class="cm"># 就地放下</span>
     link_into(ctx.objects, obj)                         <span class="cm"># 接入链表尾</span>
     <span class="kw">return</span> obj</pre>
-<p>这里有两个要点。其一，<strong>张量的元数据（那个 <span class="mono">ggml_tensor</span> 结构）和它的数据缓冲，都从这同一块 arena 里切</strong>——
-没有"每个张量单独 <span class="mono">malloc</span> 一次"这回事。其二，<strong>arena 不会自动扩容</strong>：游标一旦撞到边界，ggml 直接 <span class="mono">abort</span>。
-所以使用者要<strong>事先把池子估得足够大</strong>。ggml 提供了 <span class="mono">ggml_tensor_overhead()</span> 帮你算"每个张量的元数据要占多少字节"，
-建图时常按 <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> 个节点的规模留余量。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这里有两个要点。其一，<strong>张量的元数据（那个 <span class="mono">ggml_tensor</span> 结构）和它的数据缓冲，都从这同一块 arena 里切</strong>——没有"每个张量单独 <span class="mono">malloc</span> 一次"这回事。其二，<strong>arena 不会自动扩容</strong>：游标一旦撞到边界，ggml 直接 <span class="mono">abort</span>。所以使用者要<strong>事先把池子估得足够大</strong>。ggml 提供了 <span class="mono">ggml_tensor_overhead()</span> 帮你算"每个张量的元数据要占多少字节"，建图时常按 <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> 个节点的规模留余量。
+</div>
 <p>举个具体感受："元数据"到底有多轻？一个 <span class="mono">ggml_tensor</span> 结构加上对象头，<span class="mono">ggml_tensor_overhead()</span> 量出来不过几百字节。
 就算一张图有上千个张量，元数据加起来也才几百 KB——和动辄几个 GB 的<strong>权重数据</strong>相比，几乎可以忽略。这再次印证了"轻元数据 / 重数据"的分野：
 在 <span class="mono">no_alloc=true</span> 下，<span class="mono">ggml_context</span> 这块 arena 只需开<strong>几 MB</strong> 装下整张图的骨架就绰绰有余，真正吃内存的数据另有去处。</p>
@@ -588,18 +591,18 @@ that big arena</strong> - if you passed a <span class="mono">mem_buffer</span> i
 <span class="mono">ggml_aligned_malloc(mem_size)</span> itself (see <span class="mono">ggml/src/ggml.c</span>). <span class="mono">ggml_free</span> returns the whole arena
 (only freeing the block if ggml allocated it itself, i.e. <span class="mono">mem_buffer_owned</span>). That "<strong>you can pass in mem_buffer</strong>" matters: ggml can work
 on memory someone else gave it, handy for embedding into various environments or reusing one buffer to build graphs repeatedly.</p>
-<p>A word on <strong>alignment</strong>. <span class="mono">ggml_aligned_malloc</span> wants not just any memory but memory <strong>aligned to a particular boundary</strong> - because
-backend SIMD instructions (AVX, NEON, from L07) often require aligned addresses to read efficiently or even correctly. Each object carved inside the arena is also aligned to
-<span class="mono">GGML_MEM_ALIGN</span>. Think of the arena as a <strong>ruler with tick marks</strong>: every object lands on a tidy tick rather than wherever - and that bit of
-tidiness buys speed at compute time.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  A word on <strong>alignment</strong>. <span class="mono">ggml_aligned_malloc</span> wants not just any memory but memory <strong>aligned to a particular boundary</strong> - because backend SIMD instructions (AVX, NEON, from L07) often require aligned addresses to read efficiently or even correctly. Each object carved inside the arena is also aligned to <span class="mono">GGML_MEM_ALIGN</span>. Think of the arena as a <strong>ruler with tick marks</strong>: every object lands on a tidy tick rather than wherever - and that bit of tidiness buys speed at compute time.
+</div>
 <p>So strictly, the difference between <span class="mono">ggml_aligned_malloc</span> and plain <span class="mono">malloc</span> is just
 "<strong>alignment</strong>": plain malloc only guarantees big-enough, not that the address falls on a boundary; ggml's memory must start at a multiple of some alignment (16 or
 32 bytes), so the backend can confidently use aligned SIMD loads to move a batch at once. This small thing reflects ggml's bias of "<strong>always making way for backend
 compute</strong>".</p>
-<p>One more often-asked question: <strong>how many <span class="mono">ggml_context</span>s can a program open?</strong> The answer is <strong>several</strong>, and that is common.
-For instance, one ctx for the <strong>model weights</strong> (long-lived, present the whole inference) and another for <strong>each step's compute graph</strong> (short-lived,
-cleared once computed). Putting things of different lifetimes into different pools lets <strong>the long-lived stay and the short-lived clear fast</strong>, without interfering -
-another convenience of the arena model: one <span class="mono">ggml_free</span> precisely reclaims a whole batch of same-lifetime objects.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One more often-asked question: <strong>how many <span class="mono">ggml_context</span>s can a program open?</strong> The answer is <strong>several</strong>, and that is common. For instance, one ctx for the <strong>model weights</strong> (long-lived, present the whole inference) and another for <strong>each step's compute graph</strong> (short-lived, cleared once computed). Putting things of different lifetimes into different pools lets <strong>the long-lived stay and the short-lived clear fast</strong>, without interfering - another convenience of the arena model: one <span class="mono">ggml_free</span> precisely reclaims a whole batch of same-lifetime objects.
+</div>
 <p>This mechanism is everywhere in llama.cpp. When loading a model, the loader first <strong>estimates how big a metadata arena</strong> it needs from the tensor count and sizes
 in the GGUF header, <span class="mono">ggml_init</span>s a (usually <span class="mono">no_alloc=true</span>) context, and registers every weight tensor in it; the weights' real data is
 taken up by backend buffers (or even mmap'd straight from the file, see L13). Each inference step uses another context to temporarily build that step's compute graph, discarded
@@ -620,10 +623,10 @@ and the cursor always rests at the end of the last object. A new object is carve
 <span class="mono">size</span> it occupies, a pointer <span class="mono">next</span> to the <strong>next object</strong>, plus a type field marking "tensor or graph".
 <span class="mono">ggml_context</span> itself tracks the list head/tail (<span class="mono">objects_begin</span> / <span class="mono">objects_end</span>) and the object count
 <span class="mono">n_objects</span>. With a tail pointer, "append at the end" is O(1) - another face of why bump is fast.</p>
-<p>And why does this "only-add, never-remove" cursor work? Because <strong>the build phase is almost append-only</strong> - you are constructing the whole compute graph in one
-go, rarely needing to free a single tensor mid-way. With no "rob Peter to pay Paul" need, the simplest allocator (a forward-pushing cursor) suffices, sparing all the complexity
-of tracking free blocks and merging fragments. This is a classic "<strong>trade the scenario's traits for the allocator's utter simplicity</strong>": not until L10 actually
-needs to <strong>reuse</strong> memory does a smarter allocator come in; here in the build phase, plain bump is the best fit.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  And why does this "only-add, never-remove" cursor work? Because <strong>the build phase is almost append-only</strong> - you are constructing the whole compute graph in one go, rarely needing to free a single tensor mid-way. With no "rob Peter to pay Paul" need, the simplest allocator (a forward-pushing cursor) suffices, sparing all the complexity of tracking free blocks and merging fragments. This is a classic "<strong>trade the scenario's traits for the allocator's utter simplicity</strong>": not until L10 actually needs to <strong>reuse</strong> memory does a smarter allocator come in; here in the build phase, plain bump is the best fit.
+</div>
 <pre class="code"><span class="cm"># cf. ggml_new_object / ggml_new_tensor_impl in ggml/src/ggml.c</span>
 <span class="kw">def</span> <span class="fn">new_object</span>(ctx, size):
     cur = ctx.objects_end.offs + ctx.objects_end.size   <span class="cm"># current cursor</span>
@@ -632,10 +635,10 @@ needs to <strong>reuse</strong> memory does a smarter allocator come in; here in
     obj = place_at(ctx.mem_buffer + cur)                <span class="cm"># place in situ</span>
     link_into(ctx.objects, obj)                         <span class="cm"># append to the list</span>
     <span class="kw">return</span> obj</pre>
-<p>Two points here. One, <strong>a tensor's metadata (the <span class="mono">ggml_tensor</span> struct) and its data buffer are both carved from this same arena</strong> - there
-is no "malloc once per tensor". Two, <strong>the arena does not auto-grow</strong>: the moment the cursor hits the edge, ggml <span class="mono">abort</span>s. So the user must
-<strong>size the pool large enough up front</strong>. ggml offers <span class="mono">ggml_tensor_overhead()</span> to compute "how many bytes each tensor's metadata takes",
-and graphs commonly leave headroom for <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> nodes.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  Two points here. One, <strong>a tensor's metadata (the <span class="mono">ggml_tensor</span> struct) and its data buffer are both carved from this same arena</strong> - there is no "malloc once per tensor". Two, <strong>the arena does not auto-grow</strong>: the moment the cursor hits the edge, ggml <span class="mono">abort</span>s. So the user must <strong>size the pool large enough up front</strong>. ggml offers <span class="mono">ggml_tensor_overhead()</span> to compute "how many bytes each tensor's metadata takes", and graphs commonly leave headroom for <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> nodes.
+</div>
 <p>For a concrete feel: just how light is "metadata"? A <span class="mono">ggml_tensor</span> struct plus object header, as measured by
 <span class="mono">ggml_tensor_overhead()</span>, is only a few hundred bytes. Even a graph with thousands of tensors totals just a few hundred KB of metadata - next to the multiple
 GB of <strong>weight data</strong>, practically nothing. This again confirms the "light metadata / heavy data" split: under <span class="mono">no_alloc=true</span>, the
