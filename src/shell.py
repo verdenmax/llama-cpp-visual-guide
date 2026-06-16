@@ -72,6 +72,18 @@ PAGES = [
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
     ("13-gguf-format.html", "GGUF 文件格式", "The GGUF file format",
      "第三部分 · ggml 引擎", "Part 3 · The ggml engine"),
+    ("14-model-loading.html", "模型加载", "Model loading",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("15-architecture-hparams.html", "架构与超参", "Architecture & hyperparameters",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("16-build-graph.html", "构建计算图", "Building the compute graph",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("17-context-session.html", "上下文与会话", "Context & session",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("18-batching.html", "批处理", "Batching",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("19-kv-cache.html", "KV cache", "The KV cache",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -511,6 +523,18 @@ SUBTITLES = {
                               "block byte layout; super-block K-quant; dequant; type_traits"),
     "13-gguf-format.html": ("magic/version · metadata KV · tensor info · 对齐 · mmap",
                             "magic/version; metadata KV; tensor info; alignment; mmap"),
+    "14-model-loading.html": ("llama_model_loader · GGUF metadata/张量清单 · mmap · 分片",
+                              "llama_model_loader; GGUF metadata/tensor map; mmap; splits"),
+    "15-architecture-hparams.html": ("llm_arch · llama_hparams · LLM_TENSOR_NAMES 命名约定",
+                                     "llm_arch; llama_hparams; LLM_TENSOR_NAMES naming"),
+    "16-build-graph.html": ("build_graph 派发 · build_attn/build_ffn 积木 · src/models · ggml_cgraph",
+                            "build_graph dispatch; build_attn/build_ffn blocks; src/models; ggml_cgraph"),
+    "17-context-session.html": ("llama_context · cparams · memory/sched/logits · llama_decode",
+                                "llama_context; cparams; memory/sched/logits; llama_decode"),
+    "18-batching.html": ("llama_batch · pos/seq_id/logits 标志 · llama_batch_allocr -> ubatch",
+                         "llama_batch; pos/seq_id/logits flags; llama_batch_allocr -> ubatch"),
+    "19-kv-cache.html": ("llama_kv_cache · cell(pos/seq_id) · 上下文移位 · 多序列 · 变体",
+                         "llama_kv_cache; cell(pos/seq_id); context shift; multi-seq; variants"),
 }
 
 

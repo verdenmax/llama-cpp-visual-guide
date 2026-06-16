@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>15 · 架构与超参 / Architecture &amp; hyperparameters - llama.cpp 图解教程</title>
+<meta name="description" content="第四部分 · llama 推理内部｜架构与超参 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="15 · 架构与超参 / Architecture &amp; hyperparameters - llama.cpp 图解教程">
+<meta property="og:description" content="第四部分 · llama 推理内部｜架构与超参 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="15 · 架构与超参 / Architecture &amp; hyperparameters - llama.cpp 图解教程">
+<meta name="twitter:description" content="第四部分 · llama 推理内部｜架构与超参 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></span>
+    <span class="pill">15 / 19</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:78%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></div>
+    <h1><span class="lang-zh">架构与超参</span><span class="lang-en">Architecture &amp; hyperparameters</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课 loader 把权重读成了一张"带名字的张量清单"，可这些张量怎么知道自己属于<strong>哪种架构</strong>（llama？qwen2？）、每层有哪些部件？这一课讲两样东西：<span class="mono">llama-arch</span>（架构标识 +
+键名约定 + 张量名约定三套表）和 <span class="mono">llama-hparams</span>（几层、多宽、每层几个头）——它们合起来，是把"一堆张量"翻译成"一个具体可建图的模型"的<strong>说明书</strong>。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">为什么把这两件事单拎一课？因为它们是 llama.cpp 能用<strong>一套代码读懂几十种模型</strong>的秘密。同样是 transformer，llama 和 qwen2 的差别，本质上就藏在"用哪套约定、几层多宽、张量怎么命名"里。
+搞懂这一课，你就明白新模型是怎么"插进"这个引擎的。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  架构与超参像一套<strong>建筑图纸 + 规格表</strong>：图纸（<span class="mono">llm_arch</span> + 张量命名约定）说明"这是哪种楼、每层有哪些构件、各叫什么名"；规格表（<span class="mono">hparams</span>）给出具体尺寸——
+  "几层、多宽、每层几个注意力头"。上一课的 loader 就像备好了一堆贴着标签的建材，而这一课的图纸和规格表，告诉它<strong>按什么名字提哪块料、按什么尺寸搭起来</strong>。
+</div>
+
+<h2>架构标识：llm_arch</h2>
+<p>一切从一个问题开始：拿到一个模型，怎么知道它是 llama 还是 qwen2？答案在 L13 讲过的那个 GGUF 元数据键 <span class="mono">general.architecture</span> 里。它是一个字符串（比如 <span class="mono">"llama"</span>），
+loader 读出它、在一张名字表里一查，就得到对应的<strong>架构枚举</strong> <span class="mono">LLM_ARCH_LLAMA</span>。这个枚举一旦定下，后面用哪套键名、哪套张量名、调哪个建图函数（L16），就全都定了。</p>
+<div class="flow">
+  <div class="node"><div class="nt">general.architecture</div><div class="nd">GGUF 里的字符串<br>= "llama"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">LLM_ARCH_LLAMA</div><div class="nd">查 LLM_ARCH_NAMES<br>得到架构枚举</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">一套约定</div><div class="nd">KV 键 / 张量名 / 建图(L16)</div></div>
+</div>
+<p>落到源码（简化自 <span class="mono">src/llama-arch.{h,cpp}</span>）：</p>
+<pre class="code"><span class="cm">// 简化自 src/llama-arch.h / src/llama-arch.cpp</span>
+<span class="kw">enum</span> llm_arch { LLM_ARCH_LLAMA, LLM_ARCH_QWEN2, <span class="cm">/* ... 几十种 ... */</span> };
+<span class="cm">// LLM_ARCH_NAMES: 枚举 &lt;-&gt; 字符串</span>
+{ LLM_ARCH_LLAMA, <span class="st">"llama"</span> }, { LLM_ARCH_QWEN2, <span class="st">"qwen2"</span> }, <span class="cm">/* ... */</span></pre>
+<p>这张 <span class="mono">LLM_ARCH_NAMES</span> 表是双向的桥：写文件时（L02 转换脚本）把架构枚举翻成字符串写进 GGUF，读文件时把字符串翻回枚举。一个小小的字符串，就是<strong>整个后续流程的总开关</strong>——
+它一变，loader 找的键、建图用的函数全跟着变。所以你可以把 <span class="mono">general.architecture</span> 理解成模型在对引擎说："请按 llama 这套规矩来对待我。"</p>
+<p>为什么要用一个枚举、而不是到处用字符串比较？因为枚举又快又不易写错，且能当 <span class="mono">switch</span> / 表格的下标。llama.cpp 里大量"按架构分情况"的逻辑——读哪些超参、张量怎么命名、建图怎么拼——都靠这个枚举来分流。
+把"我是谁"收敛成一个枚举值，是让后面所有"按架构区别对待"的代码都能写得整齐的前提。</p>
+<p>顺带感受一下这套机制的容量：llama.cpp 支持的架构早已是<strong>几十种</strong>——llama、qwen、mistral、phi、gemma、deepseek、stablelm…… 全都靠这一个 <span class="mono">llm_arch</span> 枚举区分。
+新模型层出不穷，可它们绝大多数都是 transformer 的变体、差异有限；于是"再多一种架构"在引擎眼里，往往只是枚举里多一个值、表里多几行。这种"用一个枚举撑起一个生态"的容量，正是表驱动设计的威力。</p>
+<p>除了 <span class="mono">general.architecture</span>，GGUF 头里还有一批 <span class="mono">general.*</span> 的通用元信息（L13 提过）：模型名、整体量化档位、量化版本等。它们和架构枚举一起，构成了"这到底是个什么模型"的完整自我介绍。
+loader 一上来读的，正是这批通用信息加上架构相关的超参——前者认出"是谁"，后者量出"多大"。</p>
+<p>这条"字符串 &lt;-&gt; 枚举"的桥也解释了 L02 转换脚本在做的事之一：把一个 HuggingFace 模型转成 GGUF 时，脚本要判断它是哪种架构、把对应的字符串（如 <span class="mono">"llama"</span>）写进 <span class="mono">general.architecture</span>。
+写入方和读取方共用同一张 <span class="mono">LLM_ARCH_NAMES</span>，一写一读才能严丝合缝。这也是为什么有时一个全新架构的模型，需要先给 llama.cpp 加上对它的支持，转换脚本才认得、才转得出来。</p>
+
+<h2>超参 llama_hparams</h2>
+<p>知道了是哪种架构，还得知道<strong>具体尺寸</strong>：这个 llama 是 7B 还是 70B？多少层、多宽、每层几个头？这些数叫<strong>超参</strong>（hyperparameters），装在 <span class="mono">llama_hparams</span> 里，全部由上一课的 <span class="mono">get_key</span> 从 GGUF 的 KV 读出。</p>
+<table class="t">
+  <tr><th>超参</th><th>含义</th></tr>
+  <tr><td><span class="mono">n_embd</span></td><td>隐藏维度（一个 token 向量多宽）</td></tr>
+  <tr><td><span class="mono">n_layer()</span></td><td>层数（多少个 transformer block）</td></tr>
+  <tr><td><span class="mono">n_head(il)</span></td><td>第 il 层的注意力头数</td></tr>
+  <tr><td><span class="mono">n_head_kv(il)</span></td><td>第 il 层的 KV 头数（GQA 时 &lt; n_head）</td></tr>
+  <tr><td><span class="mono">n_ff(il)</span></td><td>第 il 层 FFN 的中间维度</td></tr>
+  <tr><td><span class="mono">rope_freq_base_train</span></td><td>RoPE 的频率基（位置编码，L16）</td></tr>
+</table>
+<pre class="code"><span class="cm">// 简化自 src/llama-hparams.h</span>
+<span class="kw">struct</span> llama_hparams {
+    uint32_t n_embd;  uint32_t n_ctx_train;  float rope_freq_base_train;  float f_norm_rms_eps;
+    std::array&lt;uint32_t, LLAMA_MAX_LAYERS&gt; n_head_arr, n_head_kv_arr, n_ff_arr; <span class="cm">// 按层存</span>
+    uint32_t n_layer() const;  uint32_t n_head(uint32_t il = 0) const;        <span class="cm">// 访问器, 不是字段!</span>
+};</pre>
+<p>这里有两个<strong>极易踩的坑</strong>，务必记牢。第一：<span class="mono">n_layer()</span>、<span class="mono">n_head(il)</span> 这些不是普通字段，而是<strong>访问器方法</strong>（注意有括号）。为什么？因为现代架构里，
+不同层的头数、注意力类型可能不一样（比如 GQA、滑窗层），所以头数按层存进 <span class="mono">n_head_arr</span> 这样的数组，取的时候要带层号 <span class="mono">il</span>。把它当成定值字段去用，迟早出错。</p>
+<p>第二个坑：<span class="mono">n_vocab</span>（词表大小）<strong>不在</strong> <span class="mono">llama_hparams</span> 里！它属于分词器，来自 <span class="mono">llama_vocab::n_tokens()</span>（L20 会讲）。很多人想当然以为词表大小是个超参，
+结果在 hparams 里翻半天找不到。记住：hparams 管的是"网络的形状"，词表是另一码事，归分词器管。</p>
+<p>这些超参一旦读出来，就成了整个推理的"尺寸基准"：建图（L16）时按 <span class="mono">n_layer()</span> 决定堆几层、按 <span class="mono">n_head(il)</span> 切多少个注意力头、按 <span class="mono">n_embd</span> 定各处矩阵的形状；
+KV cache（L19）按层数和 KV 头数算该开多大。可以说，hparams 是把"一个抽象的 transformer"具体化成"这一个模型"的那组数字。</p>
+<p>顺便厘清"参数量"和超参的关系。我们常说的 7B、70B，指的是模型权重里浮点数的<strong>总个数</strong>（70 亿、700 亿）；而这个总数，正是由超参算出来的——大致是 <span class="mono">n_layer</span> × 每层各权重矩阵尺寸之和，
+而每个矩阵的尺寸又由 <span class="mono">n_embd</span>、<span class="mono">n_ff</span> 等决定。所以超参不是一堆孤立的数字，它们<strong>共同决定了模型有多大</strong>。读懂超参，你就能从一个模型的几个数，估出它要吃多少显存。</p>
+<p>表里没列全的超参还有不少，各有用处：<span class="mono">n_ctx_train</span> 是模型训练时的上下文长度（你能开多长上下文的参考上限）；<span class="mono">f_norm_rms_eps</span> 是 RMSNorm 里防止除零的小常数（L11 的归一化用到）；<span class="mono">n_rot</span> 是 RoPE 实际旋转的维数。
+这些数看着琐碎，却个个都会在建图（L16）时被某个算子精确用到——少一个、错一个，算出来的就不是这个模型了。</p>
+<p>再说一句那个默认参数 <span class="mono">il = 0</span>：它让"对每层都一样"的简单模型用起来很省事——不传层号，默认取第 0 层（也就是所有层）的值。所以接口虽然是"按层取"，对老实的同构模型并不啰嗦。
+这是个体贴的设计：复杂情况能表达，简单情况不添乱。</p>
+<p>这里特别值得记住 <span class="mono">n_head_kv</span> 的意义：它直接决定 KV cache 有多大。GQA 的思路就是让多个 Q 头<strong>共享</strong>一组 K/V，于是 KV 头数远少于 Q 头数，KV cache 也就成倍变小（L19 会细讲）。
+所以读一个模型的超参时，<span class="mono">n_head</span> 和 <span class="mono">n_head_kv</span> 的比值，几乎就告诉了你"这个模型对长上下文友不友好"。一个看似不起眼的超参，背后是显存与速度的大账。</p>
+
+<h2>张量命名约定</h2>
+<p>最后一块拼图：loader 读出的张量怎么<strong>按名字</strong>对上模型结构？靠一套命名约定。每个张量在文件里都有名字，而这些名字不是随便起的，遵循 <span class="mono">LLM_TENSOR_NAMES</span> 定义的模板。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>张量名模板（LLM_TENSOR_NAMES）</b>：按部件 + 层号命名，建图时照名取权重</div>
+  <div class="cells"><span class="lab">名字</span><span class="cell hl">token_embd</span><span class="cell">blk.0.attn_q</span><span class="cell">blk.0.ffn_gate</span><span class="cell">output_norm</span></div>
+</div>
+<p>看这几个名字就懂了规律：<span class="mono">token_embd</span> 是词嵌入表（开头那层），<span class="mono">blk.0.attn_q</span> 是第 0 层的注意力 Q 投影、<span class="mono">blk.0.ffn_gate</span> 是第 0 层 FFN 的门控、<span class="mono">output_norm</span> 是最后的输出归一。
+名字里 <span class="mono">blk.%d</span> 的 <span class="mono">%d</span> 会被层号填进去——这正是 <span class="mono">n_layer()</span> 派上用场的地方：循环 0 到 n_layer()，每层按模板拼出该层各张量的名字。</p>
+<p>名字由一个叫 <span class="mono">LLM_TN</span> 的小构造器拼出来（它的 <span class="mono">tn(...)</span> 调用，把"部件 + 后缀 + 层号"组装成完整张量名）。建图（L16）时，每要一个权重，就用这个构造器拼出名字、去上一课的 <span class="mono">weights_map</span> 里查——
+这就把"加载"和"建图"两课用名字这根线<strong>串了起来</strong>：loader 按名字存，建图按名字取，中间靠 <span class="mono">LLM_TENSOR_NAMES</span> 这份共同约定对齐。</p>
+<p>这也回答了上一课留的悬念——为什么 <span class="mono">weights_map</span> 要按名字索引。因为名字是<strong>稳定的契约</strong>：换个导出工具、张量排列变了也不怕，只要名字这套约定不变，建图就总能精确取到它要的那块权重。
+名字这层抽象，把"权重物理上躺在哪"和"逻辑上是哪个部件"彻底解耦了。</p>
+<p>把一层 transformer 的张量名列全，规律就更清楚了：注意力部分有 <span class="mono">attn_q</span>/<span class="mono">attn_k</span>/<span class="mono">attn_v</span>/<span class="mono">attn_output</span> 四个投影、加一个 <span class="mono">attn_norm</span>；FFN 部分有 <span class="mono">ffn_gate</span>/<span class="mono">ffn_up</span>/<span class="mono">ffn_down</span> 三个矩阵、加一个 <span class="mono">ffn_norm</span>。
+每一层都按这套模板复制一遍，前面加 <span class="mono">blk.层号.</span>。看懂这张"一层有哪些权重"的清单，你就看懂了 transformer 一个 block 的全部可学习参数。</p>
+<p>为什么用 <span class="mono">.</span> 点号分层级命名（<span class="mono">blk.0.attn_q.weight</span>）？因为这天然形成一棵<strong>层级树</strong>：<span class="mono">blk</span> 下是各层、层下是各部件、部件下是 weight/bias。这种命名既清晰、又方便按前缀批量匹配——
+比如想找第 0 层的所有权重，匹配 <span class="mono">blk.0.</span> 前缀即可。一个好的命名约定，不只是"起个名"，而是把结构信息编码进了名字本身。</p>
+<p>这套命名还是<strong>跨架构通用</strong>的：不管 llama 还是 qwen2，第 0 层的注意力 Q 投影都叫 <span class="mono">blk.0.attn_q</span>。正因为大家共享同一套名字，针对张量的通用工具（量化、转换、可视化）才能不区分架构地处理任意模型。</p>
+<p>再补一点 <span class="mono">LLM_TN</span> 的细节：它拼出的完整名字通常还带个后缀，区分 <span class="mono">.weight</span> 和 <span class="mono">.bias</span>——同一个部件可能有权重、也可能有偏置。所以 <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> 拼出的是 <span class="mono">blk.il.attn_q.weight</span>。
+把"部件名模板 + 后缀 + 层号"三者交给一个构造器统一拼，既避免了到处手写字符串容易出的错，也让"改个命名规则"只需动一处。</p>
+<p>顺便提一句：有些张量是<strong>可选</strong>的——比如不少现代模型的线性层没有 bias，那 <span class="mono">.bias</span> 那个张量在文件里就根本不存在。建图时按架构知道"这层该有哪些张量"，缺的可选项就跳过。
+命名约定加上"哪些必需、哪些可选"的知识，才完整描述了一个架构的张量构成。</p>
+
+<h2>自描述如何在架构层兑现</h2>
+<p>把三样东西连起来看，L13 说的"<strong>自描述</strong>"就在架构层完整兑现了：<span class="mono">general.architecture</span> 选定 arch；带 <span class="mono">%s</span> 的 KV 键（如 <span class="mono">llama.block_count</span>）用架构名填模板、由 <span class="mono">get_key</span> 读出超参；
+张量按 <span class="mono">LLM_TENSOR_NAMES</span> 命名一一对上。三套约定一咬合，loader 读出的"一堆张量"就成了"一个有名有姓、有形有状的具体模型"，随时可以交给 L16 建图。</p>
+<p>值得回味的是这种设计的"<strong>表驱动</strong>"味道：架构是一张名字表、键是一张键名表、张量是一张张量名表。引擎的主干代码不写死任何一种模型，而是"照表办事"。于是支持一个新模型，多半不是改引擎，而是<strong>往这几张表里加几行 + 写一份建图</strong>（L16）。</p>
+<p>设想一下如果<strong>不</strong>用表驱动会怎样：每支持一种新模型，就得在引擎主干里写一堆 <span class="mono">if (arch == "llama") ... else if (arch == "qwen2") ...</span> 的分支，读超参、命名张量、建图处处都要改。模型一多，这些分支就会织成一张谁也不敢动的网。
+表驱动把这些差异从"散落在代码各处的 if"收进"集中的几张表 + 一份建图文件"，于是主干代码读起来始终是"照表办事"，清清爽爽。</p>
+<p>这套"<strong>识别架构 -&gt; 读超参 -&gt; 按名取张量</strong>"的三步，其实是任何"通用模型加载器"都绕不开的骨架：先搞清是什么、再量出多大、最后把零件对号入座。llama.cpp 把这三步做得极其干净，正是它能在短时间内追上一个又一个新模型的工程根基。
+下一课，我们就拿着这份"图纸 + 规格表 + 零件清单"，真正动手把它们拼成一张能算的前向计算图。</p>
+<p>把这一课和上一课连起来看，会发现一条清晰的主线：L14 的 loader 把字节变成"带名字的张量"，L15 的 arch/hparams 给这些张量配上"图纸和规格"。到这里，模型已经从"磁盘上的一个文件"变成了"内存里一个有名有姓、知道自己几层多宽的对象"——
+只差最后一步：把这些零件按图纸真正拼成一张能算的网络。那正是下一课的事。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么 n_head 写成 n_head(il) 带层号？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为现代架构里，不同层的注意力配置可能不一样。最常见的是 <strong>GQA</strong>（分组查询注意力）：Q 头多、KV 头少，于是 <span class="mono">n_head_kv(il)</span> 会小于 <span class="mono">n_head(il)</span>，用来省 KV cache（L19）。</p>
+    <p>还有些架构是<strong>混合</strong>的：某些层用全注意力、某些层用滑动窗口，各层的头数、窗口大小都可能不同。要表达这种"逐层不同"，最干净的办法就是把这些数存成<strong>按层的数组</strong>（<span class="mono">n_head_arr</span> 等），取的时候带上层号 <span class="mono">il</span>。</p>
+    <p>所以 <span class="mono">n_head(il)</span> 是个方法、不是字段——它背后从数组里按层号取值。对大多数老实的同构模型，每层都一样，<span class="mono">il</span> 取默认 0 即可；但接口设计成按层取，才容得下那些"逐层不同"的新架构。这是个"为通用性留余地"的典型取舍。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 加一个新架构，要改哪几处？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>大致四步，且大多是"填表"：① 在 <span class="mono">enum llm_arch</span> 里加一项、在 <span class="mono">LLM_ARCH_NAMES</span> 里加它的名字；② 实现这架构的超参读取（从 KV 把它特有的几个超参读进 hparams）；③ 把它用到的张量在张量名表里登记；④ 写一份建图（L16，<span class="mono">src/models/&lt;arch&gt;.cpp</span>）。</p>
+    <p>关键是<strong>第④步往往很轻</strong>：因为绝大多数架构用的是同一批积木（注意力、FFN、归一化），新架构多半只是"换个拼法"，能复用现成的 <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>（L16）。只有遇到真正新颖的结构，才需要补一两个新算子（L11）。</p>
+    <p>这就是为什么 llama.cpp 能跟上层出不穷的新模型：大部分"新架构"在工程上其实是"<strong>填几张表 + 复用积木</strong>"，引擎主干纹丝不动。把"模型的多样性"收进表和建图文件，把"不变的机制"留在主干——这是这套设计最省力的地方。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 张量命名约定为什么这么重要？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为它是<strong>三方共享的契约</strong>。写入方（L02 的转换脚本）按这套名字把权重写进 GGUF；读取方（L14 的 loader）按名字建 <span class="mono">weights_map</span>；建图方（L16）按名字取权重。三方只要都遵守同一套 <span class="mono">LLM_TENSOR_NAMES</span>，就能严丝合缝地对上。</p>
+    <p>正因为有这套约定，"权重"和"代码"才解耦了：你换个工具导出、张量在文件里顺序不同，都不影响——只要名字对得上，建图就能取到对的料。名字成了模型各部件的"身份证"，比"第几个张量"这种脆弱的下标稳得多。</p>
+    <p>它也呼应了 L13 的自描述精神：模型不光自带超参、词表，连"每块权重是哪个部件"都用名字标得明明白白。读懂了命名约定，你再去看任何模型的张量列表，都能<strong>一眼认出</strong>哪个是第几层的什么——这是读 llama.cpp 模型的一项基本功。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llm_arch</span> 由 GGUF 的 <span class="mono">general.architecture</span> 选定（<span class="mono">"llama"</span> -&gt; <span class="mono">LLM_ARCH_LLAMA</span>），决定后续用哪套约定与建图。</li>
+    <li><span class="mono">llama_hparams</span> 给规格（n_embd / n_layer() / n_head(il) ...）；<span class="mono">n_layer()</span>/<span class="mono">n_head(il)</span> 是<strong>方法</strong>（按层），<span class="mono">n_vocab</span> <strong>不在</strong>其中（来自 vocab，L20）。</li>
+    <li>张量按 <span class="mono">LLM_TENSOR_NAMES</span> 命名（<span class="mono">token_embd</span>/<span class="mono">blk.N.attn_q</span>/<span class="mono">output_norm</span>），由 <span class="mono">LLM_TN</span> 的 <span class="mono">tn()</span> 拼出。</li>
+    <li>三者咬合 = 自描述兑现：选 arch、填模板读超参、按名字对张量，"一堆张量"成"具体模型"。</li>
+    <li>加新架构 ≈ 往这几张表加几行 + 写一份建图（L16），引擎主干不动。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"模型长什么样"编码成<strong>三张表</strong>——架构名表、键名表、张量名表——于是一套引擎代码能读懂几十种架构。这是典型的<strong>表驱动</strong>设计：把"会变的部分"（不同模型的差异）集中进数据（表），让"不变的机制"（读取、建图、执行）留在代码里。
+  它和 L05/L12 那条"结构不变、可换的部分集中起来"的思路一脉相承——只不过这次可换的不是数据类型，而是<strong>整个模型架构</strong>。读懂了这一课，你就明白了 llama.cpp"海纳百川"的底层套路。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. GGUF 里哪个 KV 决定按哪套架构建图？</div>
+  <ol class="opts">
+    <li>general.name</li>
+    <li>general.architecture（如 "llama"、"qwen2"）</li>
+    <li>version</li>
+    <li>general.file_type</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。loader 读出 general.architecture 字符串，在 LLM_ARCH_NAMES 里查得 LLM_ARCH_LLAMA 等枚举；这个枚举决定后续用哪套 KV/张量约定与建图函数（L16）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 为什么 hparams 把头数写成 n_head(il) 带层号？</div>
+  <ol class="opts">
+    <li>不同层的头数/注意力类型可能不同（GQA、滑窗），按层取最通用</li>
+    <li>为了让推理更快</li>
+    <li>随机决定的</li>
+    <li>写错了，应该是字段</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。现代架构里各层注意力配置可能不同（GQA 让 KV 头少于 Q 头、混合架构逐层不同），所以头数按层存进 n_head_arr，n_head(il) 是按层取值的访问器方法（不是字段）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 加载器怎么把文件里的张量对应到模型结构？</div>
+  <ol class="opts">
+    <li>按文件里的张量顺序</li>
+    <li>靠 LLM_TENSOR_NAMES 的命名约定（token_embd / blk.N.attn_q ...）按名字在 weights_map 里查</li>
+    <li>按张量大小排序</li>
+    <li>随机匹配</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。张量名遵循 LLM_TENSOR_NAMES 模板（blk.%d 里填层号），由 LLM_TN 的 tn() 拼出；建图按名字去 weights_map 取权重。名字是稳定契约，跨工具、跨分片都不怕。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>llm_arch、llama_hparams、LLM_TENSOR_NAMES 三者各管什么？它们怎么合起来把“一堆张量”变成“一个具体可建图的模型”？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson the loader read the weights into a "name-indexed tensor list", but how do those tensors know which <strong>architecture</strong> they belong to (llama? qwen2?), and which parts each layer has? This lesson covers two things: <span class="mono">llama-arch</span>
+(architecture identity + key-name convention + tensor-name convention - three tables) and <span class="mono">llama-hparams</span> (how many layers, how wide, how many heads per layer) - together the <strong>blueprint</strong> that turns "a pile of tensors" into "a concrete, graph-able model".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Why a whole lesson on these two? Because they are the secret behind llama.cpp reading <strong>dozens of models with one codebase</strong>. Both are transformers, yet the difference between llama and qwen2 essentially hides in "which conventions, how many layers/wide, how tensors are named".
+Get this lesson and you understand how a new model "plugs into" the engine.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Architecture and hyperparameters are like a <strong>blueprint + spec sheet</strong>: the blueprint (<span class="mono">llm_arch</span> + tensor naming convention) says "which kind of building, which parts per floor, what each is named"; the spec sheet (<span class="mono">hparams</span>) gives the dimensions -
+  "how many floors, how wide, how many attention heads per floor". Last lesson's loader is like a stack of labeled materials ready to go, and this lesson's blueprint and spec sheet tell it <strong>which part to fetch by what name, and at what size to assemble</strong>.
+</div>
+
+<h2>Architecture identity: llm_arch</h2>
+<p>It all starts with one question: given a model, how do you know it is llama or qwen2? The answer is in that GGUF metadata key from L13, <span class="mono">general.architecture</span>. It is a string (e.g. <span class="mono">"llama"</span>); the loader reads it, looks it up in a name table,
+and gets the matching <strong>architecture enum</strong> <span class="mono">LLM_ARCH_LLAMA</span>. Once that enum is fixed, which key names, which tensor names, and which graph builder (L16) to use are all fixed.</p>
+<div class="flow">
+  <div class="node"><div class="nt">general.architecture</div><div class="nd">string in GGUF<br>= "llama"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">LLM_ARCH_LLAMA</div><div class="nd">look up LLM_ARCH_NAMES<br>get the arch enum</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">one set of conventions</div><div class="nd">KV keys / tensor names / graph(L16)</div></div>
+</div>
+<p>In source (simplified from <span class="mono">src/llama-arch.{h,cpp}</span>):</p>
+<pre class="code"><span class="cm">// simplified from src/llama-arch.h / src/llama-arch.cpp</span>
+<span class="kw">enum</span> llm_arch { LLM_ARCH_LLAMA, LLM_ARCH_QWEN2, <span class="cm">/* ... dozens ... */</span> };
+<span class="cm">// LLM_ARCH_NAMES: enum &lt;-&gt; string</span>
+{ LLM_ARCH_LLAMA, <span class="st">"llama"</span> }, { LLM_ARCH_QWEN2, <span class="st">"qwen2"</span> }, <span class="cm">/* ... */</span></pre>
+<p>This <span class="mono">LLM_ARCH_NAMES</span> table is a two-way bridge: on write (L02's conversion script) it turns the arch enum into a string written into GGUF; on read it turns the string back into an enum. A tiny string is the <strong>master switch for everything downstream</strong> -
+change it and the keys the loader seeks and the function used to build the graph all change with it. So you can read <span class="mono">general.architecture</span> as the model telling the engine: "please treat me by the llama rules."</p>
+<p>Why an enum rather than string comparisons everywhere? Because an enum is fast, hard to mistype, and can index a <span class="mono">switch</span> / a table. The many "branch by architecture" decisions in llama.cpp - which hyperparameters to read, how tensors are named, how the graph is assembled - all route off this enum.
+Collapsing "who am I" into one enum value is what lets all the later "treat each architecture differently" code stay tidy.</p>
+<p>Get a feel for this mechanism's capacity: llama.cpp already supports <strong>dozens</strong> of architectures - llama, qwen, mistral, phi, gemma, deepseek, stablelm... - all distinguished by this one <span class="mono">llm_arch</span> enum.
+New models keep appearing, but the vast majority are transformer variants with limited differences; so "one more architecture" is, to the engine, often just one more enum value and a few more table rows. That capacity of "one enum holding up an ecosystem" is the power of table-driven design.</p>
+<p>Beyond <span class="mono">general.architecture</span>, the GGUF header carries a set of generic <span class="mono">general.*</span> metadata (mentioned in L13): model name, overall quantization level, quantization version, and so on. Together with the architecture enum, they form a complete self-introduction of "what this model even is".
+What the loader reads first is exactly this generic info plus the architecture-specific hyperparameters - the former recognizes "who", the latter measures "how big".</p>
+<p>This "string &lt;-&gt; enum" bridge also explains one thing L02's conversion script does: when converting a HuggingFace model to GGUF, the script must decide which architecture it is and write the matching string (e.g. <span class="mono">"llama"</span>) into <span class="mono">general.architecture</span>.
+Writer and reader share the same <span class="mono">LLM_ARCH_NAMES</span>, so write and read mesh perfectly. This is also why a brand-new architecture sometimes needs support added to llama.cpp first, before the conversion script recognizes and can convert it.</p>
+
+<h2>Hyperparameters: llama_hparams</h2>
+<p>Knowing the architecture, you still need the <strong>concrete dimensions</strong>: is this llama 7B or 70B? How many layers, how wide, how many heads per layer? These numbers are the <strong>hyperparameters</strong>, held in <span class="mono">llama_hparams</span>, all read from the GGUF KVs by last lesson's <span class="mono">get_key</span>.</p>
+<table class="t">
+  <tr><th>hyperparameter</th><th>meaning</th></tr>
+  <tr><td><span class="mono">n_embd</span></td><td>hidden dimension (how wide a token vector is)</td></tr>
+  <tr><td><span class="mono">n_layer()</span></td><td>layer count (how many transformer blocks)</td></tr>
+  <tr><td><span class="mono">n_head(il)</span></td><td>attention head count of layer il</td></tr>
+  <tr><td><span class="mono">n_head_kv(il)</span></td><td>KV head count of layer il (&lt; n_head under GQA)</td></tr>
+  <tr><td><span class="mono">n_ff(il)</span></td><td>FFN intermediate dim of layer il</td></tr>
+  <tr><td><span class="mono">rope_freq_base_train</span></td><td>RoPE frequency base (position encoding, L16)</td></tr>
+</table>
+<pre class="code"><span class="cm">// simplified from src/llama-hparams.h</span>
+<span class="kw">struct</span> llama_hparams {
+    uint32_t n_embd;  uint32_t n_ctx_train;  float rope_freq_base_train;  float f_norm_rms_eps;
+    std::array&lt;uint32_t, LLAMA_MAX_LAYERS&gt; n_head_arr, n_head_kv_arr, n_ff_arr; <span class="cm">// stored per layer</span>
+    uint32_t n_layer() const;  uint32_t n_head(uint32_t il = 0) const;        <span class="cm">// accessors, not fields!</span>
+};</pre>
+<p>There are two <strong>easy traps</strong> here, worth memorizing. First: <span class="mono">n_layer()</span>, <span class="mono">n_head(il)</span> are not plain fields but <strong>accessor methods</strong> (note the parentheses). Why? Because in modern architectures different layers may have different head counts or attention types (GQA, sliding-window layers),
+so head counts are stored per layer in arrays like <span class="mono">n_head_arr</span>, fetched with a layer index <span class="mono">il</span>. Treat it as a constant field and you will eventually be wrong.</p>
+<p>Second trap: <span class="mono">n_vocab</span> (vocab size) is <strong>not</strong> in <span class="mono">llama_hparams</span>! It belongs to the tokenizer, from <span class="mono">llama_vocab::n_tokens()</span> (L20). Many assume vocab size is a hyperparameter and then search hparams in vain.
+Remember: hparams govern "the shape of the network"; the vocab is a separate matter, owned by the tokenizer.</p>
+<p>Once read, these hyperparameters become the inference's "size baseline": graph-building (L16) stacks layers by <span class="mono">n_layer()</span>, splits heads by <span class="mono">n_head(il)</span>, sets matrix shapes by <span class="mono">n_embd</span>;
+the KV cache (L19) sizes itself by layer count and KV head count. In short, hparams are the set of numbers that turn "an abstract transformer" into "this particular model".</p>
+<p>While we are at it, untangle "parameter count" from hyperparameters. The 7B, 70B we casually say refers to the <strong>total count</strong> of floats in the model's weights (7 billion, 70 billion); and that total is computed from the hyperparameters - roughly <span class="mono">n_layer</span> x the sum of each layer's weight-matrix sizes,
+where each matrix's size is set by <span class="mono">n_embd</span>, <span class="mono">n_ff</span>, etc. So hyperparameters are not isolated numbers; together they <strong>determine how big the model is</strong>. Read the hyperparameters and you can estimate a model's VRAM appetite from just a few numbers.</p>
+<p>Plenty of hyperparameters the table omits each have their use: <span class="mono">n_ctx_train</span> is the context length the model was trained at (a reference ceiling for how long a context you can open); <span class="mono">f_norm_rms_eps</span> is the small constant in RMSNorm that avoids divide-by-zero (used by L11's normalization); <span class="mono">n_rot</span> is the number of dimensions RoPE actually rotates.
+These look trivial, yet each is used precisely by some operator at graph time (L16) - miss one or get one wrong, and what you compute is no longer this model.</p>
+<p>One more word on that default <span class="mono">il = 0</span>: it makes the common "same for every layer" model effortless - pass no index, and it defaults to layer 0's (i.e. every layer's) value. So although the interface is "fetch per layer", it is not verbose for honest homogeneous models.
+A considerate design: it can express the complex case without cluttering the simple one.</p>
+<p>Worth specially remembering is what <span class="mono">n_head_kv</span> means: it directly decides how big the KV cache is. GQA's idea is to let several Q heads <strong>share</strong> one set of K/V, so KV heads are far fewer than Q heads, and the KV cache shrinks several-fold (L19 covers this).
+So reading a model's hyperparameters, the ratio of <span class="mono">n_head</span> to <span class="mono">n_head_kv</span> nearly tells you "how friendly this model is to long context". A seemingly minor hyperparameter, with a big VRAM-and-speed account behind it.</p>
+
+<h2>Tensor naming convention</h2>
+<p>The last piece: how do the loader's tensors line up <strong>by name</strong> with the model structure? Via a naming convention. Every tensor in the file has a name, and these names are not arbitrary - they follow the templates defined in <span class="mono">LLM_TENSOR_NAMES</span>.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>tensor-name templates (LLM_TENSOR_NAMES)</b>: named by part + layer index; graph-building fetches weights by name</div>
+  <div class="cells"><span class="lab">name</span><span class="cell hl">token_embd</span><span class="cell">blk.0.attn_q</span><span class="cell">blk.0.ffn_gate</span><span class="cell">output_norm</span></div>
+</div>
+<p>These names reveal the pattern: <span class="mono">token_embd</span> is the token-embedding table (the first layer), <span class="mono">blk.0.attn_q</span> is layer 0's attention Q projection, <span class="mono">blk.0.ffn_gate</span> is layer 0's FFN gate, <span class="mono">output_norm</span> is the final output norm.
+The <span class="mono">%d</span> in <span class="mono">blk.%d</span> is filled with the layer index - exactly where <span class="mono">n_layer()</span> earns its keep: loop 0 to n_layer(), and per layer build that layer's tensor names from the templates.</p>
+<p>Names are built by a small constructor called <span class="mono">LLM_TN</span> (its <span class="mono">tn(...)</span> call assembles "part + suffix + layer index" into a full tensor name). At graph time (L16), each time a weight is needed, this constructor builds the name and looks it up in last lesson's <span class="mono">weights_map</span> -
+which <strong>strings together</strong> the "loading" and "graph" lessons via names: the loader stores by name, the graph fetches by name, aligned through the shared <span class="mono">LLM_TENSOR_NAMES</span> convention.</p>
+<p>This also answers last lesson's cliffhanger - why <span class="mono">weights_map</span> is keyed by name. Because a name is a <strong>stable contract</strong>: a different export tool, a different tensor order, no problem - as long as the naming convention holds, graph-building can always fetch the exact weight it wants.
+That layer of naming fully decouples "where a weight physically sits" from "which part it logically is".</p>
+<p>List a transformer layer's tensor names in full and the pattern is clearer still: the attention part has four projections <span class="mono">attn_q</span>/<span class="mono">attn_k</span>/<span class="mono">attn_v</span>/<span class="mono">attn_output</span> plus an <span class="mono">attn_norm</span>; the FFN part has three matrices <span class="mono">ffn_gate</span>/<span class="mono">ffn_up</span>/<span class="mono">ffn_down</span> plus an <span class="mono">ffn_norm</span>.
+Every layer replicates this template, prefixed with <span class="mono">blk.&lt;index&gt;.</span>. Understand this "what weights a layer has" list and you understand all the learnable parameters of one transformer block.</p>
+<p>Why dot-separated hierarchical names (<span class="mono">blk.0.attn_q.weight</span>)? Because it naturally forms a <strong>hierarchy tree</strong>: under <span class="mono">blk</span> are the layers, under a layer the parts, under a part weight/bias. Such naming is both clear and convenient for prefix matching in bulk -
+to find all of layer 0's weights, match the <span class="mono">blk.0.</span> prefix. A good naming convention is not just "giving a name"; it encodes structural information into the name itself.</p>
+<p>This naming is also <strong>cross-architecture</strong>: whether llama or qwen2, layer 0's attention Q projection is named <span class="mono">blk.0.attn_q</span>. Because everyone shares one naming set, generic tensor tools (quantization, conversion, visualization) can process any model without caring about architecture.</p>
+<p>A bit more <span class="mono">LLM_TN</span> detail: the full name it builds usually carries a suffix too, distinguishing <span class="mono">.weight</span> from <span class="mono">.bias</span> - a part may have a weight and possibly a bias. So <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> builds <span class="mono">blk.il.attn_q.weight</span>.
+Handing "part-name template + suffix + layer index" to one constructor avoids the errors of hand-writing strings everywhere, and means "changing a naming rule" touches just one place.</p>
+<p>By the way: some tensors are <strong>optional</strong> - many modern models' linear layers have no bias, so the <span class="mono">.bias</span> tensor simply does not exist in the file. At graph time, the architecture knows "which tensors this layer should have", and missing optional ones are skipped.
+The naming convention plus knowledge of "which are required, which optional" together fully describe an architecture's tensor makeup.</p>
+
+<h2>How self-description cashes out at the architecture layer</h2>
+<p>Connect the three things and L13's "<strong>self-description</strong>" cashes out fully at the architecture layer: <span class="mono">general.architecture</span> selects the arch; <span class="mono">%s</span> keys (like <span class="mono">llama.block_count</span>) fill the template with the arch name and are read by <span class="mono">get_key</span> into hyperparameters;
+tensors line up by their <span class="mono">LLM_TENSOR_NAMES</span> names. Once the three conventions mesh, the loader's "pile of tensors" becomes "a concrete model with names, shapes, and sizes", ready to hand to L16 for graph-building.</p>
+<p>What is worth savoring is the <strong>table-driven</strong> flavor of this design: architecture is a name table, keys are a key-name table, tensors are a tensor-name table. The engine's trunk hard-codes no single model; it "acts by the tables". So supporting a new model is mostly not editing the engine, but <strong>adding a few rows to these tables + writing one graph builder</strong> (L16).</p>
+<p>Imagine if it were <strong>not</strong> table-driven: every new model would mean a pile of <span class="mono">if (arch == "llama") ... else if (arch == "qwen2") ...</span> branches in the engine trunk - reading hyperparameters, naming tensors, building graphs, all needing edits everywhere. With enough models, those branches weave into a web no one dares touch.
+Table-driven design gathers these differences from "ifs scattered through the code" into "a few centralized tables + one graph file", so the trunk code always reads as "act by the tables" - clean and clear.</p>
+<p>These three steps - "<strong>recognize the architecture -&gt; read hyperparameters -&gt; fetch tensors by name</strong>" - are really the inescapable skeleton of any "general model loader": first figure out what it is, then measure how big, finally slot the parts into place. llama.cpp does these three exceptionally cleanly, the engineering basis for it catching up to one new model after another so quickly.
+Next lesson, carrying this "blueprint + spec sheet + parts list", we actually assemble them into a runnable forward compute graph.</p>
+<p>Connecting this lesson with the last reveals a clear through-line: L14's loader turns bytes into "named tensors", and L15's arch/hparams give those tensors "a blueprint and spec". By here, the model has gone from "a file on disk" to "an in-memory object with names, knowing how many layers and how wide it is" -
+one step short: actually assembling these parts by the blueprint into a runnable network. That is exactly the next lesson.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why is n_head written as n_head(il) with a layer index? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because in modern architectures different layers may have different attention configs. The most common is <strong>GQA</strong> (grouped-query attention): many Q heads, few KV heads, so <span class="mono">n_head_kv(il)</span> is smaller than <span class="mono">n_head(il)</span>, used to shrink the KV cache (L19).</p>
+    <p>Some architectures are <strong>hybrid</strong>: some layers use full attention, others sliding windows, with different head counts and window sizes per layer. To express this "per-layer difference", the cleanest way is to store these numbers as <strong>per-layer arrays</strong> (<span class="mono">n_head_arr</span> etc.), fetched with the layer index <span class="mono">il</span>.</p>
+    <p>So <span class="mono">n_head(il)</span> is a method, not a field - behind it, a value is pulled from an array by layer index. For most honest homogeneous models every layer is the same and <span class="mono">il</span> defaults to 0; but designing the interface to fetch per layer is what accommodates those "per-layer different" new architectures. A classic "leave room for generality" trade-off.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What does adding a new architecture touch? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Roughly four steps, mostly "filling tables": (1) add an entry to <span class="mono">enum llm_arch</span> and its name to <span class="mono">LLM_ARCH_NAMES</span>; (2) implement this architecture's hyperparameter reading (read its specific hyperparameters from the KVs into hparams); (3) register the tensors it uses in the tensor-name table; (4) write one graph builder (L16, <span class="mono">src/models/&lt;arch&gt;.cpp</span>).</p>
+    <p>The key is that <strong>step (4) is often light</strong>: because the vast majority of architectures use the same building blocks (attention, FFN, normalization), a new architecture is mostly "a different arrangement", reusing the existing <span class="mono">build_attn</span>/<span class="mono">build_ffn</span> (L16). Only a truly novel structure needs one or two new operators (L11).</p>
+    <p>This is why llama.cpp keeps up with the endless stream of new models: most "new architectures" are, in engineering terms, "<strong>fill a few tables + reuse blocks</strong>", with the engine trunk untouched. Folding "model diversity" into tables and graph files, and keeping "the invariant machinery" in the trunk - that is where this design saves the most effort.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why is the tensor naming convention so important? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because it is a <strong>three-party contract</strong>. The writer (L02's conversion script) writes weights into GGUF by these names; the reader (L14's loader) builds <span class="mono">weights_map</span> by name; the graph builder (L16) fetches weights by name. As long as all three honor the same <span class="mono">LLM_TENSOR_NAMES</span>, they line up perfectly.</p>
+    <p>Because of this convention, "weights" and "code" are decoupled: export with a different tool, a different tensor order in the file - none of it matters, as long as names match, graph-building fetches the right material. A name becomes each part's "ID card", far steadier than the fragile "which-th tensor" index.</p>
+    <p>It also echoes L13's self-description spirit: a model carries not only its hyperparameters and vocab but even labels "which part each weight is" clearly by name. Read the naming convention and, looking at any model's tensor list, you can <strong>recognize at a glance</strong> which is what of which layer - a basic skill for reading llama.cpp models.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llm_arch</span> is selected by GGUF's <span class="mono">general.architecture</span> (<span class="mono">"llama"</span> -&gt; <span class="mono">LLM_ARCH_LLAMA</span>), deciding the conventions and graph builder used.</li>
+    <li><span class="mono">llama_hparams</span> gives the spec (n_embd / n_layer() / n_head(il) ...); <span class="mono">n_layer()</span>/<span class="mono">n_head(il)</span> are <strong>methods</strong> (per layer), and <span class="mono">n_vocab</span> is <strong>not</strong> among them (from vocab, L20).</li>
+    <li>Tensors are named by <span class="mono">LLM_TENSOR_NAMES</span> (<span class="mono">token_embd</span>/<span class="mono">blk.N.attn_q</span>/<span class="mono">output_norm</span>), built by <span class="mono">LLM_TN</span>'s <span class="mono">tn()</span>.</li>
+    <li>The three meshing = self-description cashed out: pick arch, fill templates to read hyperparameters, line up tensors by name; "a pile of tensors" becomes "a concrete model".</li>
+    <li>Adding a new architecture ~= add a few rows to these tables + write one graph builder (L16), engine trunk untouched.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Encoding "what a model looks like" into <strong>three tables</strong> - an arch-name table, a key-name table, a tensor-name table - lets one engine codebase read dozens of architectures. This is classic <strong>table-driven</strong> design: fold "the parts that vary" (differences between models) into data (tables), and keep "the invariant machinery" (reading, graph-building, execution) in code.
+  It is of a piece with that L05/L12 idea of "structure fixed, the swappable parts gathered together" - only this time what is swappable is not a data type but <strong>an entire model architecture</strong>. Get this lesson and you understand llama.cpp's underlying recipe for "taking in all rivers".
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which GGUF KV decides which architecture's graph to build?</div>
+  <ol class="opts">
+    <li>general.name</li>
+    <li>general.architecture (e.g. "llama", "qwen2")</li>
+    <li>version</li>
+    <li>general.file_type</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The loader reads the general.architecture string and looks it up in LLM_ARCH_NAMES to get an enum like LLM_ARCH_LLAMA; that enum decides the KV/tensor conventions and graph builder used (L16).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does hparams write head count as n_head(il) with a layer index?</div>
+  <ol class="opts">
+    <li>different layers may have different head counts/attention types (GQA, sliding-window), so per-layer is most general</li>
+    <li>to make inference faster</li>
+    <li>decided at random</li>
+    <li>it is a typo; it should be a field</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. In modern architectures per-layer attention configs can differ (GQA gives fewer KV than Q heads; hybrids differ by layer), so head counts are stored per layer in n_head_arr, and n_head(il) is an accessor method (not a field) fetching by layer.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does the loader map a file's tensors onto the model structure?</div>
+  <ol class="opts">
+    <li>by the tensor order in the file</li>
+    <li>by the LLM_TENSOR_NAMES naming convention (token_embd / blk.N.attn_q ...), looking up weights_map by name</li>
+    <li>by sorting on tensor size</li>
+    <li>by random matching</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Tensor names follow LLM_TENSOR_NAMES templates (blk.%d filled with the layer index), built by LLM_TN's tn(); graph-building fetches weights from weights_map by name. A name is a stable contract, robust across tools and splits.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>What do llm_arch, llama_hparams, and LLM_TENSOR_NAMES each govern? How do they combine to turn 'a pile of tensors' into 'a concrete, graph-able model'?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="14-model-loading.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">模型加载</span><span class="lang-en">Model loading</span></div></a><a class="next" href="16-build-graph.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">构建计算图</span><span class="lang-en">Building the compute graph</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

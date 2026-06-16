@@ -937,6 +937,390 @@ QUIZZES = {
             },
         ],
     },
+    "14-model-loading.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model_loader 主要做什么？",
+                    "en": "What does llama_model_loader mainly do?",
+                },
+                "opts": [
+                    {
+                        "zh": "读 GGUF 的 metadata（超参）和 tensor infos、建按名字的张量清单、（按 use_mmap）把权重数据 mmap 或读入",
+                        "en": "read GGUF metadata (hyperparameters) and tensor infos, build a name-indexed tensor list, and (per use_mmap) mmap or read the weight data",
+                    },
+                    {"zh": "训练这个模型", "en": "train the model"},
+                    {"zh": "把权重重新量化", "en": "re-quantize the weights"},
+                    {"zh": "编译 GPU kernel", "en": "compile GPU kernels"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "loader 不计算，只把字节整理成可用模型：gguf_init_from_file 读头部、weights_map 按名字登记每个张量、use_mmap 时让 data 指针指进文件映射（L13 零拷贝）。",
+                    "en": "The loader computes nothing; it organizes bytes into a usable model: gguf_init_from_file reads the header, weights_map registers each tensor by name, and with use_mmap the data pointers point into the file mapping (L13 zero-copy).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个被分片的大模型，文件名长什么样？",
+                    "en": "What do the filenames of a split large model look like?",
+                },
+                "opts": [
+                    {"zh": "model-00001-of-00003.gguf 这种 of-N 编号", "en": "of-N numbering like model-00001-of-00003.gguf"},
+                    {"zh": "随机哈希名", "en": "random hash names"},
+                    {"zh": "一个 .zip 压缩包", "en": "a single .zip archive"},
+                    {"zh": "永远是单文件，不能分片", "en": "always a single file, never split"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "分片文件名由 llama_split_path 按 \"%s-%05d-of-%05d.gguf\" 拼出；split.count 记总片数；loader 按编号逐片打开、并进同一张 weights_map。",
+                    "en": "Split filenames are built by llama_split_path as \"%s-%05d-of-%05d.gguf\"; split.count records the total; the loader opens each by number and merges into one weights_map.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "加载器怎么知道模型有多少层、多大维度？",
+                    "en": "How does the loader know the model's layer count and dimensions?",
+                },
+                "opts": [
+                    {
+                        "zh": "用 get_key(llm_kv, ...) 从 GGUF 的 metadata KV 里读（自描述）",
+                        "en": "it reads them from the GGUF metadata KVs via get_key(llm_kv, ...) (self-describing)",
+                    },
+                    {"zh": "靠猜测", "en": "by guessing"},
+                    {"zh": "读一个外部 config.json", "en": "by reading an external config.json"},
+                    {"zh": "在代码里硬编码", "en": "hard-coded in the code"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "超参全在 GGUF 的 metadata KV 里（L13 自描述）；loader 用模板方法 get_key 把键映射到具体超参字段，无需外部配置或猜测。",
+                    "en": "Hyperparameters live in the GGUF metadata KVs (L13 self-description); the loader's templated get_key maps a key to a specific field, with no external config or guessing.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L13，说说 llama_model_loader 为什么用 mmap 加载权重数据能做到“秒加载”又省内存。（提示：零拷贝/按页/共享）",
+                "en": "Drawing on L13, explain why llama_model_loader's mmap loading of weight data achieves 'instant load' and saves memory. (hint: zero-copy / paging / sharing)",
+            },
+        ],
+    },
+    "15-architecture-hparams.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GGUF 里哪个 KV 决定按哪套架构建图？",
+                    "en": "Which GGUF KV decides which architecture's graph to build?",
+                },
+                "opts": [
+                    {"zh": "general.architecture（如 \"llama\"、\"qwen2\"）", "en": "general.architecture (e.g. \"llama\", \"qwen2\")"},
+                    {"zh": "general.name", "en": "general.name"},
+                    {"zh": "general.file_type", "en": "general.file_type"},
+                    {"zh": "version", "en": "version"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "loader 读出 general.architecture 字符串，在 LLM_ARCH_NAMES 里查得 LLM_ARCH_LLAMA 等枚举；这个枚举决定后续用哪套 KV/张量约定与建图函数（L16）。",
+                    "en": "The loader reads the general.architecture string and looks it up in LLM_ARCH_NAMES to get an enum like LLM_ARCH_LLAMA; that enum decides the KV/tensor conventions and graph builder used (L16).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么 hparams 把头数写成 n_head(il) 带层号？",
+                    "en": "Why does hparams write head count as n_head(il) with a layer index?",
+                },
+                "opts": [
+                    {
+                        "zh": "不同层的头数/注意力类型可能不同（GQA、滑窗），按层取最通用",
+                        "en": "different layers may have different head counts/attention types (GQA, sliding-window), so per-layer is most general",
+                    },
+                    {"zh": "写错了，应该是字段", "en": "it is a typo; it should be a field"},
+                    {"zh": "为了让推理更快", "en": "to make inference faster"},
+                    {"zh": "随机决定的", "en": "decided at random"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "现代架构里各层注意力配置可能不同（GQA 让 KV 头少于 Q 头、混合架构逐层不同），所以头数按层存进 n_head_arr，n_head(il) 是按层取值的访问器方法（不是字段）。",
+                    "en": "In modern architectures per-layer attention configs can differ (GQA gives fewer KV than Q heads; hybrids differ by layer), so head counts are stored per layer in n_head_arr, and n_head(il) is an accessor method (not a field) fetching by layer.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "加载器怎么把文件里的张量对应到模型结构？",
+                    "en": "How does the loader map a file's tensors onto the model structure?",
+                },
+                "opts": [
+                    {
+                        "zh": "靠 LLM_TENSOR_NAMES 的命名约定（token_embd / blk.N.attn_q ...）按名字在 weights_map 里查",
+                        "en": "by the LLM_TENSOR_NAMES naming convention (token_embd / blk.N.attn_q ...), looking up weights_map by name",
+                    },
+                    {"zh": "按文件里的张量顺序", "en": "by the tensor order in the file"},
+                    {"zh": "按张量大小排序", "en": "by sorting on tensor size"},
+                    {"zh": "随机匹配", "en": "by random matching"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "张量名遵循 LLM_TENSOR_NAMES 模板（blk.%d 里填层号），由 LLM_TN 的 tn() 拼出；建图按名字去 weights_map 取权重。名字是稳定契约，跨工具、跨分片都不怕。",
+                    "en": "Tensor names follow LLM_TENSOR_NAMES templates (blk.%d filled with the layer index), built by LLM_TN's tn(); graph-building fetches weights from weights_map by name. A name is a stable contract, robust across tools and splits.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "llm_arch、llama_hparams、LLM_TENSOR_NAMES 三者各管什么？它们怎么合起来把“一堆张量”变成“一个具体可建图的模型”？",
+                "en": "What do llm_arch, llama_hparams, and LLM_TENSOR_NAMES each govern? How do they combine to turn 'a pile of tensors' into 'a concrete, graph-able model'?",
+            },
+        ],
+    },
+    "16-build-graph.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama 层怎么为不同架构建出不同的前向图？",
+                    "en": "How does the llama layer build different forward graphs for different architectures?",
+                },
+                "opts": [
+                    {
+                        "zh": "llama_model::build_graph 派发到每架构自己的 build_arch_graph（src/models/&lt;arch&gt;.cpp），复用 llm_graph_context 的 build_* 积木",
+                        "en": "llama_model::build_graph dispatches to each architecture's build_arch_graph (src/models/&lt;arch&gt;.cpp), reusing llm_graph_context's build_* blocks",
+                    },
+                    {"zh": "一个巨型 if-else", "en": "one giant if-else"},
+                    {"zh": "每个架构一个独立引擎", "en": "a separate engine per architecture"},
+                    {"zh": "运行时编译整个模型", "en": "compiling the whole model at runtime"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "build_graph 是稳定入口，调虚函数 build_arch_graph 派发到各架构的 src/models/&lt;arch&gt;.cpp；真正干活的 build_attn/build_ffn/build_norm 是基类 llm_graph_context 的共享积木。",
+                    "en": "build_graph is the stable entry; it calls the virtual build_arch_graph, dispatching to each architecture's src/models/&lt;arch&gt;.cpp, while the real workers build_attn/build_ffn/build_norm are shared blocks on the base llm_graph_context.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "build_graph 产出什么、交给谁？",
+                    "en": "What does build_graph produce, and hand to whom?",
+                },
+                "opts": [
+                    {"zh": "一张 ggml_cgraph（只建不算），交给后端执行（L10）", "en": "a ggml_cgraph (built, not computed), handed to the backend to execute (L10)"},
+                    {"zh": "直接产出文本", "en": "text output directly"},
+                    {"zh": "立即算出结果", "en": "the computed result immediately"},
+                    {"zh": "一个 .gguf 文件", "en": "a .gguf file"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "build_* 只填算子的 op/src（L09 惰性建图），get_gf() 交出一张 ggml_cgraph；真正逐节点执行是 L10 后端的事。所以同一张图能换后端跑。",
+                    "en": "build_* only fills operators' op/src (L09 lazy build); get_gf() hands out a ggml_cgraph; actual node-by-node execution is the L10 backend's job. So the same graph runs on any backend.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一层 transformer 在图里大致是什么顺序？",
+                    "en": "Roughly what order is one transformer layer in the graph?",
+                },
+                "opts": [
+                    {"zh": "norm -> attn（QKV+rope+KV+softmax）-> 残差 -> norm -> ffn -> 残差", "en": "norm -> attn (QKV+rope+KV+softmax) -> residual -> norm -> ffn -> residual"},
+                    {"zh": "只有一个 mul_mat", "en": "just one mul_mat"},
+                    {"zh": "完全随机", "en": "completely random"},
+                    {"zh": "先 ffn 后 attn 且无 norm", "en": "ffn before attn, with no norm"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "一个 block 的骨架固定：build_norm -> build_attn -> 残差 -> build_norm -> build_ffn -> 残差；循环 n_layer() 层，每层按名字取权重（L15）。",
+                    "en": "A block's skeleton is fixed: build_norm -> build_attn -> residual -> build_norm -> build_ffn -> residual; looped n_layer() times, fetching weights by name per layer (L15).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "build_attn 这种积木被复用、加新架构只写一份 src/models/&lt;arch&gt;.cpp——这种结构对“支持很多模型”有什么好处？",
+                "en": "build_attn-style blocks are reused, and a new architecture only writes one src/models/&lt;arch&gt;.cpp - what are the benefits of this structure for 'supporting many models'?",
+            },
+        ],
+    },
+    "17-context-session.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model 和 llama_context 的区别是？",
+                    "en": "What is the difference between llama_model and llama_context?",
+                },
+                "opts": [
+                    {
+                        "zh": "model 是只读权重（可被多 context 共享），context 是有状态运行时（KV/sched/logits，每会话一个）",
+                        "en": "model is read-only weights (shareable by many contexts); context is a stateful runtime (KV/sched/logits, one per session)",
+                    },
+                    {"zh": "是一回事，只是名字不同", "en": "they are the same thing, just different names"},
+                    {"zh": "context 存权重，model 存 KV", "en": "context stores weights, model stores KV"},
+                    {"zh": "model 有状态，context 只读", "en": "model is stateful, context is read-only"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "权重只读、几个 GB，多会话共享同一份最省内存；KV cache、当前位置是每会话不同的状态，必须各存一份。所以 model 只读可共享、context 有状态每会话一个。",
+                    "en": "Weights are read-only and several GB, so sharing one copy across sessions saves the most memory; KV cache and current position are per-session state stored separately. So model is read-only/shareable, context is stateful/per-session.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama_decode 做什么？",
+                    "en": "What does llama_decode do?",
+                },
+                "opts": [
+                    {"zh": "跑一步前向（建图 + 执行 + 更新 KV），算出 logits", "en": "runs one forward step (build graph + execute + update KV), producing logits"},
+                    {"zh": "加载模型", "en": "loads the model"},
+                    {"zh": "直接采样出一个 token", "en": "directly samples a token"},
+                    {"zh": "释放内存", "en": "frees memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_decode 吃一个 batch，内部切 ubatch（L18）-> build_graph（L16）-> sched 执行（L10）-> 更新 KV（L19）-> 把 logits 写进输出缓冲。采样是下一步（L21）的事。",
+                    "en": "llama_decode eats a batch, internally splitting ubatch (L18) -> build_graph (L16) -> sched execute (L10) -> update KV (L19) -> write logits to the output buffer. Sampling is the next step's job (L21).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "取第 i 个 token 的 logits 用哪个？",
+                    "en": "Which call gets the i-th token's logits?",
+                },
+                "opts": [
+                    {"zh": "llama_get_logits_ith(ctx, i)", "en": "llama_get_logits_ith(ctx, i)"},
+                    {"zh": "llama_get_model", "en": "llama_get_model"},
+                    {"zh": "llama_tokenize", "en": "llama_tokenize"},
+                    {"zh": "llama_free", "en": "llama_free"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_get_logits_ith(ctx, i) 取第 i 个被标记输出的位置的 logits——一个 n_vocab 维向量，交给采样（L21）挑词。",
+                    "en": "llama_get_logits_ith(ctx, i) reads the logits of the i-th flagged-output position - an n_vocab-dimensional vector handed to sampling (L21) to pick a word.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么把“权重”（model）和“会话状态”（context）分成两个对象？这对一台机器服务很多用户有什么好处？",
+                "en": "Why split 'weights' (model) and 'session state' (context) into two objects? What does this gain for one machine serving many users?",
+            },
+        ],
+    },
+    "18-batching.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_batch 的 logits 字段是干嘛的？",
+                    "en": "What is the logits field of llama_batch for?",
+                },
+                "opts": [
+                    {"zh": "一个 per-token 标志，标记哪些 token 需要算输出 logits", "en": "a per-token flag marking which tokens need output logits computed"},
+                    {"zh": "存放算好的 logits", "en": "stores the already-computed logits"},
+                    {"zh": "存权重", "en": "stores weights"},
+                    {"zh": "采样温度", "en": "the sampling temperature"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "logits 是个开关数组（源码注释将改名 output）：标了的位置才做输出投影（隐藏向量 -> 词表大小的大矩阵乘）。prefill 往往只标最后一个，省掉大量无用投影。",
+                    "en": "logits is a switch array (source comment will rename to output): only flagged positions do the output projection (a hidden-vector -> vocab-size matmul). Prefill often flags only the last, saving many useless projections.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "为什么要把 batch 切成 ubatch？",
+                    "en": "Why split a batch into ubatches?",
+                },
+                "opts": [
+                    {"zh": "硬件一次能高效处理的物理批大小有限（n_ubatch），大批切成小批逐个算", "en": "the physical batch size hardware can efficiently process is limited (n_ubatch); a big batch is split into small ones computed one by one"},
+                    {"zh": "为了加密", "en": "for encryption"},
+                    {"zh": "为多线程随机切", "en": "to split randomly for multithreading"},
+                    {"zh": "没有意义", "en": "no reason"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "n_batch 是逻辑批（一次能提交多少），n_ubatch 是物理批（硬件一次高效算多少）。llama_batch_allocr 把大的逻辑批 split 成若干 &lt;= n_ubatch 的物理批逐个喂图，两者解耦。",
+                    "en": "n_batch is the logical batch (how much you can submit at once), n_ubatch the physical batch (how much hardware efficiently computes at once). llama_batch_allocr splits the big logical batch into several &lt;= n_ubatch physical batches fed one by one, the two decoupled.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "batch 里的 seq_id 表示什么？",
+                    "en": "What does seq_id in a batch represent?",
+                },
+                "opts": [
+                    {"zh": "这个 token 属于哪条序列（支持多序列并行）", "en": "which sequence this token belongs to (supports multi-sequence parallelism)"},
+                    {"zh": "token 的 id", "en": "the token's id"},
+                    {"zh": "token 的位置", "en": "the token's position"},
+                    {"zh": "输出标志", "en": "the output flag"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "seq_id 标明每个 token 属于哪条（或哪些）序列。一个 batch/context 可同时装多条序列，它们共享权重和调度、各有各的 KV（按 seq_id 区分，L19）。",
+                    "en": "seq_id marks which sequence(s) each token belongs to. One batch/context can hold several sequences at once, sharing weights and scheduling, each with its own KV (distinguished by seq_id, L19).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L03 的 prefill/decode，说说 batch 的 logits 标志怎么帮引擎省掉不必要的计算。",
+                "en": "Drawing on L03's prefill/decode, explain how the batch's logits flag helps the engine skip unnecessary computation.",
+            },
+        ],
+    },
+    "19-kv-cache.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "KV cache 解决什么问题？",
+                    "en": "What problem does the KV cache solve?",
+                },
+                "opts": [
+                    {"zh": "缓存先前 token 的 K/V，让自回归每步只算新 token（不重算整段）", "en": "caches prior tokens' K/V so autoregression computes only the new token each step (no whole-segment recompute)"},
+                    {"zh": "压缩权重", "en": "compresses weights"},
+                    {"zh": "缓存 logits", "en": "caches logits"},
+                    {"zh": "加速模型加载", "en": "speeds up model loading"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "没缓存每步要重算前面所有 token 的 K/V（随长度平方涨）；有缓存则每步只算新 token、读历史 K/V（线性）。L04 证明二者数值等价但快一个数量级，是 decode 快的根本。",
+                    "en": "Without a cache each step recomputes all prior tokens' K/V (quadratic in length); with one, each step computes only the new token and reads historical K/V (linear). L04 proves they are numerically equivalent but an order of magnitude faster - the root of decode's speed.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个 cell 主要记录什么？",
+                    "en": "What does a cell mainly record?",
+                },
+                "opts": [
+                    {"zh": "这个位置的 pos、属于哪些 seq_id（以及对应的 K/V）", "en": "this position's pos, which seq_ids it belongs to (and the corresponding K/V)"},
+                    {"zh": "权重", "en": "weights"},
+                    {"zh": "文件偏移", "en": "a file offset"},
+                    {"zh": "采样概率", "en": "sampling probabilities"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_kv_cells 管理一格格 cell，每个 cell 记 pos（喂 rope/因果掩码）和所属 seq_id（支持多序列）；head 是滚动写指针。pos+seq_id 是 cell 的核心标识。",
+                    "en": "llama_kv_cells manages the grid of cells; each records pos (fed to rope/causal mask) and its seq_id (for multi-sequence); head is the rolling write pointer. pos+seq_id are a cell's core identity.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "公开 C API 里删除某序列的 KV 用哪个？",
+                    "en": "Which public C API removes a sequence's KV?",
+                },
+                "opts": [
+                    {"zh": "llama_memory_seq_rm（经 llama_get_memory）", "en": "llama_memory_seq_rm (via llama_get_memory)"},
+                    {"zh": "llama_kv_self_rm（已改名移除）", "en": "llama_kv_self_rm (renamed and removed)"},
+                    {"zh": "llama_free", "en": "llama_free"},
+                    {"zh": "llama_decode", "en": "llama_decode"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "序列操作的公开 API 是 llama_memory_seq_*（seq_rm/seq_cp/seq_add 等），经 llama_get_memory 拿到记忆对象；旧名 llama_kv_self_* 已改名移除，看老教程要小心。",
+                    "en": "The public sequence-op API is llama_memory_seq_* (seq_rm/seq_cp/seq_add etc.), via llama_get_memory; the old llama_kv_self_* names are renamed and removed, so beware old tutorials.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "KV cache 很吃显存。结合 L17 的 type_k/type_v 和本课的滑窗变体，说说有哪些办法控制 KV 的内存。",
+                "en": "The KV cache is VRAM-hungry. Drawing on L17's type_k/type_v and this lesson's sliding-window variant, what are the ways to control KV memory?",
+            },
+        ],
+    },
 }
 
 

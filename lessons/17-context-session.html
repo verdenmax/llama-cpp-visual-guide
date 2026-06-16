@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>17 · 上下文与会话 / Context &amp; session - llama.cpp 图解教程</title>
+<meta name="description" content="第四部分 · llama 推理内部｜上下文与会话 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="17 · 上下文与会话 / Context &amp; session - llama.cpp 图解教程">
+<meta property="og:description" content="第四部分 · llama 推理内部｜上下文与会话 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="17 · 上下文与会话 / Context &amp; session - llama.cpp 图解教程">
+<meta name="twitter:description" content="第四部分 · llama 推理内部｜上下文与会话 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></span>
+    <span class="pill">17 / 19</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:89%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></div>
+    <h1><span class="lang-zh">上下文与会话</span><span class="lang-en">Context &amp; session</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+能建图的模型（L14-16）还差一个<strong>运行时</strong>，才能真正跑起来、记住对话进度、把结果交出去——这就是 <span class="mono">llama_context</span>。它是一个<strong>有状态</strong>的对象，持有这次会话的配置（cparams）、
+KV cache（memory）、后端调度器（sched）和输出缓冲；<span class="mono">llama_decode</span> 跑一步前向、<span class="mono">llama_get_logits_ith</span> 取出结果。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这一课是把前面"静态的模型"激活成"会跑的推理"的关键一环。它也回答了一个很实际的问题：为什么 llama.cpp 把"模型"和"上下文"分成两个对象？想清楚这件事，你就明白了 llama-server 能同时服务很多用户的底层原因。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  如果 <span class="mono">llama_model</span> 是<strong>图纸 + 零件库</strong>（静态、只读、可共享），<span class="mono">llama_context</span> 就是<strong>施工现场</strong>（有状态、每个会话一个）：现场放着这次施工的进度（KV cache）、工具调度（sched）、和产出（logits）。
+  同一份图纸，能同时开好几个工地——一个 model 配多个 context，各跑各的对话，谁也不影响谁。
+</div>
+
+<h2>model 与 context：只读知识 vs 有状态会话</h2>
+<p>这是这一课最该先想清的一刀切：<strong>权重是只读的知识，会话是有状态的进度</strong>，两者被故意分成两个对象。</p>
+<div class="cols">
+  <div class="col"><h4>llama_model（只读知识）</h4><p>权重 · 超参 · 词表 · <strong>只读</strong> · 一份就够 · 可被<strong>多个 context 共享</strong></p></div>
+  <div class="col"><h4>llama_context（有状态会话）</h4><p>cparams + KV cache + sched + logits · <strong>有状态</strong> · <strong>每会话一个</strong> · 记着这次对话算到哪</p></div>
+</div>
+<p>为什么要这么分？因为权重几个 GB、加载一次就不变，理应<strong>共享</strong>；而"对话进度"（KV cache、当前位置）是每个会话各不相同的<strong>状态</strong>，必须各存一份。把不变的知识和会变的状态拆开，一份权重就能撑起许多并发会话——这正是服务器多用户的根基。</p>
+<p>打个比方：模型像一本字典（人人可查、内容不变），上下文像每个人手里的草稿纸（各写各的、互不干扰）。你绝不会给每个查字典的人各印一本字典，但每个人都需要自己的草稿纸。llama.cpp 这一刀，切的正是"共享的知识"和"私有的状态"。</p>
+<p>"一个 model 配多个 context"不是空话，而是天天在发生的事。<span class="mono">llama-server</span> 同时服务多个用户时，就是一份权重 + 每个请求一个 context；甚至单个程序里想并行跑几条不同的对话，也是开几个 context。
+它们共享那份只读的权重，各自维护自己的 KV 和进度，互不串扰。理解了这点，你就明白"加载一次、服务很多"是怎么做到的。</p>
+<p>实现上，<span class="mono">llama_context</span> 内部持有一个指向 <span class="mono">llama_model</span> 的引用——它不复制权重，只是"借用"。所以新建一个 context 的代价很小：分配一些会话状态（主要是 KV cache 的空间），权重那几个 GB 一个字节都不用再读、不用再拷。
+这也是为什么 server 加一个并发连接，增量内存主要就是那一份 KV，而不是整个模型。</p>
+<p>这"知识 vs 状态"的分法，其实是计算机里一条很通用的设计原则：把<strong>无状态、可共享</strong>的部分和<strong>有状态、需隔离</strong>的部分分开。Web 服务器把静态资源和会话 session 分开、数据库把只读快照和事务状态分开，都是同一个思路。
+llama.cpp 把它用在了推理上：权重是无状态的"程序"，context 是有状态的"进程"。</p>
+<p>这里的"会话"（session）一词值得点明：它就是一次"<strong>连续的对话或生成过程</strong>"。同一个会话里，后面的话能记得前面说过什么（靠 KV cache）；换一个会话，就是一张白纸重新开始。
+所以 context 本质上承载的是"<strong>一次连贯对话的全部记忆</strong>"——它在，对话的上下文就在；它一释放，这次对话就被忘得干干净净。</p>
+<p>顺带一提，"上下文"这个词在这里有两层意思容易混：一是 <span class="mono">llama_context</span> 这个对象，二是 <span class="mono">n_ctx</span> 那个"能记多少 token"的上下文长度。前者是装会话状态的容器，后者是这个容器能装下的对话有多长。本课讲的主要是前者，后者的细节留到 L19。</p>
+
+<h2>context 里有什么</h2>
+<p>掀开 <span class="mono">llama_context</span> 看看，它主要持有四样东西：配置、记忆、调度器、输出。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">配置</span><span class="name">llama_cparams cparams</span></div><div class="ld">这次会话的参数：上下文多长、批多大、几个线程……</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">记忆</span><span class="name">llama_memory_ptr memory</span></div><div class="ld">KV cache（L19）：记着这次对话先前每个 token 的 K/V</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">调度</span><span class="name">ggml_backend_sched_ptr sched</span></div><div class="ld">多后端调度器（L10）：决定图的哪部分在 CPU/GPU 上算</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">输出</span><span class="name">buffer_view&lt;float&gt; logits / embd</span></div><div class="ld">输出缓冲：装这一步算出的 logits（下一 token 的分数）</div></div>
+</div>
+<pre class="code"><span class="cm">// 简化自 src/llama-context.h</span>
+<span class="kw">struct</span> llama_context {
+    llama_cparams          cparams;  <span class="cm">// 这次会话的配置</span>
+    llama_memory_ptr       memory;   <span class="cm">// KV cache 等(L19)</span>
+    ggml_backend_sched_ptr sched;    <span class="cm">// 多后端调度(L10)</span>
+    buffer_view&lt;float&gt;     logits;   <span class="cm">// 输出: 下一 token 的分数</span>
+};</pre>
+<p>这四样合起来，正好是"跑一步推理"所需的全部状态：<span class="mono">cparams</span> 说"按什么规格跑"，<span class="mono">memory</span> 记"之前算过什么"，<span class="mono">sched</span> 管"在哪块硬件上算"，<span class="mono">logits</span> 接"算出来的结果"。
+注意 <span class="mono">memory</span> 是个泛化的"记忆"抽象（不只是裸的 KV cache，还能是 recurrent、hybrid 等变体，L19 细讲），所以字段名是 memory 而非 kv_cache——这是为长上下文与新型架构留的余地。</p>
+<p>还要点一句：<span class="mono">context</span> <strong>不</strong>持有权重——权重在 <span class="mono">model</span> 里，context 只<strong>引用</strong>它。这正是上一节"分开"的体现：一个轻量的 context 背着会话状态、指向那份重而只读的权重，于是开多个 context 几乎不额外占权重的内存。</p>
+<p>为什么 <span class="mono">sched</span>（后端调度器）也要放进 context、而不是放进 model？因为调度是带<strong>会话状态</strong>的：它要管这次会话的中间张量内存怎么分配复用（L10 的 ggml-alloc）、图的哪部分在哪块设备上算。
+不同会话各跑各的图，自然各需要一个调度器。把它放进 context，正好和"每会话一份状态"的设计对齐。</p>
+<p>输出为什么是 <span class="mono">buffer_view&lt;float&gt;</span> 这种"视图"，而不是一个普通数组？因为输出的大小是动态的——这一步标了几个位置要输出，就有几行 logits（每行 <span class="mono">n_vocab</span> 个数）。
+用一个轻量的视图指向底层缓冲，既能灵活表示"这一步有几行输出"，又避免反复分配。<span class="mono">llama_get_logits_ith</span> 取的，就是这个视图里第 i 行。</p>
+<p>顺带说说 context 的生死：它由 <span class="mono">llama_init_from_model(model, cparams)</span> 创建（这时就按 cparams 把 KV cache 等开好），用完由 <span class="mono">llama_free</span> 释放。model 活得久（整个服务期间），context 可以来去（一个请求一个）。
+这种"长命的 model + 短命的 context"的生命周期搭配，正是服务器处理一波又一波请求的常态。</p>
+<p>还有个实现细节：你传进去的 <span class="mono">llama_context_params</span> 会被<strong>拷一份</strong>存进 context（内部叫 <span class="mono">llama_cparams</span>）。这样 context 一旦建好，它这次会话的规格就<strong>定下来了</strong>，不会因为你后来改了外面那份参数而变。
+每个 context 各自记着自己的规格，互不影响——这又是"每会话独立"的一处体现。</p>
+<p>那个和 logits 并列的 <span class="mono">embd</span> 缓冲也顺带提一句：它装的是<strong>嵌入向量</strong>输出——做 embedding 任务（把整句话变成一个向量）时用它，而不是 logits。所以 context 的输出口其实有两个：要"下一个词"就看 logits，要"句子的向量表示"就看 embd。同一套 decode 机制，按任务取不同的输出。</p>
+
+<h2>cparams：怎么配这次会话</h2>
+<p>创建 context 时，你用 <span class="mono">llama_context_params</span>（cparams）告诉它这次会话怎么跑。这些参数大多是在<strong>显存与速度之间做权衡</strong>。</p>
+<table class="t">
+  <tr><th>参数</th><th>含义</th></tr>
+  <tr><td><span class="mono">n_ctx</span></td><td>上下文长度（能记多少 token；越大 KV cache 越占显存）</td></tr>
+  <tr><td><span class="mono">n_batch</span> / <span class="mono">n_ubatch</span></td><td>逻辑 / 物理批大小（一次提交多少 / 一次真正算多少，L18）</td></tr>
+  <tr><td><span class="mono">n_seq_max</span></td><td>最多并行几条序列</td></tr>
+  <tr><td><span class="mono">n_threads</span></td><td>用几个 CPU 线程</td></tr>
+  <tr><td><span class="mono">type_k</span> / <span class="mono">type_v</span></td><td>KV cache 的数据类型（可量化以省显存）</td></tr>
+  <tr><td><span class="mono">offload_kqv</span></td><td>是否把 KV 相关计算放到 GPU</td></tr>
+  <tr><td><span class="mono">pooling_type</span></td><td>embedding 任务时怎么把 token 向量汇成句向量</td></tr>
+</table>
+<pre class="code"><span class="cm">// 简化自 include/llama.h 的 llama_context_params</span>
+<span class="kw">struct</span> llama_context_params {
+    uint32_t n_ctx;      uint32_t n_batch;   uint32_t n_ubatch;
+    uint32_t n_seq_max;  int32_t  n_threads;
+    ggml_type type_k, type_v;   <span class="cm">// KV 的量化类型(省显存)</span>
+    bool offload_kqv;           <span class="cm">// KV 计算放 GPU?</span>
+};</pre>
+<p>这里最该上手感的是 <span class="mono">n_ctx</span> 和 <span class="mono">type_k/type_v</span>：它们直接决定 KV cache 吃多少显存。<span class="mono">n_ctx</span> 翻倍，KV cache 大致翻倍；把 <span class="mono">type_k/type_v</span> 从 16 位降到 8 位，KV 占用又能减半（代价是一点点精度）。
+所以"能开多长上下文"不是模型单方面决定的，而是你按手头显存，在 <span class="mono">n_ctx</span> 和 KV 量化之间调出来的——这条线会在 L19 讲 KV cache 时再展开。</p>
+<p><span class="mono">n_seq_max</span> 这个参数关系到一个常被忽略的能力：一个 context 可以<strong>同时跑多条序列</strong>。比如批量给几个不同 prompt 各生成回答，可以放进同一个 context、用不同的 seq_id 区分（L18），共享这份权重和这套调度。
+<span class="mono">n_seq_max</span> 就是上限。这让"一个 context 服务多个并发对话"成为可能，是比"一对话一 context"更省的玩法。</p>
+<p>cparams 和模型本身的默认值也有联系。很多参数你可以填 0 表示"用模型的默认"——比如 <span class="mono">n_ctx</span> 填 0，就取模型训练时的上下文长度（L15 的 <span class="mono">n_ctx_train</span>）。
+这让你既能省心地用默认值，又能在需要时按显存覆盖它。配置的灵活性，就藏在这些"0 表示跟随模型"的约定里。</p>
+<p>表里没列全的 cparams 还有一些专门用途，比如 <span class="mono">pooling_type</span>（做 embedding 任务时怎么把 token 向量汇成一个句向量）、各种 RoPE 缩放参数（把上下文外推到训练长度之外）。
+普通文本生成多半用默认就行，但它们的存在说明：context 不只服务"生成下一个词"，也能服务 embedding、长上下文外推等多种任务。</p>
+<p>一个实用提醒：context 的内存占用，<strong>大头往往是 KV cache</strong>，而 KV cache 的大小由 <span class="mono">n_ctx</span>、层数、KV 头数、<span class="mono">type_k/type_v</span> 共同决定。所以当你发现显存不够，调小 <span class="mono">n_ctx</span> 或量化 KV，往往比换模型更立竿见影。这条经验，在 L19 会有更细的账。</p>
+<p>为什么这些参数放在<strong>建 context 时</strong>配、而不是加载 model 时配？因为它们是"<strong>这次会话怎么跑</strong>"的事，而不是"模型是什么"的事。同一个 model，你可以用不同的 cparams 开多个 context：一个开长上下文、一个开短的，一个多线程、一个少线程，各按各的场景来。
+把会话参数和模型解耦，正是为了这种灵活。</p>
+
+<h2>一步推理与取结果</h2>
+<p>万事俱备，跑推理就是反复调 <span class="mono">llama_decode</span>。它吃一个 batch（L18），内部把建图、执行、更新 KV 一气呵成，最后把 logits 放进 context 的输出缓冲。</p>
+<pre class="code"><span class="cm"># 伪代码: 一步推理(llama_decode 内部)</span>
+<span class="fn">llama_decode</span>(ctx, batch)              <span class="cm"># 跑一步前向</span>
+<span class="cm">#   -&gt; 切 ubatch(L18) -&gt; build_graph(L16) -&gt; sched 执行(L10) -&gt; 更新 KV(L19)</span>
+<span class="cm">#   -&gt; logits 写进 ctx 的输出缓冲</span>
+p = <span class="fn">llama_get_logits_ith</span>(ctx, i)    <span class="cm"># 取第 i 个 token 的 logits(n_vocab 维)</span></pre>
+<p>取结果用 <span class="mono">llama_get_logits_ith(ctx, i)</span>，拿到第 i 个 token 的 logits——一个 <span class="mono">n_vocab</span> 维的向量，是"下一个词"的未归一分数，接下来交给采样（L21）挑一个词。这就把 L16 的建图、L10 的执行、L19 的 KV，
+通过 <span class="mono">llama_decode</span> 这一个函数<strong>串成了一步完整的推理</strong>。</p>
+<p>所以 <span class="mono">llama_context</span> 在整套机制里扮演的是"<strong>总指挥 + 状态本</strong>"：它知道这次会话的所有配置、记着算到哪、调度着硬件、收着输出。理解了它，你就把前面那些零件（model、graph、backend、KV）真正<strong>组装成了一台能转的推理机</strong>。</p>
+<p>这里也顺势把 L03 的 prefill/decode 接上：两个阶段<strong>都</strong>是调 <span class="mono">llama_decode</span>，区别只在喂的 batch。prefill 一次喂整段 prompt（多个 token），把它们的 K/V 一口气填进 KV cache，只取最后一个的 logits；decode 之后每次只喂一个新 token、取它的 logits。
+同一个函数，两种节奏，全靠 batch 来表达。</p>
+<p>把整个自回归循环画出来就是：<span class="mono">llama_decode</span> 算出 logits -&gt; 采样（L21）挑一个 token -&gt; 把这个新 token 包成一个新 batch 喂回 <span class="mono">llama_decode</span> -&gt; 再出 logits…… 如此往复，逐字蹦出回答。
+context 在这整个循环里<strong>一直在</strong>：它的 KV cache 一步步变长、它的输出缓冲一步步刷新。一句对话的生成，就是这个循环在一个 context 上转了很多圈。</p>
+<p>补一句 <span class="mono">llama_encode</span>：有些模型（如带 encoder 的）需要先 encode、再 decode，所以 API 里既有 <span class="mono">llama_decode</span> 也有 <span class="mono">llama_encode</span>。对最常见的 decoder-only 大模型（L04），你基本只会用到 <span class="mono">llama_decode</span>。知道有这么个分工即可，不必深究。</p>
+<p>所以这一课交付的，是一个<strong>从"零件"到"机器"</strong>的跃迁：前几课造出了 model（L14-15）和 graph（L16）这些零件，这一课用 context 把它们装进一个能反复转动的循环里。读到这儿，你已经能在脑子里跑通一次完整推理：加载模型 -&gt; 建 context -&gt; 反复 decode + 采样 -&gt; 逐字输出。
+剩下几课，是把这台机器的几个关键部件（batch、KV cache、采样……）再各自拆开看细节。</p>
+<p>再强调一遍"<strong>状态在推进</strong>"这件事，因为它是理解自回归的关键。每次 <span class="mono">llama_decode</span> 不是从头重算，而是<strong>在 context 现有状态上往前走一步</strong>：KV cache 里已经有前面所有 token 的 K/V，这一步只需算新 token、把它的 K/V 追加进去。
+正因为状态被 context 一直记着，decode 才能做到"每步只算一个 token"这么快（L03/L19）。</p>
+<p>最后用一句话收束 context 的角色：它是那个让"静态模型"变成"动态推理"的开关。没有它，model 只是一堆躺着的权重；有了它，权重才被一步步驱动起来、吐出一个个 token。下一课起，我们就钻进这台机器的具体部件，先从喂给 decode 的 batch 开始。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么 model 和 context 要分开？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>核心是"<strong>共享只读、各存状态</strong>"。权重是只读的、几个 GB，多个会话<strong>共用同一份</strong>最省内存（配合 L13 的 mmap，连物理内存都能跨进程共享）；而 KV cache、当前位置这些是<strong>每会话不同的状态</strong>，必须各存一份。</p>
+    <p>分开之后，一台机器上一份权重就能撑起很多并发会话：每来一个用户/请求，新建一个轻量的 context（只背自己的 KV），权重那几个 GB 一动不动地被大家共享。这正是 <span class="mono">llama-server</span> 能多并发、省内存的根基。</p>
+    <p>反过来想，如果不分开、把权重和状态揉成一个对象，那每个会话都得复制一份几 GB 的权重——服务几十个用户就要几十份权重，根本扛不住。一个看似简单的"拆成两个对象"的设计，撑起了整个多用户服务的可行性。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> logits 是什么？为什么只在某些 token 上有？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">logits</span> 是模型对"下一个 token 该是谁"打出的一组<strong>未归一分数</strong>，长度等于词表大小 <span class="mono">n_vocab</span>。它还不是概率（没归一），但分数越高的词越可能被选中；采样（L21）就是拿这组 logits 去挑一个词。</p>
+    <p>关键是：<strong>不是每个 token 都要算 logits</strong>。算 logits 要做一次"隐藏向量 -&gt; 词表大小"的大矩阵乘，挺贵。而 prefill 阶段把整段 prompt 过一遍时，中间那些 token 的 logits 根本用不到——我们只要<strong>最后一个</strong> token 的 logits（用来预测下一个）。</p>
+    <p>所以哪些位置算 logits，由 batch 的输出标志控制（L18）。decode 阶段每步只新增一个 token、只它要 logits；prefill 整段只要末位。<span class="mono">llama_get_logits_ith(ctx, i)</span> 就是去取第 i 个被标记输出的位置的 logits。这套"按需算输出"的设计，省下了大量无用的大矩阵乘。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> context 怎么把 L16/L10/L19 串成一步？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">llama_decode</span> 是那个"总指挥"。它拿到这一步的 batch（L18），先用批处理逻辑把它切成物理可算的 ubatch；对每个 ubatch，调 <span class="mono">build_graph</span>（L16）搭出这一步的计算图。</p>
+    <p>然后把图交给 context 里的 <span class="mono">sched</span>（L10 的后端调度器）真正执行；执行过程中，注意力算子会把这一步新 token 的 K/V <strong>写进 context 的 KV cache</strong>（L19），并读回历史 K/V。算完，把输出 logits 写进 context 的输出缓冲。</p>
+    <p>一圈下来，context 的状态就<strong>往前推进了一步</strong>：KV cache 多记了一个 token、输出缓冲有了新 logits。下一次 <span class="mono">llama_decode</span> 接着在这个状态上推进。正是 context 把这些散落的机制（建图、执行、KV、输出）攒在一起、按顺序驱动，才有了"一步接一步"的自回归生成。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama_model</span> 是<strong>只读</strong>的权重/超参/词表（一份、可被多 context 共享）；<span class="mono">llama_context</span> 是<strong>有状态</strong>的会话（每会话一个）。</li>
+    <li>context 持有 <span class="mono">cparams</span>（配置）+ <span class="mono">memory</span>（KV cache，L19）+ <span class="mono">sched</span>（后端调度，L10）+ <span class="mono">logits</span>（输出缓冲）；不持有权重，只引用 model。</li>
+    <li>cparams 调 <span class="mono">n_ctx</span>/<span class="mono">n_batch</span>/<span class="mono">type_k</span>/<span class="mono">type_v</span> 等，多在显存与速度间权衡（<span class="mono">n_ctx</span>、KV 量化直接影响显存）。</li>
+    <li><span class="mono">llama_decode</span> 跑一步前向（切 ubatch -&gt; 建图 -&gt; 执行 -&gt; 更新 KV -&gt; 出 logits）；<span class="mono">llama_get_logits_ith</span> 取第 i 个 token 的 logits。</li>
+    <li>分开 model 与 context = 一份权重撑多会话，是 <span class="mono">llama-server</span> 多并发的根基。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把"<strong>不变的知识</strong>"（权重 model）和"<strong>会话的状态</strong>"（KV/进度 context）拆成两个对象——这一刀看似平常，回报却极大：一份几 GB 的权重能被许多会话共享，每个会话只额外背一份轻量的状态。
+  于是同一台机器、同一份模型，能同时服务很多用户。这正是"<strong>状态与数据分离</strong>"这条老道理在推理引擎里的又一次体现，也是从"能跑一个对话"到"能扛一个服务"之间，那道最关键的设计分水岭。下一课，我们就看喂给 <span class="mono">llama_decode</span> 的那个 batch 到底长什么样。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. llama_model 和 llama_context 的区别是？</div>
+  <ol class="opts">
+    <li>是一回事，只是名字不同</li>
+    <li>context 存权重，model 存 KV</li>
+    <li>model 是只读权重（可被多 context 共享），context 是有状态运行时（KV/sched/logits，每会话一个）</li>
+    <li>model 有状态，context 只读</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。权重只读、几个 GB，多会话共享同一份最省内存；KV cache、当前位置是每会话不同的状态，必须各存一份。所以 model 只读可共享、context 有状态每会话一个。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. llama_decode 做什么？</div>
+  <ol class="opts">
+    <li>直接采样出一个 token</li>
+    <li>释放内存</li>
+    <li>跑一步前向（建图 + 执行 + 更新 KV），算出 logits</li>
+    <li>加载模型</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。llama_decode 吃一个 batch，内部切 ubatch（L18）-> build_graph（L16）-> sched 执行（L10）-> 更新 KV（L19）-> 把 logits 写进输出缓冲。采样是下一步（L21）的事。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 取第 i 个 token 的 logits 用哪个？</div>
+  <ol class="opts">
+    <li>llama_free</li>
+    <li>llama_tokenize</li>
+    <li>llama_get_logits_ith(ctx, i)</li>
+    <li>llama_get_model</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。llama_get_logits_ith(ctx, i) 取第 i 个被标记输出的位置的 logits——一个 n_vocab 维向量，交给采样（L21）挑词。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>为什么把“权重”（model）和“会话状态”（context）分成两个对象？这对一台机器服务很多用户有什么好处？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+A graph-able model (L14-16) still needs a <strong>runtime</strong> to actually run, remember conversation progress, and hand results out - that is <span class="mono">llama_context</span>. It is a <strong>stateful</strong> object holding this session's config (cparams),
+the KV cache (memory), the backend scheduler (sched), and output buffers; <span class="mono">llama_decode</span> runs one forward step, <span class="mono">llama_get_logits_ith</span> reads the result.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This lesson is the key link that activates "a static model" into "running inference". It also answers a very practical question: why does llama.cpp split "model" and "context" into two objects? Think this through and you understand the underlying reason llama-server can serve many users at once.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  If <span class="mono">llama_model</span> is a <strong>blueprint + parts library</strong> (static, read-only, shareable), <span class="mono">llama_context</span> is a <strong>construction site</strong> (stateful, one per session): the site holds this build's progress (KV cache), tool scheduling (sched), and output (logits).
+  The same blueprint can run several sites at once - one model with several contexts, each running its own conversation, none disturbing the others.
+</div>
+
+<h2>model vs context: read-only knowledge vs stateful session</h2>
+<p>This is the cut to grasp first: <strong>weights are read-only knowledge, a session is stateful progress</strong>, and the two are deliberately split into two objects.</p>
+<div class="cols">
+  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights · hyperparameters · vocab · <strong>read-only</strong> · one is enough · <strong>shareable by many contexts</strong></p></div>
+  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits · <strong>stateful</strong> · <strong>one per session</strong> · remembers where this conversation is</p></div>
+</div>
+<p>Why split this way? Because weights are several GB, loaded once and unchanging, and ought to be <strong>shared</strong>; while "conversation progress" (KV cache, current position) is <strong>per-session state</strong> that must be stored separately. Splitting unchanging knowledge from changing state, one copy of weights can hold up many concurrent sessions - the basis of multi-user serving.</p>
+<p>An analogy: the model is like a dictionary (everyone consults it, its content fixed), the context like each person's scratch paper (each writes their own, none interfering). You would never print a separate dictionary per reader, but everyone needs their own scratch paper. llama.cpp's cut is exactly between "shared knowledge" and "private state".</p>
+<p>"One model with several contexts" is no slogan but a daily reality. When <span class="mono">llama-server</span> serves many users at once, it is one copy of weights + one context per request; even within a single program, running several different conversations in parallel means opening several contexts.
+They share the read-only weights, each maintaining its own KV and progress, none interfering. Understand this and you see how "load once, serve many" is done.</p>
+<p>In implementation, <span class="mono">llama_context</span> holds a reference to <span class="mono">llama_model</span> internally - it copies no weights, just "borrows". So creating a context is cheap: allocate some session state (mainly KV cache space), with not a byte of those several-GB weights re-read or re-copied.
+This is why a server adding one concurrent connection adds memory mainly for that one KV, not the whole model.</p>
+<p>This "knowledge vs state" split is actually a very general design principle in computing: separate the <strong>stateless, shareable</strong> parts from the <strong>stateful, must-isolate</strong> parts. Web servers separate static assets from session state, databases separate read-only snapshots from transaction state - the same idea.
+llama.cpp applies it to inference: weights are a stateless "program", the context a stateful "process".</p>
+<p>The word "session" here is worth pinning down: it is one "<strong>continuous conversation or generation process</strong>". Within one session, later words remember what was said before (via the KV cache); a different session is a blank sheet starting over.
+So a context essentially carries "<strong>all the memory of one coherent conversation</strong>" - while it lives, the conversation's context lives; once freed, this conversation is forgotten clean.</p>
+<p>By the way, "context" here has two easily-confused senses: one is the <span class="mono">llama_context</span> object, the other is <span class="mono">n_ctx</span>, the "how many tokens it can remember" context length. The former is the container holding session state, the latter how long a conversation that container can hold. This lesson is mainly about the former; the latter's details wait for L19.</p>
+
+<h2>What is inside a context</h2>
+<p>Open up <span class="mono">llama_context</span> and it mainly holds four things: config, memory, scheduler, output.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">config</span><span class="name">llama_cparams cparams</span></div><div class="ld">this session's params: how long the context, how big the batch, how many threads...</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">memory</span><span class="name">llama_memory_ptr memory</span></div><div class="ld">KV cache (L19): remembers this conversation's prior tokens' K/V</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">scheduling</span><span class="name">ggml_backend_sched_ptr sched</span></div><div class="ld">multi-backend scheduler (L10): decides which graph parts compute on CPU/GPU</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">output</span><span class="name">buffer_view&lt;float&gt; logits / embd</span></div><div class="ld">output buffer: holds this step's logits (the next token's scores)</div></div>
+</div>
+<pre class="code"><span class="cm">// simplified from src/llama-context.h</span>
+<span class="kw">struct</span> llama_context {
+    llama_cparams          cparams;  <span class="cm">// this session's config</span>
+    llama_memory_ptr       memory;   <span class="cm">// KV cache etc.(L19)</span>
+    ggml_backend_sched_ptr sched;    <span class="cm">// multi-backend scheduling(L10)</span>
+    buffer_view&lt;float&gt;     logits;   <span class="cm">// output: next token's scores</span>
+};</pre>
+<p>These four together are exactly the state needed to "run one inference step": <span class="mono">cparams</span> says "at what spec to run", <span class="mono">memory</span> remembers "what was computed before", <span class="mono">sched</span> manages "on which hardware to compute", <span class="mono">logits</span> receives "the computed result".
+Note <span class="mono">memory</span> is a generalized "memory" abstraction (not only a raw KV cache, but also variants like recurrent, hybrid, L19), so the field is named memory rather than kv_cache - room left for long context and new architectures.</p>
+<p>One more point: the <span class="mono">context</span> does <strong>not</strong> hold the weights - those live in <span class="mono">model</span>, and the context only <strong>references</strong> it. This is exactly the previous section's "split" in action: a lightweight context carries session state and points at the heavy, read-only weights, so opening many contexts costs almost no extra weight memory.</p>
+<p>Why is <span class="mono">sched</span> (the backend scheduler) also placed in the context, not the model? Because scheduling carries <strong>session state</strong>: it manages how this session's intermediate-tensor memory is allocated and reused (L10's ggml-alloc), and which graph parts compute on which device.
+Different sessions run their own graphs, so each naturally needs a scheduler. Placing it in the context aligns exactly with the "one bit of state per session" design.</p>
+<p>Why is output a <span class="mono">buffer_view&lt;float&gt;</span> "view" rather than a plain array? Because output size is dynamic - however many positions this step flags for output, that many rows of logits (each <span class="mono">n_vocab</span> numbers).
+A lightweight view pointing into an underlying buffer both flexibly expresses "how many output rows this step has" and avoids repeated allocation. <span class="mono">llama_get_logits_ith</span> reads the i-th row of this view.</p>
+<p>A word on a context's life and death: it is created by <span class="mono">llama_init_from_model(model, cparams)</span> (opening the KV cache etc. per cparams then), and freed by <span class="mono">llama_free</span> when done. The model is long-lived (the whole service duration), the context comes and goes (one per request).
+This "long-lived model + short-lived context" lifecycle pairing is exactly how a server handles wave after wave of requests.</p>
+<p>An implementation detail: the <span class="mono">llama_context_params</span> you pass in is <strong>copied</strong> into the context (internally <span class="mono">llama_cparams</span>). So once a context is built, its session spec is <strong>fixed</strong>, not changing because you later edit that outer params struct.
+Each context remembers its own spec, none interfering - another showing of "per-session independence".</p>
+<p>The <span class="mono">embd</span> buffer alongside logits deserves a mention: it holds <strong>embedding vector</strong> output - used for embedding tasks (turning a whole sentence into one vector) instead of logits. So a context actually has two output ports: for "the next word" read logits, for "the sentence's vector representation" read embd. The same decode mechanism, different outputs by task.</p>
+
+<h2>cparams: configuring this session</h2>
+<p>When creating a context, you tell it how to run via <span class="mono">llama_context_params</span> (cparams). Most of these parameters trade off <strong>VRAM against speed</strong>.</p>
+<table class="t">
+  <tr><th>parameter</th><th>meaning</th></tr>
+  <tr><td><span class="mono">n_ctx</span></td><td>context length (how many tokens it can remember; bigger = more KV cache VRAM)</td></tr>
+  <tr><td><span class="mono">n_batch</span> / <span class="mono">n_ubatch</span></td><td>logical / physical batch size (how much submitted / actually computed at once, L18)</td></tr>
+  <tr><td><span class="mono">n_seq_max</span></td><td>max number of parallel sequences</td></tr>
+  <tr><td><span class="mono">n_threads</span></td><td>how many CPU threads</td></tr>
+  <tr><td><span class="mono">type_k</span> / <span class="mono">type_v</span></td><td>KV cache data type (can be quantized to save VRAM)</td></tr>
+  <tr><td><span class="mono">offload_kqv</span></td><td>whether to put KV-related compute on the GPU</td></tr>
+  <tr><td><span class="mono">pooling_type</span></td><td>how to pool token vectors into a sentence vector for embedding tasks</td></tr>
+</table>
+<pre class="code"><span class="cm">// simplified from llama_context_params in include/llama.h</span>
+<span class="kw">struct</span> llama_context_params {
+    uint32_t n_ctx;      uint32_t n_batch;   uint32_t n_ubatch;
+    uint32_t n_seq_max;  int32_t  n_threads;
+    ggml_type type_k, type_v;   <span class="cm">// KV quant type(save VRAM)</span>
+    bool offload_kqv;           <span class="cm">// KV compute on GPU?</span>
+};</pre>
+<p>The two to build intuition for are <span class="mono">n_ctx</span> and <span class="mono">type_k/type_v</span>: they directly decide how much VRAM the KV cache eats. Double <span class="mono">n_ctx</span> and the KV cache roughly doubles; drop <span class="mono">type_k/type_v</span> from 16-bit to 8-bit and KV usage halves again (at a little precision cost).
+So "how long a context you can open" is not decided by the model alone but tuned by you, given your VRAM, between <span class="mono">n_ctx</span> and KV quantization - a thread we pick up again in L19's KV cache.</p>
+<p><span class="mono">n_seq_max</span> relates to an often-overlooked capability: one context can <strong>run multiple sequences at once</strong>. For example, generating answers for several different prompts in a batch can go into the same context, distinguished by different seq_ids (L18), sharing these weights and this scheduling.
+<span class="mono">n_seq_max</span> is the upper bound. This makes "one context serving several concurrent conversations" possible, a more frugal approach than "one conversation per context".</p>
+<p>cparams also relate to the model's own defaults. Many parameters you can set to 0 to mean "use the model's default" - e.g. <span class="mono">n_ctx</span> set to 0 takes the model's trained context length (L15's <span class="mono">n_ctx_train</span>).
+This lets you both rely on defaults effortlessly and override by VRAM when needed. Configuration flexibility hides in these "0 means follow the model" conventions.</p>
+<p>cparams the table omits have specialized uses too, such as <span class="mono">pooling_type</span> (how to pool token vectors into one sentence vector for embedding tasks) and various RoPE scaling parameters (extrapolating context beyond the trained length).
+Plain text generation mostly uses defaults, but their existence shows the context serves not only "generate the next word" but also embedding, long-context extrapolation, and more.</p>
+<p>A practical reminder: a context's memory is <strong>mostly the KV cache</strong>, whose size is set jointly by <span class="mono">n_ctx</span>, layer count, KV head count, and <span class="mono">type_k/type_v</span>. So when you hit a VRAM wall, shrinking <span class="mono">n_ctx</span> or quantizing KV is often more effective than swapping models. We will do this account in more detail in L19.</p>
+<p>Why are these parameters configured <strong>at context creation</strong>, not at model load? Because they are about "<strong>how this session runs</strong>", not "what the model is". With one model, you can open several contexts with different cparams: one with long context, one short, one many-threaded, one few-threaded, each to its scenario.
+Decoupling session parameters from the model is exactly for this flexibility.</p>
+
+<h2>One inference step and reading the result</h2>
+<p>With everything ready, running inference is repeatedly calling <span class="mono">llama_decode</span>. It eats a batch (L18), internally does graph-building, execution, and KV update in one go, then puts the logits into the context's output buffer.</p>
+<pre class="code"><span class="cm"># pseudocode: one inference step (inside llama_decode)</span>
+<span class="fn">llama_decode</span>(ctx, batch)              <span class="cm"># run one forward step</span>
+<span class="cm">#   -&gt; split ubatch(L18) -&gt; build_graph(L16) -&gt; sched execute(L10) -&gt; update KV(L19)</span>
+<span class="cm">#   -&gt; logits written into ctx's output buffer</span>
+p = <span class="fn">llama_get_logits_ith</span>(ctx, i)    <span class="cm"># get the i-th token's logits(n_vocab-dim)</span></pre>
+<p>Read the result with <span class="mono">llama_get_logits_ith(ctx, i)</span>, getting the i-th token's logits - an <span class="mono">n_vocab</span>-dimensional vector, the unnormalized scores for "the next word", handed next to sampling (L21) to pick one. This strings L16's graph-building, L10's execution, and L19's KV,
+through this one <span class="mono">llama_decode</span> function, <strong>into one complete inference step</strong>.</p>
+<p>So <span class="mono">llama_context</span> plays the role of "<strong>conductor + state ledger</strong>" in the whole machine: it knows all this session's config, remembers where it is, schedules the hardware, and collects the output. Understand it and you have truly <strong>assembled those earlier parts (model, graph, backend, KV) into a running inference machine</strong>.</p>
+<p>This is also where L03's prefill/decode connects: <strong>both</strong> phases call <span class="mono">llama_decode</span>, differing only in the batch fed. Prefill feeds a whole prompt at once (many tokens), filling their K/V into the KV cache in one go, taking only the last one's logits; decode then feeds one new token each time and takes its logits.
+One function, two rhythms, all expressed via the batch.</p>
+<p>Drawing the whole autoregressive loop: <span class="mono">llama_decode</span> computes logits -&gt; sampling (L21) picks a token -&gt; that new token is wrapped into a new batch fed back to <span class="mono">llama_decode</span> -&gt; logits again... and so on, popping out the answer word by word.
+The context is <strong>present throughout</strong> this loop: its KV cache grows step by step, its output buffer refreshes step by step. Generating one reply is this loop turning many times on one context.</p>
+<p>A note on <span class="mono">llama_encode</span>: some models (e.g. with an encoder) need to encode first, then decode, so the API has both <span class="mono">llama_decode</span> and <span class="mono">llama_encode</span>. For the most common decoder-only large models (L04), you basically only use <span class="mono">llama_decode</span>. Just know this division exists, no need to dig in.</p>
+<p>So what this lesson delivers is a leap <strong>from "parts" to "machine"</strong>: earlier lessons built parts like the model (L14-15) and graph (L16); this lesson uses the context to pack them into a loop that can turn repeatedly. By here you can run a full inference in your head: load model -&gt; build context -&gt; repeatedly decode + sample -&gt; output word by word.
+The remaining lessons take this machine's key components (batch, KV cache, sampling...) apart one by one for the details.</p>
+<p>Emphasize once more that "<strong>state advances</strong>", because it is the key to understanding autoregression. Each <span class="mono">llama_decode</span> is not a recompute from scratch but <strong>advancing one step on the context's existing state</strong>: the KV cache already holds all prior tokens' K/V, and this step only computes the new token and appends its K/V.
+Precisely because the context keeps the state throughout, decode can be so fast as "compute only one token per step" (L03/L19).</p>
+<p>To close on the context's role in one sentence: it is the switch that turns "a static model" into "dynamic inference". Without it, the model is just a pile of resting weights; with it, the weights are driven step by step, popping out token after token. From the next lesson, we dig into this machine's concrete components, starting with the batch fed to decode.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why split model and context? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>The core is "<strong>share read-only, store state separately</strong>". Weights are read-only and several GB, and many sessions <strong>sharing one copy</strong> saves the most memory (with L13's mmap, even physical memory can be shared across processes); while KV cache and current position are <strong>per-session state</strong> that must be stored separately.</p>
+    <p>Split this way, one copy of weights on a machine holds up many concurrent sessions: each user/request gets a new lightweight context (carrying only its own KV), while those several GB of weights stay shared and untouched. This is the basis for <span class="mono">llama-server</span> being concurrent and memory-frugal.</p>
+    <p>Conversely, if not split - if weights and state were one object - every session would copy several GB of weights; serving dozens of users would need dozens of weight copies, simply unsustainable. A deceptively simple "split into two objects" upholds the feasibility of the whole multi-user service.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What are logits? Why only on some tokens? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">logits</span> are a set of <strong>unnormalized scores</strong> the model assigns for "who the next token should be", of length equal to the vocab size <span class="mono">n_vocab</span>. They are not yet probabilities (not normalized), but higher-scoring words are more likely to be chosen; sampling (L21) takes these logits to pick a word.</p>
+    <p>The key: <strong>not every token needs logits computed</strong>. Computing logits means a big "hidden vector -&gt; vocab size" matmul, quite costly. And when prefill passes a whole prompt through, the middle tokens' logits are simply unused - we only want the <strong>last</strong> token's logits (to predict the next one).</p>
+    <p>So which positions compute logits is controlled by the batch's output flag (L18). In decode each step adds one token and only it needs logits; prefill needs only the final position. <span class="mono">llama_get_logits_ith(ctx, i)</span> gets the logits of the i-th flagged-output position. This "compute output on demand" design saves a lot of useless big matmuls.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> How does context string L16/L10/L19 into one step? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">llama_decode</span> is the "conductor". It takes this step's batch (L18), first uses batching logic to split it into physically-computable ubatches; for each ubatch, it calls <span class="mono">build_graph</span> (L16) to assemble this step's compute graph.</p>
+    <p>Then it hands the graph to the context's <span class="mono">sched</span> (L10's backend scheduler) to actually execute; during execution, attention operators <strong>write this step's new token's K/V into the context's KV cache</strong> (L19) and read back historical K/V. When done, it writes the output logits into the context's output buffer.</p>
+    <p>One round and the context's state <strong>advances by one step</strong>: the KV cache has remembered one more token, the output buffer has new logits. The next <span class="mono">llama_decode</span> continues advancing on this state. It is exactly the context gathering these scattered mechanisms (graph-building, execution, KV, output) and driving them in order that produces "step after step" autoregressive generation.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama_model</span> is <strong>read-only</strong> weights/hyperparameters/vocab (one copy, shareable by many contexts); <span class="mono">llama_context</span> is a <strong>stateful</strong> session (one per session).</li>
+    <li>The context holds <span class="mono">cparams</span> (config) + <span class="mono">memory</span> (KV cache, L19) + <span class="mono">sched</span> (backend scheduling, L10) + <span class="mono">logits</span> (output buffer); it holds no weights, only references the model.</li>
+    <li>cparams tunes <span class="mono">n_ctx</span>/<span class="mono">n_batch</span>/<span class="mono">type_k</span>/<span class="mono">type_v</span> etc., mostly trading VRAM against speed (<span class="mono">n_ctx</span> and KV quantization directly affect VRAM).</li>
+    <li><span class="mono">llama_decode</span> runs one forward step (split ubatch -&gt; build graph -&gt; execute -&gt; update KV -&gt; emit logits); <span class="mono">llama_get_logits_ith</span> reads the i-th token's logits.</li>
+    <li>Splitting model and context = one copy of weights holds up many sessions, the basis of <span class="mono">llama-server</span>'s concurrency.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Splitting "<strong>unchanging knowledge</strong>" (weights, model) from "<strong>session state</strong>" (KV/progress, context) into two objects - this seemingly ordinary cut pays off enormously: one copy of several-GB weights can be shared by many sessions, each carrying only a lightweight bit of state.
+  So the same machine, the same model, can serve many users at once. This is another showing of the old truth "<strong>separate state from data</strong>" in an inference engine, and the most crucial design watershed between "can run one conversation" and "can hold up a service". Next lesson, we look at what that batch fed to <span class="mono">llama_decode</span> actually looks like.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the difference between llama_model and llama_context?</div>
+  <ol class="opts">
+    <li>they are the same thing, just different names</li>
+    <li>context stores weights, model stores KV</li>
+    <li>model is read-only weights (shareable by many contexts); context is a stateful runtime (KV/sched/logits, one per session)</li>
+    <li>model is stateful, context is read-only</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weights are read-only and several GB, so sharing one copy across sessions saves the most memory; KV cache and current position are per-session state stored separately. So model is read-only/shareable, context is stateful/per-session.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What does llama_decode do?</div>
+  <ol class="opts">
+    <li>directly samples a token</li>
+    <li>frees memory</li>
+    <li>runs one forward step (build graph + execute + update KV), producing logits</li>
+    <li>loads the model</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_decode eats a batch, internally splitting ubatch (L18) -> build_graph (L16) -> sched execute (L10) -> update KV (L19) -> write logits to the output buffer. Sampling is the next step's job (L21).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which call gets the i-th token's logits?</div>
+  <ol class="opts">
+    <li>llama_free</li>
+    <li>llama_tokenize</li>
+    <li>llama_get_logits_ith(ctx, i)</li>
+    <li>llama_get_model</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_get_logits_ith(ctx, i) reads the logits of the i-th flagged-output position - an n_vocab-dimensional vector handed to sampling (L21) to pick a word.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Why split 'weights' (model) and 'session state' (context) into two objects? What does this gain for one machine serving many users?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="16-build-graph.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">构建计算图</span><span class="lang-en">Building the compute graph</span></div></a><a class="next" href="18-batching.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">批处理</span><span class="lang-en">Batching</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
