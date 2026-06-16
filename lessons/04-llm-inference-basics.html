@@ -397,11 +397,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>表里每一行是"某个 token 在看谁"：亮格表示<strong>可以注意</strong>（不晚于自己），灰格表示<strong>被屏蔽</strong>（在自己之后）。
 实现上很直接：算完注意力分数后，把所有"未来位置"的分数<strong>置成 -inf</strong>，再过 softmax，这些位置的权重就变成 0，等于没看。
 <strong>这就是"自回归"在数学上的样子</strong>——每个位置的输出只依赖它<strong>及它之前</strong>的输入，绝不泄露未来。</p>
-<p><strong>因果掩码还有一个训练时的妙用，值得点破。</strong>训练时我们手里有<strong>完整的句子</strong>，可以把它整段一次喂进模型；
-因果掩码保证第 i 个位置<strong>只能看到 &lt;= i 的词</strong>，于是"用前文预测下一个词"这件事，在<strong>每一个位置上同时成立</strong>——
-一次前向就拿到了全句每个位置的"下一个词"预测，可以并行地和真实的下一个词比对、算损失。这种"<strong>把答案也一起喂进去、
-但靠掩码挡住未来</strong>"的训练方式叫 teacher forcing，让训练极其高效。有意思的是：<strong>这和推理时的 prefill 是同一套机制</strong>——
-prompt 里每个 token 都已知，于是能像训练那样一次并行算完，只不过推理时我们只关心最后一个位置的输出。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  <strong>因果掩码还有一个训练时的妙用，值得点破。</strong>训练时我们手里有<strong>完整的句子</strong>，可以把它整段一次喂进模型；因果掩码保证第 i 个位置<strong>只能看到 &lt;= i 的词</strong>，于是"用前文预测下一个词"这件事，在<strong>每一个位置上同时成立</strong>——一次前向就拿到了全句每个位置的"下一个词"预测，可以并行地和真实的下一个词比对、算损失。这种"<strong>把答案也一起喂进去、但靠掩码挡住未来</strong>"的训练方式叫 teacher forcing，让训练极其高效。有意思的是：<strong>这和推理时的 prefill 是同一套机制</strong>——prompt 里每个 token 都已知，于是能像训练那样一次并行算完，只不过推理时我们只关心最后一个位置的输出。
+</div>
 <p>也正因为训练和推理共用<strong>同一套前向</strong>，llama.cpp 里并没有"两套代码"：无论是 prefill 一次喂进几百个 token，
 还是 decode 每次只喂 1 个新 token，走的都是<strong>同一张计算图</strong>，区别只在"这一批有几个 token、要输出哪些位置"。
 理解了这点，再回看课 03 的七步数据流，就明白它为什么能用一个 <span class="mono">llama_decode</span> 同时扛起这两种节奏。</p>
@@ -656,12 +655,10 @@ masking out every "future" position. Drawn as a grid, it is a <strong>lower tria
 (after itself). The implementation is direct: after computing attention scores, set every "future" score to <strong>-inf</strong>, then softmax turns those
 weights into 0 - as if unseen. <strong>This is what "autoregression" looks like mathematically</strong> - each position's output depends only on
 <strong>itself and what came before</strong>, never leaking the future.</p>
-<p><strong>The causal mask also has a neat training use worth spelling out.</strong> During training we have the <strong>full sentence</strong> and can
-feed it in all at once; the causal mask guarantees position i sees only tokens <strong>&lt;= i</strong>, so "predict the next word from the prefix" holds
-<strong>at every position simultaneously</strong> - one forward pass yields a "next word" prediction at every position, compared in parallel against the
-real next words to compute the loss. This "<strong>feed the answers in too, but block the future with a mask</strong>" training is called teacher forcing,
-and it is extremely efficient. Tellingly, <strong>this is the very same mechanism as prefill at inference time</strong> - every prompt token is known, so it
-can be computed in parallel like training, except at inference we only care about the last position's output.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  <strong>The causal mask also has a neat training use worth spelling out.</strong> During training we have the <strong>full sentence</strong> and can feed it in all at once; the causal mask guarantees position i sees only tokens <strong>&lt;= i</strong>, so "predict the next word from the prefix" holds <strong>at every position simultaneously</strong> - one forward pass yields a "next word" prediction at every position, compared in parallel against the real next words to compute the loss. This "<strong>feed the answers in too, but block the future with a mask</strong>" training is called teacher forcing, and it is extremely efficient. Tellingly, <strong>this is the very same mechanism as prefill at inference time</strong> - every prompt token is known, so it can be computed in parallel like training, except at inference we only care about the last position's output.
+</div>
 <p>Because training and inference share <strong>the same forward pass</strong>, llama.cpp has no "two codebases": whether prefill feeds in hundreds of
 tokens at once or decode feeds just 1 new token, both run the <strong>same compute graph</strong>, differing only in "how many tokens in this batch, and
 which positions to output". With that in mind, revisit lesson 03's seven-step flow and you see why a single <span class="mono">llama_decode</span> can

@@ -410,9 +410,10 @@ option(GGML_VULKAN "ggml: use Vulkan"         OFF)
 课 01 说的"可嵌入"，靠的就是它们。另一类是<strong>可执行程序</strong>，就是你平时直接用的命令：<span class="mono">llama-cli</span>（命令行对话）、
 <span class="mono">llama-server</span>（起一个 HTTP 服务）、<span class="mono">llama-quantize</span>（课 06 用过的量化工具）、<span class="mono">llama-bench</span>（测速）、
 <span class="mono">llama-perplexity</span>（测质量）等等。</p>
-<p>前面说库可以"被别的程序链接"，具体怎么用？你的程序只要<strong>包含 <span class="mono">include/llama.h</span> 这个头文件、再链接上 <span class="mono">libllama</span></strong>，
-就能调用课 01 里那套 C API 来加载模型、跑推理。库可以编成<strong>静态库</strong>（直接打包进你的可执行文件，部署时是单个文件）或<strong>动态库</strong>
-（运行时再加载，多个程序可共享）。课 01 强调的"零依赖单文件可执行"，正是把 libllama 和后端<strong>静态链接</strong>进 llama-cli 的结果。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  前面说库可以"被别的程序链接"，具体怎么用？你的程序只要<strong>包含 <span class="mono">include/llama.h</span> 这个头文件、再链接上 <span class="mono">libllama</span></strong>，就能调用课 01 里那套 C API 来加载模型、跑推理。库可以编成<strong>静态库</strong>（直接打包进你的可执行文件，部署时是单个文件）或<strong>动态库</strong>（运行时再加载，多个程序可共享）。课 01 强调的"零依赖单文件可执行"，正是把 libllama 和后端<strong>静态链接</strong>进 llama-cli 的结果。
+</div>
 <p>这些可执行程序里，最常打交道的是两个：<span class="mono">llama-cli</span> 适合<strong>在命令行里快速试一把</strong>或写脚本；<span class="mono">llama-server</span>
 则会起一个<strong>常驻的 HTTP 服务</strong>，对外提供和 OpenAI 兼容的接口，适合给前端、应用或其它服务调用——你常用的各种本地大模型 App，背后往往就是它。
 两者用的是同一套 <span class="mono">libllama</span>，只是把"入口"包装成了不同形态。</p>
@@ -663,10 +664,10 @@ install it as prompted - most issues resolve by following the error message.</p>
 itself", which other programs can link against; lesson 01's "embeddable" rests on these. The other kind is <strong>executables</strong>, the commands you use directly:
 <span class="mono">llama-cli</span> (command-line chat), <span class="mono">llama-server</span> (starts an HTTP service), <span class="mono">llama-quantize</span> (the
 quantizer from lesson 06), <span class="mono">llama-bench</span> (speed), <span class="mono">llama-perplexity</span> (quality), and more.</p>
-<p>We said the libraries can "be linked by other programs" - how exactly? Your program just <strong>includes the <span class="mono">include/llama.h</span> header and links
-<span class="mono">libllama</span></strong> to call the C API from lesson 01 to load a model and run inference. The libraries can be built <strong>static</strong> (baked into
-your executable, a single file to deploy) or <strong>dynamic</strong> (loaded at runtime, shareable across programs). Lesson 01's "zero-dependency single-file
-executable" is exactly the result of <strong>statically linking</strong> libllama and the backends into llama-cli.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  We said the libraries can "be linked by other programs" - how exactly? Your program just <strong>includes the <span class="mono">include/llama.h</span> header and links <span class="mono">libllama</span></strong> to call the C API from lesson 01 to load a model and run inference. The libraries can be built <strong>static</strong> (baked into your executable, a single file to deploy) or <strong>dynamic</strong> (loaded at runtime, shareable across programs). Lesson 01's "zero-dependency single-file executable" is exactly the result of <strong>statically linking</strong> libllama and the backends into llama-cli.
+</div>
 <p>Of these executables, two you will use most: <span class="mono">llama-cli</span> suits <strong>a quick command-line try</strong> or scripting;
 <span class="mono">llama-server</span> starts a <strong>long-running HTTP service</strong> with an OpenAI-compatible API, for front-ends, apps, or other services to call -
 the local-LLM apps you use are often it under the hood. Both use the same <span class="mono">libllama</span>, just wrapping the "entry point" in different forms.</p>
