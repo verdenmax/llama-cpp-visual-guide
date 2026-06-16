@@ -90,6 +90,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("22-chat-templates.html", "对话模板", "Chat templates",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("23-grammar.html", "语法约束", "Grammar (GBNF)",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -547,6 +549,8 @@ SUBTITLES = {
                          "llama_sampler; sampler chain; top-k/top-p/temp; greedy vs dist"),
     "22-chat-templates.html": ("llm_chat_template · 内建 vs Jinja · ChatML/Llama/Gemma",
                                "llm_chat_template; built-in vs Jinja; ChatML/Llama/Gemma"),
+    "23-grammar.html": ("GBNF · llama_grammar · 掩码采样(-inf) · root 规则",
+                        "GBNF; llama_grammar; mask sampling(-inf); root rule"),
 }
 
 

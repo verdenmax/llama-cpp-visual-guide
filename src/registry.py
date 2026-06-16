@@ -33,4 +33,5 @@ CONTENT = {
     "20-vocabulary.html": part4.LESSON_20,
     "21-sampling.html": part4.LESSON_21,
     "22-chat-templates.html": part4.LESSON_22,
+    "23-grammar.html": part4.LESSON_23,
 }

@@ -1504,6 +1504,67 @@ QUIZZES = {
             },
         ],
     },
+    "23-grammar.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GBNF 语法约束怎么起作用？",
+                    "en": "How does a GBNF grammar constraint work?",
+                },
+                "opts": [
+                    {"zh": "采样时把不符合语法的 token 的 logit 设成负无穷（掩码），模型只能选合法 token", "en": "at sampling time it sets the logit of grammar-illegal tokens to negative infinity (a mask), so the model can only pick legal tokens"},
+                    {"zh": "生成完用正则校验", "en": "validate with a regex after generation"},
+                    {"zh": "微调模型", "en": "fine-tune the model"},
+                    {"zh": "改 prompt 提示", "en": "change the prompt"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "grammar 在采样前掩掉非法候选（logit 设负无穷、概率归零），选定后推进语法状态。这样每步都合法、输出必然合法，不靠事后校验，也不用微调或改 prompt。",
+                    "en": "The grammar masks illegal candidates before sampling (logit to negative infinity, probability zeroed), then advances the grammar state after a pick. So every step is legal and the output is necessarily valid - no after-the-fact check, no fine-tuning or prompt change.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "GBNF 文法的入口（起始）规则叫什么？",
+                    "en": "What is the entry (start) rule of a GBNF grammar called?",
+                },
+                "opts": [
+                    {"zh": "root", "en": "root"},
+                    {"zh": "main", "en": "main"},
+                    {"zh": "start", "en": "start"},
+                    {"zh": "entry", "en": "entry"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GBNF 约定入口规则叫 root，文法从它开始展开（就像程序从 main 开始）。读 GBNF 从 root 出发顺着 ::= 往下看最省力。",
+                    "en": "GBNF conventionally names the entry rule root, where the grammar starts expanding (like a program at main). The easiest way to read a GBNF is to start from root and follow ::= downward.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "相比'生成完再校验'，token 级语法掩码的好处是？",
+                    "en": "Compared to 'check after generation', what is the benefit of token-level grammar masking?",
+                },
+                "opts": [
+                    {"zh": "每一步都保证合法，不会生成到一半才发现非法而重来", "en": "every step is guaranteed legal, never finding illegality halfway and having to retry"},
+                    {"zh": "占内存更少", "en": "it uses less memory"},
+                    {"zh": "不需要词表", "en": "it needs no vocabulary"},
+                    {"zh": "让模型更有创意", "en": "it makes the model more creative"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "事后校验慢且可能反复失败、不保证收敛；token 级掩码把关口前移到每一步，生成出来必然合法、一次成型。它仍要用词表的 token 空间工作。",
+                    "en": "After-the-fact checking is slow, may fail repeatedly, and is not guaranteed to converge; token-level masking moves the gate to every step, so output is necessarily valid in one go. It still works in the vocab's token space.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L21，说说 grammar 作为一种'掩码采样器'为什么常被放在采样链之外、按 grammar_first 单独施加。",
+                "en": "Drawing on L21, explain why grammar, as a 'mask sampler', is often placed outside the sampler chain and applied separately per grammar_first.",
+            },
+        ],
+    },
 }
 
 
