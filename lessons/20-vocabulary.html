@@ -333,7 +333,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>模型内部全是数字。它的输入是一串 token id、输出也是一个 token id 的概率分布；从头到尾，它<strong>碰不到、也不需要</strong>字符串。词表就横在文本世界和 token 世界的边界上，进出两头都得过它这一关——这是它必须存在的根本原因。</p>
 <p>为什么不直接按"字"或"字母"喂模型？因为太细则序列太长（一个汉字若干字节、一句话上千步）、太粗则词表爆炸（穷举所有词不现实）。<strong>子词（subword）</strong>切分是个折中：常见词整块给一个 id，生僻词拆成几个常见片段。于是词表大小可控（几万），序列长度也合理。</p>
 <p>这也解释了为什么"同一句话，不同模型切出的 token 数不一样"。切分规则是模型训练时就定死的、随权重一起存在 GGUF 里（L13 的自描述）；用的时候必须用<strong>同一套</strong>词表，错一套，切出来的 id 就对不上模型学过的东西，输出立刻变成乱码。</p>
-<p>所以词表不是可有可无的配件，而是和权重<strong>绑定</strong>的一部分。加载模型（L14）时，词表也一并从 GGUF 里读出来；它定义了这个模型的"token 空间"——后面采样（L21）选下一个词，选的也正是这张词表里的某个 id。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  所以词表不是可有可无的配件，而是和权重<strong>绑定</strong>的一部分。加载模型（L14）时，词表也一并从 GGUF 里读出来；它定义了这个模型的"token 空间"——后面采样（L21）选下一个词，选的也正是这张词表里的某个 id。
+</div>
 <p>换个角度看，词表其实是模型和人之间"约定俗成"的接口。模型在训练时反复见过的每一个片段，都对应词表里的一个 id；它学到的所有规律，都建立在"这些片段"之上。所以词表一旦定下，就等于划定了模型"认得的世界"——它能流利处理的，永远是这张词表切得出来的片段的组合。</p>
 <p>也正因如此，词表的好坏会直接影响表现。一套切得好的词表，能让常用表达只占很少的 token，让模型把注意力花在"意思"而不是"拼写"上；切得糙则会把简单的词拆得七零八落，既浪费序列长度、又抬高学习难度。可以说，分词是模型训练和推理共同的起跑线。</p>
 <p>不妨用一个数字建立直觉：一个英文单词平均约切成 1.3 个 token，一个汉字常占 1 到 2 个 token，而一段几百字的提示词，往往对应上千个 token。模型的"上下文长度"（L17 的 n_ctx）数的就是 token、不是字符；你能塞进多少对话，最终由分词后的 token 数决定。想明白这点，才能理解为什么"同样几屏文字，有时就超了上下文"。</p>
@@ -351,7 +354,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p><span class="mono">llama_vocab</span> 对外是一套统一接口：<span class="mono">n_tokens()</span> 给词表大小、<span class="mono">tokenize</span> 编码、<span class="mono">token_to_piece</span> 解码，还有一堆查询单个 token 属性的方法。但它把"具体用哪种分词算法"的实现细节，全藏在一个私有的 <span class="mono">impl</span> 结构里——这就是 <strong>pimpl</strong>（pointer to implementation）手法。</p>
 <p>为什么要 pimpl？因为分词算法五花八门（下一节细讲），每种的内部数据结构、合并规则都不同。把它们统统塞进 <span class="mono">impl</span>，对外只露 <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> 这层薄薄的接口，于是<strong>用的人完全无感</strong>：不管底下是 SPM 还是 BPE，调用方式一模一样。换算法、改实现，都不会惊动上层代码。</p>
 <p>这和你前面见过的解耦是一个味道：L14 的 loader 把"解析格式"和"使用模型"分开，L17 的 context 把"只读知识"和"会话状态"分开。这里则是把"分词的脏活"和"统一的接口"分开。一道清晰的边界，让复杂性被关在盒子里。</p>
-<p>还有一组以 <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span> 为代表的标志位，记录"这个模型 tokenize 时该不该自动前置 BOS、后置 EOS"。这些也是随模型定的（写在 GGUF 里），词表忠实地照做——又一次体现 L13 的自描述精神。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  还有一组以 <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span> 为代表的标志位，记录"这个模型 tokenize 时该不该自动前置 BOS、后置 EOS"。这些也是随模型定的（写在 GGUF 里），词表忠实地照做——又一次体现 L13 的自描述精神。
+</div>
 <p>再具体看这套接口的分工。编码这头，<span class="mono">tokenize</span> 要处理的细节其实不少：要不要加空格前缀、要不要规范化、遇到连续空白怎么合并——这些都是不同分词器各自的"脾气"，但全被收进了 <span class="mono">impl</span>。上层只管把字符串递进去、把 id 取出来，完全不必关心底下在折腾什么。</p>
 <p>解码那头同样有讲究。<span class="mono">token_to_piece</span> 不是简单"查表取字符串"，它还要处理特殊 token 该不该显示、字节 token 怎么按 UTF-8 拼、首词要不要补空格这些琐碎规则。把它们也一并封进词表，是为了让"还原文本"在任何模型上都一致正确——你只管循环调用、拼接结果。</p>
 
@@ -368,7 +374,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>主流分词算法就那么几种，<span class="mono">enum llama_vocab_type</span> 把它们一一列出。它们的差别在"怎么把词拆成子词、怎么合并"，但对上层都是同一个 <span class="mono">tokenize</span>。GGUF 的 tokenizer 元数据（L13）决定这个模型用哪种。</p>
 <p><strong>SPM</strong>（SentencePiece）是 LLaMA 系的传统，基于字节级 BPE 且自带字节回退；<strong>BPE</strong>（byte-pair encoding）是 GPT-2 系的字节级合并；<strong>WPM</strong>（WordPiece）是 BERT 系；<strong>UGM</strong>（Unigram）是 T5 系；<strong>RWKV</strong> 用贪心匹配；还有较新的 <strong>PLAMO2</strong>（Aho-Corasick + 动态规划）。这些缩写背后，是不同的历史生态和语言/效率取舍。</p>
 <p>为什么有这么多？因为不同模型家族沿用各自生态的工具链，而每种算法在多语言、代码、压缩率上各有长短。llama.cpp 不强求统一，而是用一套接口（pimpl）把它们都兼容进来——这正是它能跑几十种模型的工程基础之一。</p>
-<p>你不需要记住每种的细节，只要建立一个直觉：<strong>同一句话，换种算法就换种切法</strong>，token 数和边界都可能不同；但只要"编码用的词表"和"模型训练用的词表"是同一套，往返就严丝合缝。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  你不需要记住每种的细节，只要建立一个直觉：<strong>同一句话，换种算法就换种切法</strong>，token 数和边界都可能不同；但只要"编码用的词表"和"模型训练用的词表"是同一套，往返就严丝合缝。
+</div>
 <p>举个直观的例子体会差异。"unhappiness"这个词，BPE 可能切成"un"+"happiness"或"un"+"happy"+"ness"，靠的是训练时统计出来的高频合并；Unigram 则从一个大候选集里、按概率挑出最可能的一种切分。两条路线殊途同归，都想用尽量少的片段覆盖尽量多的文本，只是挑片段的"哲学"不同。</p>
 <p>对中文这种没有天然空格的语言，分词更见功夫。字节级方案会先把汉字降到 UTF-8 字节再合并，于是不依赖"词的边界"也能工作——这也是为什么一个主要用英文训练的模型，往往也能磕磕绊绊地处理中文：因为最底层它认的是字节，而不是某种语言的"词"。</p>
 <p>还有一个常被问到的点：词表该做多大？太小则每个词都得拆成很多片段、序列变长、推理变慢；太大则嵌入表和输出层都跟着膨胀、显存吃紧。所以词表大小是个折中，主流模型大多落在几万到十几万这个区间。它一旦定下，就深深影响着模型的体量与速度——又一次印证"词表和模型是绑在一起的"。</p>
@@ -388,7 +397,10 @@ text = <span class="st">""</span>
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># 逐 token 还原拼接</span></pre>
 <p><span class="mono">tokenize</span> 时可以让它自动前置 BOS（由前面那个 <span class="mono">get_add_bos()</span> 标志控制）；解码时则逐个 token 调 <span class="mono">token_to_piece</span> 把片段拼回去。注意字节 token 还原时要按 UTF-8 把几个字节<strong>拼起来</strong>才是一个完整字符——这也是为什么解码要逐步累积、而不是"一个 token 一个字"。</p>
 <p>特殊 token 之所以重要，是因为它们承载着"文字之外"的结构信息。一段对话里，谁说的、一轮在哪结束、要不要停下，都靠这些标记界定（后面 L22 的对话模板，正是在大量使用它们）。可以把普通 token 看成"内容"、特殊 token 看成"标点和段落标记"——少了后者，模型就分不清对话的骨架。</p>
-<p>字节回退还有个容易被忽略的好处：它让词表可以做得相对"小"而不担心覆盖不全。既然有 256 个字节 token 兜底，词表就不必为塞下每个生僻字而无限膨胀，只收高频片段即可，罕见的交给字节去拼。这是"常见的走捷径、罕见的走通路"的务实设计，和很多系统里"快路径 + 慢路径"异曲同工。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  字节回退还有个容易被忽略的好处：它让词表可以做得相对"小"而不担心覆盖不全。既然有 256 个字节 token 兜底，词表就不必为塞下每个生僻字而无限膨胀，只收高频片段即可，罕见的交给字节去拼。这是"常见的走捷径、罕见的走通路"的务实设计，和很多系统里"快路径 + 慢路径"异曲同工。
+</div>
 <p>这里还要点出一个细节：判断"该不该停"靠的不是单一的 EOS，而是一组"生成结束"（EOG）标记。不同模型用的结束标记不一样，有的用 EOS、有的用 EOT、有的两者皆可；词表里用一个专门的判断（是否属于 EOG 集合）来统一处理。上层只要问一句"这个 token 是不是结束符"，就能正确收尾，而不必记住每个模型的具体约定。</p>
 
 <h2>C API 与衔接</h2>
@@ -525,7 +537,10 @@ By now M4a's model can "compute" - loading (L14), architecture (L15), graph-buil
 <p>Inside, the model is all numbers. Its input is a list of token ids and its output is a probability distribution over a token id; from end to end it <strong>never touches, and never needs</strong>, strings. The vocabulary sits exactly on the border between the text world and the token world, and both directions must pass through it - that is why it must exist.</p>
 <p>Why not feed the model by "character" or "letter" directly? Too fine and the sequence is too long (one CJK glyph is several bytes, one sentence thousands of steps); too coarse and the vocab explodes (enumerating all words is hopeless). <strong>Subword</strong> splitting is the compromise: common words get one id whole, rare words split into a few common pieces. So the vocab size stays manageable (tens of thousands) and the sequence length stays reasonable.</p>
 <p>This also explains why "the same sentence, split by different models, yields a different token count". The splitting rules are fixed at training time and stored with the weights in GGUF (L13's self-description); at use time you must use the <strong>same</strong> vocab - the wrong one and the ids no longer match what the model learned, and the output instantly turns to garbage.</p>
-<p>So the vocabulary is not an optional accessory but a part <strong>bound</strong> to the weights. When the model loads (L14), the vocab is read out of GGUF along with it; it defines this model's "token space" - and when sampling (L21) later picks the next word, it is picking some id from exactly this vocabulary.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  So the vocabulary is not an optional accessory but a part <strong>bound</strong> to the weights. When the model loads (L14), the vocab is read out of GGUF along with it; it defines this model's "token space" - and when sampling (L21) later picks the next word, it is picking some id from exactly this vocabulary.
+</div>
 <p>From another angle, the vocabulary is really an agreed-upon interface between the model and people. Every piece the model saw repeatedly during training maps to one id in the vocab; all the patterns it learned are built on "those pieces". So once the vocab is fixed, it delimits the model's "known world" - what it handles fluently is always combinations of pieces this vocab can produce.</p>
 <p>For that reason the vocab's quality directly affects performance. A well-cut vocab lets common expressions take very few tokens, letting the model spend attention on "meaning" rather than "spelling"; a crude one shatters simple words into fragments, wasting sequence length and raising the learning difficulty. Tokenization is, in a sense, the shared starting line of both training and inference.</p>
 <p>Build intuition with a number: an English word averages about 1.3 tokens, a CJK glyph often takes 1 to 2 tokens, and a prompt of a few hundred characters often maps to over a thousand tokens. The model's "context length" (L17's n_ctx) counts tokens, not characters; how much conversation you can fit is ultimately decided by the post-tokenization token count. Grasp this and you see why "the same few screens of text sometimes overflows the context".</p>
@@ -543,7 +558,10 @@ By now M4a's model can "compute" - loading (L14), architecture (L15), graph-buil
 <p>Outwardly <span class="mono">llama_vocab</span> is one unified interface: <span class="mono">n_tokens()</span> gives the vocab size, <span class="mono">tokenize</span> encodes, <span class="mono">token_to_piece</span> decodes, plus a batch of methods to query a single token's attributes. But it hides all the "which tokenizer algorithm exactly" implementation detail inside a private <span class="mono">impl</span> struct - this is the <strong>pimpl</strong> (pointer to implementation) idiom.</p>
 <p>Why pimpl? Because tokenizer algorithms vary wildly (next section), each with different internal data structures and merge rules. Stuffing them all into <span class="mono">impl</span> and exposing only the thin <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> interface means <strong>the caller feels nothing</strong>: whether SPM or BPE underneath, the call is identical. Swapping algorithms or changing internals never disturbs the upper code.</p>
 <p>This is the same flavor of decoupling you have seen before: L14's loader splits "parse the format" from "use the model", L17's context splits "read-only knowledge" from "session state". Here it splits "the dirty work of tokenizing" from "the unified interface". A clear boundary keeps the complexity locked in a box.</p>
-<p>There is also a set of flags led by <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span>, recording "should this model auto-prepend BOS, auto-append EOS when tokenizing". These too are set per model (written in GGUF), and the vocab faithfully obeys - once more L13's self-description spirit.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  There is also a set of flags led by <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span>, recording "should this model auto-prepend BOS, auto-append EOS when tokenizing". These too are set per model (written in GGUF), and the vocab faithfully obeys - once more L13's self-description spirit.
+</div>
 <p>Look more concretely at this interface's division of labor. On the encoding side, <span class="mono">tokenize</span> handles quite a few details: whether to add a space prefix, whether to normalize, how to merge consecutive whitespace - each tokenizer's own "temperament", all gathered into <span class="mono">impl</span>. The upper layer just hands in a string and takes out ids, never minding what churns below.</p>
 <p>The decoding side is equally subtle. <span class="mono">token_to_piece</span> is not a plain "look up a string"; it also handles whether a special token should show, how byte tokens join by UTF-8, whether the first word needs a leading space. Sealing these into the vocab too keeps "restoring text" consistently correct across any model - you just call in a loop and concatenate.</p>
 
@@ -560,7 +578,10 @@ By now M4a's model can "compute" - loading (L14), architecture (L15), graph-buil
 <p>There are only a handful of mainstream tokenizer algorithms, and <span class="mono">enum llama_vocab_type</span> lists them out. They differ in "how to split a word into subwords and how to merge", but to the upper layer they are all the same <span class="mono">tokenize</span>. GGUF's tokenizer metadata (L13) decides which one this model uses.</p>
 <p><strong>SPM</strong> (SentencePiece) is the LLaMA-family tradition, based on byte-level BPE with built-in byte fallback; <strong>BPE</strong> (byte-pair encoding) is the GPT-2-family byte-level merging; <strong>WPM</strong> (WordPiece) is the BERT family; <strong>UGM</strong> (Unigram) is the T5 family; <strong>RWKV</strong> uses greedy matching; and the newer <strong>PLAMO2</strong> (Aho-Corasick + dynamic programming). Behind these abbreviations lie different historical ecosystems and language/efficiency trade-offs.</p>
 <p>Why so many? Because different model families inherit their own ecosystem's toolchain, and each algorithm has strengths and weaknesses across multilingual coverage, code, and compression rate. llama.cpp does not force uniformity; it makes them all compatible behind one interface (pimpl) - one of the engineering foundations for running dozens of models.</p>
-<p>You need not memorize each one's details, only build an intuition: <strong>the same sentence, a different algorithm means a different cut</strong>, with possibly different token counts and boundaries; but as long as "the vocab used to encode" and "the vocab the model trained with" are the same, the round-trip fits perfectly.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  You need not memorize each one's details, only build an intuition: <strong>the same sentence, a different algorithm means a different cut</strong>, with possibly different token counts and boundaries; but as long as "the vocab used to encode" and "the vocab the model trained with" are the same, the round-trip fits perfectly.
+</div>
 <p>A concrete example brings out the difference. The word "unhappiness", BPE might cut into "un"+"happiness" or "un"+"happy"+"ness", relying on high-frequency merges counted at training time; Unigram instead picks, from a large candidate set, the most probable single split by probability. The two routes converge - both want to cover the most text with the fewest pieces - they just differ in the "philosophy" of choosing pieces.</p>
 <p>For a language like Chinese with no natural spaces, tokenization shows its craft. Byte-level schemes first drop a glyph to UTF-8 bytes and then merge, so they work without relying on "word boundaries" - which is also why a model trained mostly on English can often stumble through Chinese: at the bottom it knows bytes, not any language's "words".</p>
 <p>Another frequently asked point: how big should the vocab be? Too small and every word splits into many pieces, lengthening sequences and slowing inference; too large and the embedding table and output layer bloat with it, straining VRAM. So vocab size is a compromise, and mainstream models mostly land between tens of thousands and a hundred-odd thousand. Once fixed, it deeply shapes the model's size and speed - once more proof that "the vocab and the model are bound together".</p>
@@ -580,7 +601,10 @@ text = <span class="st">""</span>
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># rebuild piece by piece</span></pre>
 <p><span class="mono">tokenize</span> can auto-prepend BOS (controlled by that <span class="mono">get_add_bos()</span> flag); decoding then calls <span class="mono">token_to_piece</span> per token to stitch pieces back. Note that restoring byte tokens means <strong>joining</strong> several bytes by UTF-8 to form one complete character - which is why decoding accumulates step by step, not "one token, one character".</p>
 <p>Special tokens matter because they carry structural information "beyond the text". In a conversation, who spoke, where a turn ends, whether to stop - all are delimited by these markers (L22's chat template, a later lesson, uses them heavily). Think of ordinary tokens as "content" and special tokens as "punctuation and paragraph marks" - without the latter, the model cannot tell the conversation's skeleton.</p>
-<p>Byte fallback has an easily overlooked benefit too: it lets the vocab stay relatively "small" without fearing incomplete coverage. Since 256 byte tokens are the safety net, the vocab need not bloat endlessly to fit every rare glyph - it keeps only high-frequency pieces and leaves the rare ones to bytes. This "shortcut for the common, full path for the rare" is the same pragmatic spirit as many systems' "fast path + slow path".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Byte fallback has an easily overlooked benefit too: it lets the vocab stay relatively "small" without fearing incomplete coverage. Since 256 byte tokens are the safety net, the vocab need not bloat endlessly to fit every rare glyph - it keeps only high-frequency pieces and leaves the rare ones to bytes. This "shortcut for the common, full path for the rare" is the same pragmatic spirit as many systems' "fast path + slow path".
+</div>
 <p>One more detail to call out: deciding "whether to stop" relies not on a single EOS but on a set of "end-of-generation" (EOG) markers. Different models use different end markers - some EOS, some EOT, some either; the vocab handles them uniformly with a dedicated test (whether a token belongs to the EOG set). The upper layer need only ask "is this token a terminator", finishing correctly without memorizing each model's specific convention.</p>
 
 <h2>The C API and the hand-off</h2>

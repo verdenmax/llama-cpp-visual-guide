@@ -367,7 +367,10 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
   <tr><td>root</td><td>入口规则</td></tr>
 </table>
 <p>这张表列了 GBNF 最常用的记号。它们组合起来，几乎能描述任何"结构化"的输出格式：JSON、特定语法的代码、固定模板的回答……仓库的 <span class="mono">grammars/</span> 目录里就放着 JSON、国际象棋着法等现成例子，可以直接拿来用或改。</p>
-<p>入口规则约定叫 <span class="mono">root</span>——文法从这里开始展开，就像程序从 main 开始。读一份 GBNF，最好的办法就是从 root 出发，顺着 <span class="mono">::=</span> 一层层往下看每个名字能变成什么，很快就能在脑子里把它"跑"一遍。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  入口规则约定叫 <span class="mono">root</span>——文法从这里开始展开，就像程序从 main 开始。读一份 GBNF，最好的办法就是从 root 出发，顺着 <span class="mono">::=</span> 一层层往下看每个名字能变成什么，很快就能在脑子里把它"跑"一遍。
+</div>
 <p>BNF 这套记法其实历史悠久，是描述编程语言文法的经典工具；GBNF 是它的一个轻量方言，专为"约束生成"裁剪定制。如果你见过编程语言的文法定义，会对这套 <span class="mono">::=</span> 规则一见如故；没见过也不要紧，把它当成"一套描述合法字符串长什么样的积木"就行。</p>
 <p>写 GBNF 有个实用心法：<strong>从大到小、逐层拆解</strong>。先想清最外层的结构（比如"一个对象"），写成 root；再把它依赖的部分（键、值、空白）各写一条规则；遇到"可以是好几种之一"的就用 <span class="mono">|</span>，遇到"重复若干次"的就用 <span class="mono">*</span>/<span class="mono">+</span>。一层层拆到最底层的字符类，一份文法就成了。仓库里的现成例子是最好的模板。</p>
 
@@ -393,7 +396,10 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
   内部还细致处理了 <strong>UTF-8</strong>：一个字符可能跨多个字节 token（L20 的字节回退），语法用一个 <span class="mono">partial_utf8</span> 缓冲来拼接半个字符，等拼完整再判断合不合规。这些细节你不用记，但知道"它考虑到了多字节字符"就够了——正是这种周到，让约束在真实多语言文本上也站得住。
 </div>
 <p>这里值得停下来体会"<strong>状态机</strong>"这个比喻。一份文法被加载后，运行时维护的不是"整段文本"，而是"当前走到文法的哪个位置、接下来允许哪些字符"。每接受一个 token，这个位置就往前挪；它就像一个在文法图上移动的光标，光标所在处决定了下一步的合法集。</p>
-<p>正因为状态是逐步推进的，<strong>同一个 token 在不同位置合不合法是不同的</strong>。比如在 JSON 里，刚写完 <span class="mono">{</span> 时只允许引号（开始一个键）或 <span class="mono">}</span>（空对象），而写完一个完整键值对后又只允许逗号或 <span class="mono">}</span>。grammar 每一步都根据当前状态算出这个"此刻合法集"，再据此掩码。约束不是一成不变的，而是<strong>随上下文动态变化</strong>的。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  正因为状态是逐步推进的，<strong>同一个 token 在不同位置合不合法是不同的</strong>。比如在 JSON 里，刚写完 <span class="mono">{</span> 时只允许引号（开始一个键）或 <span class="mono">}</span>（空对象），而写完一个完整键值对后又只允许逗号或 <span class="mono">}</span>。grammar 每一步都根据当前状态算出这个"此刻合法集"，再据此掩码。约束不是一成不变的，而是<strong>随上下文动态变化</strong>的。
+</div>
 <p>有人会问：每步都遍历几万个候选去判断合不合法，不会很慢吗？实现上做了不少优化——把文法预编译成高效结构、对候选按规则栈快速筛、缓存中间结果等等。多数情况下这点开销相对模型的一次前向（L17）几乎可忽略。所以你尽管放心用语法约束，它换来的可靠性，远大于那一点点代价。</p>
 <p>举个落地的例子：很多"让大模型当后端"的应用，都靠语法约束保证它返回能被程序直接吃下的 JSON。你定义好返回结构的文法、挂上 grammar 采样器，模型这一头就成了一个"永远输出合法结构"的可靠组件。没有它，你得在模型和程序之间塞一层解析、纠错、重试的胶水；有了它，那层胶水基本可以省掉。这就是约束带来的实打实的工程价值。</p>
 
@@ -404,7 +410,10 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 </div>
 <p>文法在加载时会被<strong>编译</strong>成一串底层元素，类型由 <span class="mono">enum llama_gretype</span> 定义。你写的每条 <span class="mono">::=</span> 规则，最终都被翻译成这样一串元素，供运行时高效匹配。</p>
 <p>这些类型就是 GBNF 记号的"机器码"：<span class="mono">CHAR</span> 是一个字面字符，<span class="mono">CHAR_RNG_UPPER</span> 配合表示一个范围（如 a-z），<span class="mono">CHAR_NOT</span> 是取反类，<span class="mono">RULE_REF</span> 是"引用另一条规则"，<span class="mono">ALT</span> 是备选分隔，<span class="mono">END</span> 收尾。把人写的文法降到这一层，是为了让运行时能快速判断"下一个字符合不合法"。</p>
-<p>那 grammar 怎么接进采样？通过一个<strong>采样器</strong>：<span class="mono">llama_sampler_init_grammar(vocab, 文法串, root)</span> 返回的就是 L21 那套 <span class="mono">llama_sampler</span>——它的 <span class="mono">apply</span> 调掩码、<span class="mono">accept</span> 调推进。换句话说，grammar 本质上就是<strong>一个特殊的采样器</strong>，完美复用了 L21 的接口。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  那 grammar 怎么接进采样？通过一个<strong>采样器</strong>：<span class="mono">llama_sampler_init_grammar(vocab, 文法串, root)</span> 返回的就是 L21 那套 <span class="mono">llama_sampler</span>——它的 <span class="mono">apply</span> 调掩码、<span class="mono">accept</span> 调推进。换句话说，grammar 本质上就是<strong>一个特殊的采样器</strong>，完美复用了 L21 的接口。
+</div>
 <p>不过它通常<strong>不混进主采样链</strong>，而是作为独立对象，按一个 <span class="mono">grammar_first</span> 标志决定在链前还是链后单独施加。这是因为约束和"调温度/裁候选"那些塑形操作性质不同，需要灵活安排先后。</p>
 <div class="card warn">
   <div class="tag">⚠ 注意</div>
@@ -564,7 +573,10 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
   <tr><td>root</td><td>entry rule</td></tr>
 </table>
 <p>This table lists GBNF's most common notations. Combined, they can describe almost any "structured" output format: JSON, code in a particular syntax, fixed-template answers... The repo's <span class="mono">grammars/</span> directory ships ready examples like JSON and chess moves, to use directly or adapt.</p>
-<p>The entry rule is conventionally called <span class="mono">root</span> - the grammar starts expanding here, like a program starts at main. The best way to read a GBNF is to start from root and follow <span class="mono">::=</span> down level by level, seeing what each name becomes; you can quickly "run" it in your head.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  The entry rule is conventionally called <span class="mono">root</span> - the grammar starts expanding here, like a program starts at main. The best way to read a GBNF is to start from root and follow <span class="mono">::=</span> down level by level, seeing what each name becomes; you can quickly "run" it in your head.
+</div>
 <p>BNF as a notation is in fact long-standing, a classic tool for describing programming-language grammars; GBNF is a lightweight dialect of it, trimmed and tailored for "constraining generation". If you have seen a programming language's grammar definition, you will take to these <span class="mono">::=</span> rules at first sight; if not, no matter - just treat it as "a set of blocks describing what a legal string looks like".</p>
 <p>There is a practical knack to writing GBNF: <strong>top-down, decompose layer by layer</strong>. First think out the outermost structure (say "an object"), written as root; then write a rule for each part it depends on (key, value, whitespace); use <span class="mono">|</span> for "one of several", <span class="mono">*</span>/<span class="mono">+</span> for "repeat some times". Decompose down to the bottom character classes and a grammar is done. The ready examples in the repo are the best templates.</p>
 
@@ -590,7 +602,10 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
   Internally it also carefully handles <strong>UTF-8</strong>: one character may span several byte tokens (L20's byte fallback), so the grammar uses a <span class="mono">partial_utf8</span> buffer to stitch a half character and judges legality once it is whole. You need not memorize these details, but knowing "it accounts for multi-byte characters" is enough - this thoroughness is what lets the constraint hold up on real multilingual text.
 </div>
 <p>It is worth pausing here to savor the "<strong>state machine</strong>" metaphor. Once a grammar is loaded, what the runtime maintains is not "the whole text" but "where in the grammar it is now, which characters are allowed next". Each accepted token nudges this position forward; it is like a cursor moving over the grammar graph, and where the cursor sits decides the legal set for the next step.</p>
-<p>Because the state advances step by step, <strong>the same token can be legal or not at different positions</strong>. In JSON, for instance, right after <span class="mono">{</span> only a quote (starting a key) or <span class="mono">}</span> (empty object) is allowed, while after a complete key-value pair only a comma or <span class="mono">}</span> is. The grammar computes this "legal set right now" from the current state each step and masks accordingly. The constraint is not fixed but <strong>changes dynamically with context</strong>.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Because the state advances step by step, <strong>the same token can be legal or not at different positions</strong>. In JSON, for instance, right after <span class="mono">{</span> only a quote (starting a key) or <span class="mono">}</span> (empty object) is allowed, while after a complete key-value pair only a comma or <span class="mono">}</span> is. The grammar computes this "legal set right now" from the current state each step and masks accordingly. The constraint is not fixed but <strong>changes dynamically with context</strong>.
+</div>
 <p>One might ask: scanning tens of thousands of candidates each step to judge legality, is that not slow? The implementation does plenty of optimization - precompiling the grammar into efficient structures, quickly filtering candidates by the rule stacks, caching intermediate results, and so on. In most cases this cost is nearly negligible against the model's one forward pass (L17). So use grammar constraints freely; the reliability they buy far outweighs the small price.</p>
 <p>A concrete grounded example: many "let the large model be a backend" applications rely on grammar constraints to guarantee it returns JSON a program can consume directly. Define the grammar for the return structure, attach the grammar sampler, and the model end becomes a reliable component that "always outputs a legal structure". Without it, you must stuff a layer of parse, correct, and retry glue between the model and the program; with it, that glue layer can largely be dropped. This is the concrete engineering value a constraint brings.</p>
 
@@ -601,7 +616,10 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 </div>
 <p>A grammar is <strong>compiled</strong> at load time into a string of low-level elements, whose types are defined by <span class="mono">enum llama_gretype</span>. Every <span class="mono">::=</span> rule you write is ultimately translated into such a string of elements for the runtime to match efficiently.</p>
 <p>These types are GBNF notation's "machine code": <span class="mono">CHAR</span> is a literal character, <span class="mono">CHAR_RNG_UPPER</span> pairs up to express a range (like a-z), <span class="mono">CHAR_NOT</span> is a negated class, <span class="mono">RULE_REF</span> is "reference another rule", <span class="mono">ALT</span> is an alternation separator, <span class="mono">END</span> closes. Lowering the human-written grammar to this level lets the runtime quickly decide "is the next character legal".</p>
-<p>So how does the grammar plug into sampling? Through a <strong>sampler</strong>: <span class="mono">llama_sampler_init_grammar(vocab, grammar_str, root)</span> returns exactly L21's <span class="mono">llama_sampler</span> - its <span class="mono">apply</span> calls the mask, its <span class="mono">accept</span> calls the advance. In other words, the grammar is essentially <strong>a special sampler</strong>, perfectly reusing L21's interface.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  So how does the grammar plug into sampling? Through a <strong>sampler</strong>: <span class="mono">llama_sampler_init_grammar(vocab, grammar_str, root)</span> returns exactly L21's <span class="mono">llama_sampler</span> - its <span class="mono">apply</span> calls the mask, its <span class="mono">accept</span> calls the advance. In other words, the grammar is essentially <strong>a special sampler</strong>, perfectly reusing L21's interface.
+</div>
 <p>But it usually does <strong>not</strong> mix into the main sampler chain; it is a separate object applied before or after the chain per a <span class="mono">grammar_first</span> flag. This is because constraint differs in nature from shaping ops like "tune temperature / prune candidates", needing flexible ordering.</p>
 <div class="card warn">
   <div class="tag">⚠ Heads-up</div>
