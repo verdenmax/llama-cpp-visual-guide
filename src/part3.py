@@ -60,14 +60,16 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
 它就自己 <span class="mono">ggml_aligned_malloc(mem_size)</span> 要一块对齐过的内存（源码见 <span class="mono">ggml/src/ggml.c</span>）。
 <span class="mono">ggml_free</span> 则把这块 arena 整体还掉（只有当这块内存是 ggml 自己分配的、即 <span class="mono">mem_buffer_owned</span> 时才释放）。
 "<strong>能让你传入 mem_buffer</strong>"这一点很重要：它意味着 ggml 可以在别人给的内存上工作，方便嵌入到各种环境、或复用一块缓冲反复建图。</p>
-<p>顺带说说<strong>对齐</strong>。<span class="mono">ggml_aligned_malloc</span> 要的不是普通内存，而是<strong>对齐到特定边界</strong>的内存——因为后端的 SIMD 指令
-（AVX、NEON 等，L07 提过）往往要求数据地址对齐才能高效甚至正确地读取。arena 内部每切一个对象，也会按 <span class="mono">GGML_MEM_ALIGN</span> 对齐。
-你可以把 arena 理解成一条<strong>带刻度的尺子</strong>，每个对象都落在整齐的刻度上，而不是随手乱放——这点整齐，换来的是计算时的速度。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  顺带说说<strong>对齐</strong>。<span class="mono">ggml_aligned_malloc</span> 要的不是普通内存，而是<strong>对齐到特定边界</strong>的内存——因为后端的 SIMD 指令（AVX、NEON 等，L07 提过）往往要求数据地址对齐才能高效甚至正确地读取。arena 内部每切一个对象，也会按 <span class="mono">GGML_MEM_ALIGN</span> 对齐。你可以把 arena 理解成一条<strong>带刻度的尺子</strong>，每个对象都落在整齐的刻度上，而不是随手乱放——这点整齐，换来的是计算时的速度。
+</div>
 <p>所以严格说，<span class="mono">ggml_aligned_malloc</span> 与普通 <span class="mono">malloc</span> 的区别就在"<strong>对齐</strong>"二字：普通 malloc 只保证够大、不保证地址落在某个边界上；
 而 ggml 要的内存，起始地址必须是某个对齐值（如 16 或 32 字节）的整数倍，这样后端才能放心地用对齐版的 SIMD 加载指令一次搬一大批数。对齐这件小事，体现的是 ggml"<strong>处处为后端计算让路</strong>"的取向。</p>
-<p>还有一个常被问到的问题：<strong>一个程序里能开几个 <span class="mono">ggml_context</span>？</strong>答案是<strong>多个</strong>，而且这很常见。
-比如可以用一个 ctx 装<strong>模型权重</strong>（活得久，整个推理期间都在）、另一个 ctx 装<strong>每步推理的计算图</strong>（活得短，算完就清）。
-不同生命周期的东西放进不同的池子，<strong>该长留的长留、该速清的速清</strong>，互不干扰——这也是 arena 模型带来的便利：一次 <span class="mono">ggml_free</span> 就能精准回收一整批同寿命的对象。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  还有一个常被问到的问题：<strong>一个程序里能开几个 <span class="mono">ggml_context</span>？</strong>答案是<strong>多个</strong>，而且这很常见。比如可以用一个 ctx 装<strong>模型权重</strong>（活得久，整个推理期间都在）、另一个 ctx 装<strong>每步推理的计算图</strong>（活得短，算完就清）。不同生命周期的东西放进不同的池子，<strong>该长留的长留、该速清的速清</strong>，互不干扰——这也是 arena 模型带来的便利：一次 <span class="mono">ggml_free</span> 就能精准回收一整批同寿命的对象。
+</div>
 <p>这套机制在 llama.cpp 里随处可见。加载一个模型时，loader 会先按 GGUF 头里记的张量数量和大小，<strong>估出需要多大的元数据 arena</strong>，
 <span class="mono">ggml_init</span> 出一个（通常 <span class="mono">no_alloc=true</span> 的）context，再把每个权重张量在里面登记一遍；权重的真正数据则由后端缓冲承接（甚至直接 mmap 自文件，见 L13）。
 每跑一步推理，又会用另一个 context 临时搭出这一步的计算图、算完即弃。所以你大可以把 <span class="mono">ggml_context</span> 想成 ggml 世界里<strong>最基本的"工作台"</strong>：
@@ -86,9 +88,10 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
 <p>多说一句那个 <span class="mono">ggml_object</span> 头里到底装了什么：自己在 arena 里的<strong>偏移</strong> <span class="mono">offs</span>、占用的<strong>大小</strong> <span class="mono">size</span>、
 指向<strong>下一个对象</strong>的指针 <span class="mono">next</span>，外加一个标记"这是张量还是图"的类型字段。<span class="mono">ggml_context</span> 自己则记着链表的头尾
 （<span class="mono">objects_begin</span> / <span class="mono">objects_end</span>）和已放对象数 <span class="mono">n_objects</span>。有了尾指针，"在末尾追加"就是 O(1)，这是 bump 快的又一面。</p>
-<p>为什么这种"只加不减"的游标能行得通？因为<strong>建图阶段几乎只增不删</strong>——你是在一口气把整张计算图搭出来，中途很少需要单独释放某个张量。
-既然没有"挖东墙补西墙"的需求，那最简单的分配器（一个往前推的游标）就够用了，连记录空闲块、合并碎片这些复杂逻辑都省了。
-这是一种典型的"<strong>用使用场景的特点，换分配器的极致简单</strong>"：等到 L10 真正要<strong>复用</strong>内存时，才会上更聪明的分配器；而这里的建图阶段，朴素的 bump 反而最合适。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  为什么这种"只加不减"的游标能行得通？因为<strong>建图阶段几乎只增不删</strong>——你是在一口气把整张计算图搭出来，中途很少需要单独释放某个张量。既然没有"挖东墙补西墙"的需求，那最简单的分配器（一个往前推的游标）就够用了，连记录空闲块、合并碎片这些复杂逻辑都省了。这是一种典型的"<strong>用使用场景的特点，换分配器的极致简单</strong>"：等到 L10 真正要<strong>复用</strong>内存时，才会上更聪明的分配器；而这里的建图阶段，朴素的 bump 反而最合适。
+</div>
 <pre class="code"><span class="cm"># 对应 ggml/src/ggml.c 的 ggml_new_object / ggml_new_tensor_impl</span>
 <span class="kw">def</span> <span class="fn">new_object</span>(ctx, size):
     cur = ctx.objects_end.offs + ctx.objects_end.size   <span class="cm"># 当前游标</span>
@@ -97,10 +100,10 @@ ctx = <span class="fn">ggml_init</span>(params);   <span class="cm">// 一次性
     obj = place_at(ctx.mem_buffer + cur)                <span class="cm"># 就地放下</span>
     link_into(ctx.objects, obj)                         <span class="cm"># 接入链表尾</span>
     <span class="kw">return</span> obj</pre>
-<p>这里有两个要点。其一，<strong>张量的元数据（那个 <span class="mono">ggml_tensor</span> 结构）和它的数据缓冲，都从这同一块 arena 里切</strong>——
-没有"每个张量单独 <span class="mono">malloc</span> 一次"这回事。其二，<strong>arena 不会自动扩容</strong>：游标一旦撞到边界，ggml 直接 <span class="mono">abort</span>。
-所以使用者要<strong>事先把池子估得足够大</strong>。ggml 提供了 <span class="mono">ggml_tensor_overhead()</span> 帮你算"每个张量的元数据要占多少字节"，
-建图时常按 <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> 个节点的规模留余量。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这里有两个要点。其一，<strong>张量的元数据（那个 <span class="mono">ggml_tensor</span> 结构）和它的数据缓冲，都从这同一块 arena 里切</strong>——没有"每个张量单独 <span class="mono">malloc</span> 一次"这回事。其二，<strong>arena 不会自动扩容</strong>：游标一旦撞到边界，ggml 直接 <span class="mono">abort</span>。所以使用者要<strong>事先把池子估得足够大</strong>。ggml 提供了 <span class="mono">ggml_tensor_overhead()</span> 帮你算"每个张量的元数据要占多少字节"，建图时常按 <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> 个节点的规模留余量。
+</div>
 <p>举个具体感受："元数据"到底有多轻？一个 <span class="mono">ggml_tensor</span> 结构加上对象头，<span class="mono">ggml_tensor_overhead()</span> 量出来不过几百字节。
 就算一张图有上千个张量，元数据加起来也才几百 KB——和动辄几个 GB 的<strong>权重数据</strong>相比，几乎可以忽略。这再次印证了"轻元数据 / 重数据"的分野：
 在 <span class="mono">no_alloc=true</span> 下，<span class="mono">ggml_context</span> 这块 arena 只需开<strong>几 MB</strong> 装下整张图的骨架就绰绰有余，真正吃内存的数据另有去处。</p>
@@ -248,18 +251,18 @@ that big arena</strong> - if you passed a <span class="mono">mem_buffer</span> i
 <span class="mono">ggml_aligned_malloc(mem_size)</span> itself (see <span class="mono">ggml/src/ggml.c</span>). <span class="mono">ggml_free</span> returns the whole arena
 (only freeing the block if ggml allocated it itself, i.e. <span class="mono">mem_buffer_owned</span>). That "<strong>you can pass in mem_buffer</strong>" matters: ggml can work
 on memory someone else gave it, handy for embedding into various environments or reusing one buffer to build graphs repeatedly.</p>
-<p>A word on <strong>alignment</strong>. <span class="mono">ggml_aligned_malloc</span> wants not just any memory but memory <strong>aligned to a particular boundary</strong> - because
-backend SIMD instructions (AVX, NEON, from L07) often require aligned addresses to read efficiently or even correctly. Each object carved inside the arena is also aligned to
-<span class="mono">GGML_MEM_ALIGN</span>. Think of the arena as a <strong>ruler with tick marks</strong>: every object lands on a tidy tick rather than wherever - and that bit of
-tidiness buys speed at compute time.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  A word on <strong>alignment</strong>. <span class="mono">ggml_aligned_malloc</span> wants not just any memory but memory <strong>aligned to a particular boundary</strong> - because backend SIMD instructions (AVX, NEON, from L07) often require aligned addresses to read efficiently or even correctly. Each object carved inside the arena is also aligned to <span class="mono">GGML_MEM_ALIGN</span>. Think of the arena as a <strong>ruler with tick marks</strong>: every object lands on a tidy tick rather than wherever - and that bit of tidiness buys speed at compute time.
+</div>
 <p>So strictly, the difference between <span class="mono">ggml_aligned_malloc</span> and plain <span class="mono">malloc</span> is just
 "<strong>alignment</strong>": plain malloc only guarantees big-enough, not that the address falls on a boundary; ggml's memory must start at a multiple of some alignment (16 or
 32 bytes), so the backend can confidently use aligned SIMD loads to move a batch at once. This small thing reflects ggml's bias of "<strong>always making way for backend
 compute</strong>".</p>
-<p>One more often-asked question: <strong>how many <span class="mono">ggml_context</span>s can a program open?</strong> The answer is <strong>several</strong>, and that is common.
-For instance, one ctx for the <strong>model weights</strong> (long-lived, present the whole inference) and another for <strong>each step's compute graph</strong> (short-lived,
-cleared once computed). Putting things of different lifetimes into different pools lets <strong>the long-lived stay and the short-lived clear fast</strong>, without interfering -
-another convenience of the arena model: one <span class="mono">ggml_free</span> precisely reclaims a whole batch of same-lifetime objects.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  One more often-asked question: <strong>how many <span class="mono">ggml_context</span>s can a program open?</strong> The answer is <strong>several</strong>, and that is common. For instance, one ctx for the <strong>model weights</strong> (long-lived, present the whole inference) and another for <strong>each step's compute graph</strong> (short-lived, cleared once computed). Putting things of different lifetimes into different pools lets <strong>the long-lived stay and the short-lived clear fast</strong>, without interfering - another convenience of the arena model: one <span class="mono">ggml_free</span> precisely reclaims a whole batch of same-lifetime objects.
+</div>
 <p>This mechanism is everywhere in llama.cpp. When loading a model, the loader first <strong>estimates how big a metadata arena</strong> it needs from the tensor count and sizes
 in the GGUF header, <span class="mono">ggml_init</span>s a (usually <span class="mono">no_alloc=true</span>) context, and registers every weight tensor in it; the weights' real data is
 taken up by backend buffers (or even mmap'd straight from the file, see L13). Each inference step uses another context to temporarily build that step's compute graph, discarded
@@ -280,10 +283,10 @@ and the cursor always rests at the end of the last object. A new object is carve
 <span class="mono">size</span> it occupies, a pointer <span class="mono">next</span> to the <strong>next object</strong>, plus a type field marking "tensor or graph".
 <span class="mono">ggml_context</span> itself tracks the list head/tail (<span class="mono">objects_begin</span> / <span class="mono">objects_end</span>) and the object count
 <span class="mono">n_objects</span>. With a tail pointer, "append at the end" is O(1) - another face of why bump is fast.</p>
-<p>And why does this "only-add, never-remove" cursor work? Because <strong>the build phase is almost append-only</strong> - you are constructing the whole compute graph in one
-go, rarely needing to free a single tensor mid-way. With no "rob Peter to pay Paul" need, the simplest allocator (a forward-pushing cursor) suffices, sparing all the complexity
-of tracking free blocks and merging fragments. This is a classic "<strong>trade the scenario's traits for the allocator's utter simplicity</strong>": not until L10 actually
-needs to <strong>reuse</strong> memory does a smarter allocator come in; here in the build phase, plain bump is the best fit.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  And why does this "only-add, never-remove" cursor work? Because <strong>the build phase is almost append-only</strong> - you are constructing the whole compute graph in one go, rarely needing to free a single tensor mid-way. With no "rob Peter to pay Paul" need, the simplest allocator (a forward-pushing cursor) suffices, sparing all the complexity of tracking free blocks and merging fragments. This is a classic "<strong>trade the scenario's traits for the allocator's utter simplicity</strong>": not until L10 actually needs to <strong>reuse</strong> memory does a smarter allocator come in; here in the build phase, plain bump is the best fit.
+</div>
 <pre class="code"><span class="cm"># cf. ggml_new_object / ggml_new_tensor_impl in ggml/src/ggml.c</span>
 <span class="kw">def</span> <span class="fn">new_object</span>(ctx, size):
     cur = ctx.objects_end.offs + ctx.objects_end.size   <span class="cm"># current cursor</span>
@@ -292,10 +295,10 @@ needs to <strong>reuse</strong> memory does a smarter allocator come in; here in
     obj = place_at(ctx.mem_buffer + cur)                <span class="cm"># place in situ</span>
     link_into(ctx.objects, obj)                         <span class="cm"># append to the list</span>
     <span class="kw">return</span> obj</pre>
-<p>Two points here. One, <strong>a tensor's metadata (the <span class="mono">ggml_tensor</span> struct) and its data buffer are both carved from this same arena</strong> - there
-is no "malloc once per tensor". Two, <strong>the arena does not auto-grow</strong>: the moment the cursor hits the edge, ggml <span class="mono">abort</span>s. So the user must
-<strong>size the pool large enough up front</strong>. ggml offers <span class="mono">ggml_tensor_overhead()</span> to compute "how many bytes each tensor's metadata takes",
-and graphs commonly leave headroom for <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> nodes.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  Two points here. One, <strong>a tensor's metadata (the <span class="mono">ggml_tensor</span> struct) and its data buffer are both carved from this same arena</strong> - there is no "malloc once per tensor". Two, <strong>the arena does not auto-grow</strong>: the moment the cursor hits the edge, ggml <span class="mono">abort</span>s. So the user must <strong>size the pool large enough up front</strong>. ggml offers <span class="mono">ggml_tensor_overhead()</span> to compute "how many bytes each tensor's metadata takes", and graphs commonly leave headroom for <span class="mono">GGML_DEFAULT_GRAPH_SIZE = 2048</span> nodes.
+</div>
 <p>For a concrete feel: just how light is "metadata"? A <span class="mono">ggml_tensor</span> struct plus object header, as measured by
 <span class="mono">ggml_tensor_overhead()</span>, is only a few hundred bytes. Even a graph with thousands of tensors totals just a few hundred KB of metadata - next to the multiple
 GB of <strong>weight data</strong>, practically nothing. This again confirms the "light metadata / heavy data" split: under <span class="mono">no_alloc=true</span>, the
@@ -435,9 +438,10 @@ LESSON_09 = {
 <span class="mono">src[1]</span> 两个指针分别指回 <span class="mono">a</span> 和 <span class="mono">b</span>（注意箭头方向——是结果<strong>指回</strong>输入，
 所以叫"反向指针"）。这两样东西，L05 介绍 <span class="mono">ggml_tensor</span> 字段时就见过，当时只说"记录它怎么来的"，现在你看到它真正的用途了。
 把源码摊开看，每个算子函数都是同一个套路：</p>
-<p>这里值得停一下，体会一下这个设计有多统一：无论是矩阵乘、加法、归一化还是注意力，几百个算子函数<strong>清一色都是"建张量 + 填 op/src + 返回"</strong>这个三步模板。
-正因为如此一致，ggml 才能用<strong>同一套建图、同一套执行</strong>机制处理所有算子——加一个新算子，主要就是定义一个新的 <span class="mono">op</span> 枚举值、再写它的形状推导和计算实现，
-建图这一环完全不用改。这种"<strong>用统一模板装下千变万化</strong>"的克制，是 ggml 代码读起来不乱的重要原因。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里值得停一下，体会一下这个设计有多统一：无论是矩阵乘、加法、归一化还是注意力，几百个算子函数<strong>清一色都是"建张量 + 填 op/src + 返回"</strong>这个三步模板。正因为如此一致，ggml 才能用<strong>同一套建图、同一套执行</strong>机制处理所有算子——加一个新算子，主要就是定义一个新的 <span class="mono">op</span> 枚举值、再写它的形状推导和计算实现，建图这一环完全不用改。这种"<strong>用统一模板装下千变万化</strong>"的克制，是 ggml 代码读起来不乱的重要原因。
+</div>
 <pre class="code"><span class="cm">// 简化自 ggml/src/ggml.c 的 ggml_mul_mat</span>
 <span class="kw">struct</span> ggml_tensor * <span class="fn">ggml_mul_mat</span>(ctx, a, b) {
     result = <span class="fn">ggml_new_tensor</span>(ctx, GGML_TYPE_F32, ...);  <span class="cm">// 只建一个空的结果张量</span>
@@ -454,8 +458,10 @@ LESSON_09 = {
 你可以拿这张借条继续往下写——把它当作下一个算子的输入，再得到一张新借条；如此层层叠叠，直到写出最终输出。整个过程里，<strong>没有任何真实数字被算出来</strong>，
 你手里攒下的，是一摞环环相扣的借条。等到"执行"那一刻，ggml 才会顺着这摞借条，从最底层开始，把每一张都兑现成真实的数据。这种"<strong>先开借条、后统一兑现</strong>"，
 正是惰性（lazy）二字的含义，也是这一课从头到尾在反复打磨的那个核心直觉。</p>
-<p>这也解释了一个新手常踩的坑：在 ggml 里，<strong>建完图就去读结果张量的数据，是读不到东西的</strong>——借条还没兑现呢。
-必须先把图交给后端执行（下一课），结果张量的 <span class="mono">data</span> 才会被填上真实数值。把"建图"和"执行"分成两个明确的阶段，是用好 ggml API 的第一课。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这也解释了一个新手常踩的坑：在 ggml 里，<strong>建完图就去读结果张量的数据，是读不到东西的</strong>——借条还没兑现呢。必须先把图交给后端执行（下一课），结果张量的 <span class="mono">data</span> 才会被填上真实数值。把"建图"和"执行"分成两个明确的阶段，是用好 ggml API 的第一课。
+</div>
 
 <h2>把张量串成一张图</h2>
 <p>一个算子记下两三个 src，看起来不起眼；但当你把整个模型的前向过程都写出来，这些 src 指针就<strong>层层相扣，连成了一张有向图</strong>。
@@ -489,11 +495,10 @@ y 依赖 W2 和 h，h 又依赖 W1 和 x。ggml 用 <span class="mono">ggml_buil
 排在前面的，一定不依赖排在后面的。这样执行时只要从头到尾依次算，每算一个节点，它的输入<strong>保证已经算好了</strong>。
 <span class="mono">ggml_cgraph</span> 本身就是几个数组：<span class="mono">nodes</span>（算子结果）、<span class="mono">leafs</span>（输入/常量）、
 计数 <span class="mono">n_nodes</span>/<span class="mono">n_leafs</span>、容量 <span class="mono">size</span>（默认 <span class="mono">GGML_DEFAULT_GRAPH_SIZE=2048</span>）。</p>
-<p>"<strong>拓扑排序</strong>"这个词听起来唬人，其实道理就是一句大白话：<strong>要用到的东西，必须先准备好</strong>。
-做菜时你不能在切菜之前就下锅，算 <span class="mono">y</span> 之前必须先有 <span class="mono">h</span>。拓扑排序就是把所有步骤排成一个合法的先后顺序，
-让每一步用到的输入都在它之前已经备齐。一张图可能有<strong>不止一种</strong>合法顺序（比如两个互不依赖的分支谁先谁后都行），但只要满足"依赖在前"，
-执行起来结果就一样。ggml 的回溯式建图，自动帮你算出了这样一个合法顺序，你完全不用操心。它内部还用一个"已访问"集合避免把同一个张量重复收进图——
-当多个算子<strong>共享同一个输入</strong>时（这在神经网络里太常见了），那个输入只会被收一次、也只会被算一次。</p>
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  "<strong>拓扑排序</strong>"这个词听起来唬人，其实道理就是一句大白话：<strong>要用到的东西，必须先准备好</strong>。做菜时你不能在切菜之前就下锅，算 <span class="mono">y</span> 之前必须先有 <span class="mono">h</span>。拓扑排序就是把所有步骤排成一个合法的先后顺序，让每一步用到的输入都在它之前已经备齐。一张图可能有<strong>不止一种</strong>合法顺序（比如两个互不依赖的分支谁先谁后都行），但只要满足"依赖在前"，执行起来结果就一样。ggml 的回溯式建图，自动帮你算出了这样一个合法顺序，你完全不用操心。它内部还用一个"已访问"集合避免把同一个张量重复收进图——当多个算子<strong>共享同一个输入</strong>时（这在神经网络里太常见了），那个输入只会被收一次、也只会被算一次。
+</div>
 <p>把这套机制放回真实的 llama.cpp 里看：加载一个模型后，每跑一步推理，llama.cpp 都会用一长串算子调用（embedding、几十层的注意力和 FFN、最后的输出投影）
 <strong>搭出这一步的完整计算图</strong>——可能有上千个节点。这一大串调用，没有一个真的在算，全是在<strong>填 op/src、连依赖</strong>；
 直到图搭完、交给后端，才一次性算出这一步的 logits。所以你之前学的"一次 decode 内部是先建图、再执行"（L03），到这里就有了精确的含义：
@@ -617,10 +622,10 @@ and again in graph building and differentiation.</p>
 <span class="mono">src[0]</span> and <span class="mono">src[1]</span> point back to <span class="mono">a</span> and <span class="mono">b</span> (note the arrow direction - the result
 <strong>points back</strong> to its inputs, hence "back-pointers"). You met these two when L05 introduced the <span class="mono">ggml_tensor</span> fields, where we only said "they record
 how it arose"; now you see their real use. Open the source and every operator function follows the same routine:</p>
-<p>It is worth pausing to feel how uniform this design is: whether matmul, add, normalization, or attention, the hundreds of operator functions are <strong>uniformly "build a tensor +
-fill op/src + return"</strong>, this same three-step template. Precisely because of this consistency, ggml can handle all operators with <strong>one graph-building and one execution</strong>
-mechanism - adding a new operator is mainly defining a new <span class="mono">op</span> enum value plus writing its shape inference and compute implementation; the graph-building part needs
-no change. This restraint of "<strong>one uniform template holding endless variety</strong>" is a big reason ggml's code reads cleanly.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  It is worth pausing to feel how uniform this design is: whether matmul, add, normalization, or attention, the hundreds of operator functions are <strong>uniformly "build a tensor + fill op/src + return"</strong>, this same three-step template. Precisely because of this consistency, ggml can handle all operators with <strong>one graph-building and one execution</strong> mechanism - adding a new operator is mainly defining a new <span class="mono">op</span> enum value plus writing its shape inference and compute implementation; the graph-building part needs no change. This restraint of "<strong>one uniform template holding endless variety</strong>" is a big reason ggml's code reads cleanly.
+</div>
 <pre class="code"><span class="cm">// simplified from ggml_mul_mat in ggml/src/ggml.c</span>
 <span class="kw">struct</span> ggml_tensor * <span class="fn">ggml_mul_mat</span>(ctx, a, b) {
     result = <span class="fn">ggml_new_tensor</span>(ctx, GGML_TYPE_F32, ...);  <span class="cm">// just build an empty result tensor</span>
@@ -637,9 +642,10 @@ no change. This restraint of "<strong>one uniform template holding endless varie
 yet</strong>. You can keep writing with this IOU - use it as the next operator's input and get a new IOU; layering on and on until you write the final output. Throughout, <strong>no real
 numbers are computed</strong>; what you accumulate is a stack of interlocking IOUs. Only at "execution" does ggml follow this stack, from the bottom up, redeeming each into real data. This
 "<strong>issue IOUs first, redeem them all later</strong>" is the meaning of lazy, and the core intuition this whole lesson keeps polishing.</p>
-<p>This also explains a pitfall beginners hit: in ggml, <strong>reading a result tensor's data right after building the graph gets you nothing</strong> - the IOU is not redeemed yet. You
-must first hand the graph to the backend to execute (next lesson) before the result tensor's <span class="mono">data</span> is filled with real values. Splitting "build" and "execute" into
-two clear phases is the first lesson of using the ggml API well.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  This also explains a pitfall beginners hit: in ggml, <strong>reading a result tensor's data right after building the graph gets you nothing</strong> - the IOU is not redeemed yet. You must first hand the graph to the backend to execute (next lesson) before the result tensor's <span class="mono">data</span> is filled with real values. Splitting "build" and "execute" into two clear phases is the first lesson of using the ggml API well.
+</div>
 
 <h2>Stringing tensors into a graph</h2>
 <p>One operator recording two or three srcs looks unremarkable; but once you write out a whole model's forward pass, these src pointers <strong>interlock layer by layer into a
@@ -673,11 +679,10 @@ y depends on W2 and h, and h depends on W1 and x. That is exactly what <span cla
 anything earlier never depends on anything later. So at execution you just compute front to back, and for each node its inputs are <strong>guaranteed already computed</strong>.
 <span class="mono">ggml_cgraph</span> itself is just a few arrays: <span class="mono">nodes</span> (operator results), <span class="mono">leafs</span> (inputs/constants), counts
 <span class="mono">n_nodes</span>/<span class="mono">n_leafs</span>, and capacity <span class="mono">size</span> (default <span class="mono">GGML_DEFAULT_GRAPH_SIZE=2048</span>).</p>
-<p>"<strong>Topological sort</strong>" sounds intimidating but the idea is plain: <strong>what you need must be ready first</strong>. When cooking you cannot hit the pan before chopping;
-before computing <span class="mono">y</span> you must have <span class="mono">h</span>. Topological sort arranges all steps into a legal order so each step's inputs are ready before it. A graph
-may have <strong>more than one</strong> legal order (two independent branches can go either first), but as long as "dependencies first" holds, the result is the same. ggml's backtracking build
-computes such a legal order automatically, no worry for you. It also uses a "visited" set internally to avoid collecting the same tensor twice - when multiple operators <strong>share one
-input</strong> (extremely common in networks), that input is collected once and computed once.</p>
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  "<strong>Topological sort</strong>" sounds intimidating but the idea is plain: <strong>what you need must be ready first</strong>. When cooking you cannot hit the pan before chopping; before computing <span class="mono">y</span> you must have <span class="mono">h</span>. Topological sort arranges all steps into a legal order so each step's inputs are ready before it. A graph may have <strong>more than one</strong> legal order (two independent branches can go either first), but as long as "dependencies first" holds, the result is the same. ggml's backtracking build computes such a legal order automatically, no worry for you. It also uses a "visited" set internally to avoid collecting the same tensor twice - when multiple operators <strong>share one input</strong> (extremely common in networks), that input is collected once and computed once.
+</div>
 <p>Put this back into real llama.cpp: after loading a model, each inference step has llama.cpp <strong>build that step's full compute graph</strong> with a long string of operator calls
 (embedding, dozens of layers of attention and FFN, the final output projection) - possibly thousands of nodes. None of this big string actually computes; it all <strong>fills op/src and
 wires dependencies</strong>; only once the graph is built and handed to the backend are that step's logits computed at once. So the "one decode is build-then-execute inside" you learned (L03)
@@ -829,9 +834,10 @@ LESSON_10 = {
 <p>这里的关键词是 <span class="mono">best_fit</span>（从空闲块里挑一块大小最合适的）和 <span class="mono">give_back</span>（张量用完就归还内存）。
 ggml-alloc 内部维护一组"空闲块"，分配时找最合适的复用，释放时把相邻的空闲块合并成更大的块。<strong>因为提前看到了整张图，它能把内存复用到极致</strong>——
 实际跑下来，峰值内存常常只有"每个张量各占一块"的几分之一。这就是 L09 强调"先建图"<strong>真正的回报之一</strong>：没有完整的图，就没法做这种全局的内存规划。</p>
-<p>这件事用一个生活场景就能体会：想象一条很长的流水线，每道工序都会产出一个半成品交给下一道。<strong>笨办法</strong>是给每个半成品都准备一个专属货架，流水线越长、货架越多，仓库迟早爆满。
-<strong>聪明办法</strong>是：一个半成品被下一道工序取走后，它的货架立刻腾出来，给后面的半成品用——因为你<strong>提前知道</strong>整条流水线的全貌，知道每个半成品什么时候"功成身退"。
-ggml-alloc 就是这个聪明的仓库管理员，而 L09 的计算图，就是它手里那张"<strong>全流程图</strong>"。少了这张图，它就只能用笨办法。</p>
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  这件事用一个生活场景就能体会：想象一条很长的流水线，每道工序都会产出一个半成品交给下一道。<strong>笨办法</strong>是给每个半成品都准备一个专属货架，流水线越长、货架越多，仓库迟早爆满。<strong>聪明办法</strong>是：一个半成品被下一道工序取走后，它的货架立刻腾出来，给后面的半成品用——因为你<strong>提前知道</strong>整条流水线的全貌，知道每个半成品什么时候"功成身退"。ggml-alloc 就是这个聪明的仓库管理员，而 L09 的计算图，就是它手里那张"<strong>全流程图</strong>"。少了这张图，它就只能用笨办法。
+</div>
 <p>顺带说一个常见误区：内存复用<strong>不会</strong>影响计算结果的正确性。有人担心"A 的地盘给了 C，会不会把 A 的数据弄乱？"——不会，因为复用只发生在 A <strong>确定不再被任何人需要之后</strong>。
 分配器严格按生命周期办事：只要还有谁可能读 A，A 的内存就绝不会被征用。所以内存复用是一种<strong>完全无损</strong>的优化，省的是空间，动不了结果——这一点和 L06 说的"量化是有损、KV cache 是无损"那个区分，是同一种思维。</p>
 
@@ -868,18 +874,20 @@ ggml_backend_t be = <span class="fn">ggml_backend_cpu_init</span>();   <span cla
   <div class="col"><h4>它要解决的问题</h4><p>一张图里，有的算子该在 GPU 上跑、有的在 CPU 上跑；数据在两种内存里，跨设备时要搬运。谁来统筹？</p></div>
   <div class="col"><h4>sched 的三件事</h4><p><strong>① 拆图</strong>：把图切成若干段，按设备归类；<strong>② 指派</strong>：每段算子分给合适的后端；<strong>③ 拷贝</strong>：在 CPU/GPU 边界自动插入数据搬运。</p></div>
 </div>
-<p>简单说，<span class="mono">ggml_backend_sched</span> 就是个"<strong>包工头</strong>"：拿到整张图后，它把活儿<strong>分派</strong>给手下不同的"工种"（后端），
-谁擅长干什么就给谁，还负责在工种之间<strong>传递半成品</strong>（跨设备拷贝张量）。这正是你用 <span class="mono">-ngl 20</span> 把 20 层放进 GPU 时，背后默默发生的事——
-sched 把这 20 层的算子指派给 CUDA 后端、其余留给 CPU，并在两者交界处安排好数据搬运。你只填了一个数字，它替你搞定了一切协调。</p>
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  简单说，<span class="mono">ggml_backend_sched</span> 就是个"<strong>包工头</strong>"：拿到整张图后，它把活儿<strong>分派</strong>给手下不同的"工种"（后端），谁擅长干什么就给谁，还负责在工种之间<strong>传递半成品</strong>（跨设备拷贝张量）。这正是你用 <span class="mono">-ngl 20</span> 把 20 层放进 GPU 时，背后默默发生的事——sched 把这 20 层的算子指派给 CUDA 后端、其余留给 CPU，并在两者交界处安排好数据搬运。你只填了一个数字，它替你搞定了一切协调。
+</div>
 <p>顺便厘清 <span class="mono">ggml_backend_graph_compute</span> 和 <span class="mono">ggml_backend_sched</span> 的关系：前者是"<strong>单后端</strong>"的执行——一张图、一个设备，直接从头算到尾；
 后者是"<strong>多后端</strong>"的总指挥——它先把图拆成几段，每段再各自交给 <span class="mono">ggml_backend_graph_compute</span> 在对应设备上执行。所以 sched 是<strong>更上一层</strong>的协调者，
 单后端执行是它手里的基本工具。只用 CPU 时你可能直接用前者；要混合 CPU/GPU，就得请出后者。理清这层包含关系，你看 ggml 的执行代码就不会绕晕。</p>
 <p>为什么要分多个后端，而不是统统塞给 GPU？因为<strong>显存常常装不下整个模型</strong>。一个量化后还有几十 GB 的大模型，你的显卡可能只放得下一半的层；
 剩下的层只能留在 CPU 内存里、用 CPU 算。这种"<strong>一半 GPU、一半 CPU</strong>"的混合执行，正是消费级硬件跑大模型的常态，也是 <span class="mono">ggml_backend_sched</span> 存在的根本理由。
 它让你能<strong>按显存大小灵活地切</strong>：显存多就多放几层进 GPU、少就少放几层，剩下的 CPU 兜底，总能跑起来——只是放进 GPU 的层越多、整体越快。</p>
-<p>也正因为有跨设备拷贝这件事，"放多少层进 GPU"并不是越多越好的简单题。每跨一次 CPU/GPU 边界，都要把数据搬一趟，<strong>搬运本身有开销</strong>。
-如果切得太碎、来回搬太多次，省下的计算时间可能还不够还搬运的债。所以实践中，往往是<strong>把连续的一大段层整体放进 GPU</strong>（减少边界），而不是东放一层、西放一层。
-这些权衡 sched 帮你处理了大部分，但理解它，能帮你在显存紧张时更聪明地设 <span class="mono">-ngl</span>。</p>
+<div class="card warn">
+  <div class="tag">⚠ 性能坑</div>
+  也正因为有跨设备拷贝这件事，"放多少层进 GPU"并不是越多越好的简单题。每跨一次 CPU/GPU 边界，都要把数据搬一趟，<strong>搬运本身有开销</strong>。如果切得太碎、来回搬太多次，省下的计算时间可能还不够还搬运的债。所以实践中，往往是<strong>把连续的一大段层整体放进 GPU</strong>（减少边界），而不是东放一层、西放一层。这些权衡 sched 帮你处理了大部分，但理解它，能帮你在显存紧张时更聪明地设 <span class="mono">-ngl</span>。
+</div>
 
 <h2>深入一点（选读）</h2>
 <p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
@@ -999,10 +1007,10 @@ pseudocode:</p>
 of "free blocks", finds the best fit when allocating, and merges adjacent free blocks when releasing. <strong>Because it saw the whole graph in advance, it reuses memory to the hilt</strong> - in
 practice peak memory is often a fraction of "each tensor its own block". This is <strong>one of the real payoffs</strong> of L09's "build first": without the complete graph, this global memory
 planning would be impossible.</p>
-<p>An everyday scene makes it click: imagine a long assembly line where each station produces a half-product handed to the next. The <strong>dumb way</strong> is to give every half-product its own
-dedicated shelf - the longer the line, the more shelves, until the warehouse overflows. The <strong>smart way</strong>: once a half-product is taken by the next station, its shelf frees immediately
-for later half-products - because you <strong>know in advance</strong> the whole line and when each half-product "retires". ggml-alloc is that smart warehouse manager, and L09's compute graph is the
-"<strong>full-process chart</strong>" in its hand. Without that chart, it could only use the dumb way.</p>
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  An everyday scene makes it click: imagine a long assembly line where each station produces a half-product handed to the next. The <strong>dumb way</strong> is to give every half-product its own dedicated shelf - the longer the line, the more shelves, until the warehouse overflows. The <strong>smart way</strong>: once a half-product is taken by the next station, its shelf frees immediately for later half-products - because you <strong>know in advance</strong> the whole line and when each half-product "retires". ggml-alloc is that smart warehouse manager, and L09's compute graph is the "<strong>full-process chart</strong>" in its hand. Without that chart, it could only use the dumb way.
+</div>
 <p>A common misconception in passing: memory reuse does <strong>not</strong> affect correctness. Some worry "giving A's plot to C - won't it corrupt A's data?" - no, because reuse only happens after A
 is <strong>certainly needed by no one</strong>. The allocator strictly follows lifetimes: as long as anyone might still read A, A's memory is never requisitioned. So memory reuse is a <strong>completely
 lossless</strong> optimization - it saves space without touching results, the same thinking as L06's distinction "quantization is lossy, the KV cache is lossless".</p>
@@ -1042,10 +1050,10 @@ separately - <strong>precisely so the execution loop can cleanly "compute only n
   <div class="col"><h4>The problem it solves</h4><p>In one graph, some operators should run on GPU, some on CPU; data lives in two memories, needing transfer across devices. Who coordinates?</p></div>
   <div class="col"><h4>sched's three jobs</h4><p><strong>1. Split</strong> the graph into segments, grouped by device; <strong>2. Assign</strong> each segment's operators to a suitable backend; <strong>3. Copy</strong> - auto-insert data transfers at CPU/GPU boundaries.</p></div>
 </div>
-<p>Simply put, <span class="mono">ggml_backend_sched</span> is a "<strong>general contractor</strong>": given the whole graph, it <strong>assigns</strong> the work to different "trades" (backends) under
-it - whoever is good at what gets it - and handles <strong>passing half-finished goods</strong> between trades (cross-device tensor copies). This is exactly what happens behind the scenes when you put
-20 layers on GPU with <span class="mono">-ngl 20</span> - sched assigns those 20 layers' operators to the CUDA backend, leaves the rest to the CPU, and arranges the data transfers at the boundary.
-You filled in one number; it handled all the coordination for you.</p>
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Simply put, <span class="mono">ggml_backend_sched</span> is a "<strong>general contractor</strong>": given the whole graph, it <strong>assigns</strong> the work to different "trades" (backends) under it - whoever is good at what gets it - and handles <strong>passing half-finished goods</strong> between trades (cross-device tensor copies). This is exactly what happens behind the scenes when you put 20 layers on GPU with <span class="mono">-ngl 20</span> - sched assigns those 20 layers' operators to the CUDA backend, leaves the rest to the CPU, and arranges the data transfers at the boundary. You filled in one number; it handled all the coordination for you.
+</div>
 <p>Let me clarify the relation between <span class="mono">ggml_backend_graph_compute</span> and <span class="mono">ggml_backend_sched</span>: the former is "<strong>single-backend</strong>" execution - one
 graph, one device, computed straight front to back; the latter is the "<strong>multi-backend</strong>" conductor - it first splits the graph into segments, then hands each to
 <span class="mono">ggml_backend_graph_compute</span> to execute on its device. So sched is the <strong>higher-level</strong> coordinator, and single-backend execution is the basic tool in its hand. On CPU only
@@ -1054,10 +1062,10 @@ you might use the former directly; to mix CPU/GPU you call in the latter. Get th
 half its layers on your card; the rest must stay in CPU memory and compute on CPU. This "<strong>half GPU, half CPU</strong>" hybrid execution is the norm for running big models on consumer hardware, and
 the fundamental reason <span class="mono">ggml_backend_sched</span> exists. It lets you <strong>cut flexibly by VRAM size</strong>: more VRAM, put more layers on GPU; less, fewer, with the CPU as backstop, so
 it always runs - just faster the more layers go on GPU.</p>
-<p>And precisely because of cross-device copies, "how many layers on GPU" is not a simple "more is better". Each crossing of a CPU/GPU boundary means moving data, and <strong>the move itself has a
-cost</strong>. Cut too finely and shuttle too often, and the compute time saved may not repay the moving debt. So in practice one usually <strong>puts a large contiguous span of layers on the GPU as a
-whole</strong> (fewer boundaries) rather than one layer here, one there. sched handles most of these trade-offs, but understanding it helps you set <span class="mono">-ngl</span> more wisely when VRAM is
-tight.</p>
+<div class="card warn">
+  <div class="tag">⚠ Performance trap</div>
+  And precisely because of cross-device copies, "how many layers on GPU" is not a simple "more is better". Each crossing of a CPU/GPU boundary means moving data, and <strong>the move itself has a cost</strong>. Cut too finely and shuttle too often, and the compute time saved may not repay the moving debt. So in practice one usually <strong>puts a large contiguous span of layers on the GPU as a whole</strong> (fewer boundaries) rather than one layer here, one there. sched handles most of these trade-offs, but understanding it helps you set <span class="mono">-ngl</span> more wisely when VRAM is tight.
+</div>
 
 <h2>Going deeper (optional)</h2>
 <p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>

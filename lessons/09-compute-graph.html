@@ -344,9 +344,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <span class="mono">src[1]</span> 两个指针分别指回 <span class="mono">a</span> 和 <span class="mono">b</span>（注意箭头方向——是结果<strong>指回</strong>输入，
 所以叫"反向指针"）。这两样东西，L05 介绍 <span class="mono">ggml_tensor</span> 字段时就见过，当时只说"记录它怎么来的"，现在你看到它真正的用途了。
 把源码摊开看，每个算子函数都是同一个套路：</p>
-<p>这里值得停一下，体会一下这个设计有多统一：无论是矩阵乘、加法、归一化还是注意力，几百个算子函数<strong>清一色都是"建张量 + 填 op/src + 返回"</strong>这个三步模板。
-正因为如此一致，ggml 才能用<strong>同一套建图、同一套执行</strong>机制处理所有算子——加一个新算子，主要就是定义一个新的 <span class="mono">op</span> 枚举值、再写它的形状推导和计算实现，
-建图这一环完全不用改。这种"<strong>用统一模板装下千变万化</strong>"的克制，是 ggml 代码读起来不乱的重要原因。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里值得停一下，体会一下这个设计有多统一：无论是矩阵乘、加法、归一化还是注意力，几百个算子函数<strong>清一色都是"建张量 + 填 op/src + 返回"</strong>这个三步模板。正因为如此一致，ggml 才能用<strong>同一套建图、同一套执行</strong>机制处理所有算子——加一个新算子，主要就是定义一个新的 <span class="mono">op</span> 枚举值、再写它的形状推导和计算实现，建图这一环完全不用改。这种"<strong>用统一模板装下千变万化</strong>"的克制，是 ggml 代码读起来不乱的重要原因。
+</div>
 <pre class="code"><span class="cm">// 简化自 ggml/src/ggml.c 的 ggml_mul_mat</span>
 <span class="kw">struct</span> ggml_tensor * <span class="fn">ggml_mul_mat</span>(ctx, a, b) {
     result = <span class="fn">ggml_new_tensor</span>(ctx, GGML_TYPE_F32, ...);  <span class="cm">// 只建一个空的结果张量</span>
@@ -363,8 +364,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 你可以拿这张借条继续往下写——把它当作下一个算子的输入，再得到一张新借条；如此层层叠叠，直到写出最终输出。整个过程里，<strong>没有任何真实数字被算出来</strong>，
 你手里攒下的，是一摞环环相扣的借条。等到"执行"那一刻，ggml 才会顺着这摞借条，从最底层开始，把每一张都兑现成真实的数据。这种"<strong>先开借条、后统一兑现</strong>"，
 正是惰性（lazy）二字的含义，也是这一课从头到尾在反复打磨的那个核心直觉。</p>
-<p>这也解释了一个新手常踩的坑：在 ggml 里，<strong>建完图就去读结果张量的数据，是读不到东西的</strong>——借条还没兑现呢。
-必须先把图交给后端执行（下一课），结果张量的 <span class="mono">data</span> 才会被填上真实数值。把"建图"和"执行"分成两个明确的阶段，是用好 ggml API 的第一课。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这也解释了一个新手常踩的坑：在 ggml 里，<strong>建完图就去读结果张量的数据，是读不到东西的</strong>——借条还没兑现呢。必须先把图交给后端执行（下一课），结果张量的 <span class="mono">data</span> 才会被填上真实数值。把"建图"和"执行"分成两个明确的阶段，是用好 ggml API 的第一课。
+</div>
 
 <h2>把张量串成一张图</h2>
 <p>一个算子记下两三个 src，看起来不起眼；但当你把整个模型的前向过程都写出来，这些 src 指针就<strong>层层相扣，连成了一张有向图</strong>。
@@ -398,11 +401,10 @@ y 依赖 W2 和 h，h 又依赖 W1 和 x。ggml 用 <span class="mono">ggml_buil
 排在前面的，一定不依赖排在后面的。这样执行时只要从头到尾依次算，每算一个节点，它的输入<strong>保证已经算好了</strong>。
 <span class="mono">ggml_cgraph</span> 本身就是几个数组：<span class="mono">nodes</span>（算子结果）、<span class="mono">leafs</span>（输入/常量）、
 计数 <span class="mono">n_nodes</span>/<span class="mono">n_leafs</span>、容量 <span class="mono">size</span>（默认 <span class="mono">GGML_DEFAULT_GRAPH_SIZE=2048</span>）。</p>
-<p>"<strong>拓扑排序</strong>"这个词听起来唬人，其实道理就是一句大白话：<strong>要用到的东西，必须先准备好</strong>。
-做菜时你不能在切菜之前就下锅，算 <span class="mono">y</span> 之前必须先有 <span class="mono">h</span>。拓扑排序就是把所有步骤排成一个合法的先后顺序，
-让每一步用到的输入都在它之前已经备齐。一张图可能有<strong>不止一种</strong>合法顺序（比如两个互不依赖的分支谁先谁后都行），但只要满足"依赖在前"，
-执行起来结果就一样。ggml 的回溯式建图，自动帮你算出了这样一个合法顺序，你完全不用操心。它内部还用一个"已访问"集合避免把同一个张量重复收进图——
-当多个算子<strong>共享同一个输入</strong>时（这在神经网络里太常见了），那个输入只会被收一次、也只会被算一次。</p>
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  "<strong>拓扑排序</strong>"这个词听起来唬人，其实道理就是一句大白话：<strong>要用到的东西，必须先准备好</strong>。做菜时你不能在切菜之前就下锅，算 <span class="mono">y</span> 之前必须先有 <span class="mono">h</span>。拓扑排序就是把所有步骤排成一个合法的先后顺序，让每一步用到的输入都在它之前已经备齐。一张图可能有<strong>不止一种</strong>合法顺序（比如两个互不依赖的分支谁先谁后都行），但只要满足"依赖在前"，执行起来结果就一样。ggml 的回溯式建图，自动帮你算出了这样一个合法顺序，你完全不用操心。它内部还用一个"已访问"集合避免把同一个张量重复收进图——当多个算子<strong>共享同一个输入</strong>时（这在神经网络里太常见了），那个输入只会被收一次、也只会被算一次。
+</div>
 <p>把这套机制放回真实的 llama.cpp 里看：加载一个模型后，每跑一步推理，llama.cpp 都会用一长串算子调用（embedding、几十层的注意力和 FFN、最后的输出投影）
 <strong>搭出这一步的完整计算图</strong>——可能有上千个节点。这一大串调用，没有一个真的在算，全是在<strong>填 op/src、连依赖</strong>；
 直到图搭完、交给后端，才一次性算出这一步的 logits。所以你之前学的"一次 decode 内部是先建图、再执行"（L03），到这里就有了精确的含义：
@@ -573,10 +575,10 @@ and again in graph building and differentiation.</p>
 <span class="mono">src[0]</span> and <span class="mono">src[1]</span> point back to <span class="mono">a</span> and <span class="mono">b</span> (note the arrow direction - the result
 <strong>points back</strong> to its inputs, hence "back-pointers"). You met these two when L05 introduced the <span class="mono">ggml_tensor</span> fields, where we only said "they record
 how it arose"; now you see their real use. Open the source and every operator function follows the same routine:</p>
-<p>It is worth pausing to feel how uniform this design is: whether matmul, add, normalization, or attention, the hundreds of operator functions are <strong>uniformly "build a tensor +
-fill op/src + return"</strong>, this same three-step template. Precisely because of this consistency, ggml can handle all operators with <strong>one graph-building and one execution</strong>
-mechanism - adding a new operator is mainly defining a new <span class="mono">op</span> enum value plus writing its shape inference and compute implementation; the graph-building part needs
-no change. This restraint of "<strong>one uniform template holding endless variety</strong>" is a big reason ggml's code reads cleanly.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  It is worth pausing to feel how uniform this design is: whether matmul, add, normalization, or attention, the hundreds of operator functions are <strong>uniformly "build a tensor + fill op/src + return"</strong>, this same three-step template. Precisely because of this consistency, ggml can handle all operators with <strong>one graph-building and one execution</strong> mechanism - adding a new operator is mainly defining a new <span class="mono">op</span> enum value plus writing its shape inference and compute implementation; the graph-building part needs no change. This restraint of "<strong>one uniform template holding endless variety</strong>" is a big reason ggml's code reads cleanly.
+</div>
 <pre class="code"><span class="cm">// simplified from ggml_mul_mat in ggml/src/ggml.c</span>
 <span class="kw">struct</span> ggml_tensor * <span class="fn">ggml_mul_mat</span>(ctx, a, b) {
     result = <span class="fn">ggml_new_tensor</span>(ctx, GGML_TYPE_F32, ...);  <span class="cm">// just build an empty result tensor</span>
@@ -593,9 +595,10 @@ no change. This restraint of "<strong>one uniform template holding endless varie
 yet</strong>. You can keep writing with this IOU - use it as the next operator's input and get a new IOU; layering on and on until you write the final output. Throughout, <strong>no real
 numbers are computed</strong>; what you accumulate is a stack of interlocking IOUs. Only at "execution" does ggml follow this stack, from the bottom up, redeeming each into real data. This
 "<strong>issue IOUs first, redeem them all later</strong>" is the meaning of lazy, and the core intuition this whole lesson keeps polishing.</p>
-<p>This also explains a pitfall beginners hit: in ggml, <strong>reading a result tensor's data right after building the graph gets you nothing</strong> - the IOU is not redeemed yet. You
-must first hand the graph to the backend to execute (next lesson) before the result tensor's <span class="mono">data</span> is filled with real values. Splitting "build" and "execute" into
-two clear phases is the first lesson of using the ggml API well.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  This also explains a pitfall beginners hit: in ggml, <strong>reading a result tensor's data right after building the graph gets you nothing</strong> - the IOU is not redeemed yet. You must first hand the graph to the backend to execute (next lesson) before the result tensor's <span class="mono">data</span> is filled with real values. Splitting "build" and "execute" into two clear phases is the first lesson of using the ggml API well.
+</div>
 
 <h2>Stringing tensors into a graph</h2>
 <p>One operator recording two or three srcs looks unremarkable; but once you write out a whole model's forward pass, these src pointers <strong>interlock layer by layer into a
@@ -629,11 +632,10 @@ y depends on W2 and h, and h depends on W1 and x. That is exactly what <span cla
 anything earlier never depends on anything later. So at execution you just compute front to back, and for each node its inputs are <strong>guaranteed already computed</strong>.
 <span class="mono">ggml_cgraph</span> itself is just a few arrays: <span class="mono">nodes</span> (operator results), <span class="mono">leafs</span> (inputs/constants), counts
 <span class="mono">n_nodes</span>/<span class="mono">n_leafs</span>, and capacity <span class="mono">size</span> (default <span class="mono">GGML_DEFAULT_GRAPH_SIZE=2048</span>).</p>
-<p>"<strong>Topological sort</strong>" sounds intimidating but the idea is plain: <strong>what you need must be ready first</strong>. When cooking you cannot hit the pan before chopping;
-before computing <span class="mono">y</span> you must have <span class="mono">h</span>. Topological sort arranges all steps into a legal order so each step's inputs are ready before it. A graph
-may have <strong>more than one</strong> legal order (two independent branches can go either first), but as long as "dependencies first" holds, the result is the same. ggml's backtracking build
-computes such a legal order automatically, no worry for you. It also uses a "visited" set internally to avoid collecting the same tensor twice - when multiple operators <strong>share one
-input</strong> (extremely common in networks), that input is collected once and computed once.</p>
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  "<strong>Topological sort</strong>" sounds intimidating but the idea is plain: <strong>what you need must be ready first</strong>. When cooking you cannot hit the pan before chopping; before computing <span class="mono">y</span> you must have <span class="mono">h</span>. Topological sort arranges all steps into a legal order so each step's inputs are ready before it. A graph may have <strong>more than one</strong> legal order (two independent branches can go either first), but as long as "dependencies first" holds, the result is the same. ggml's backtracking build computes such a legal order automatically, no worry for you. It also uses a "visited" set internally to avoid collecting the same tensor twice - when multiple operators <strong>share one input</strong> (extremely common in networks), that input is collected once and computed once.
+</div>
 <p>Put this back into real llama.cpp: after loading a model, each inference step has llama.cpp <strong>build that step's full compute graph</strong> with a long string of operator calls
 (embedding, dozens of layers of attention and FFN, the final output projection) - possibly thousands of nodes. None of this big string actually computes; it all <strong>fills op/src and
 wires dependencies</strong>; only once the graph is built and handed to the backend are that step's logits computed at once. So the "one decode is build-then-execute inside" you learned (L03)
