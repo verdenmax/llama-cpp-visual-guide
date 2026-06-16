@@ -363,6 +363,11 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 <span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># 批量挂载, 各带 scale</span>
 <span class="cm"># ... decode 若干步, 输出带上这个风格 ...</span>
 <span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; 清空, 卸下全部</span></pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">加载</span><span class="name">llama_adapter_lora_init(model, "x.gguf")</span></div><div class="ld">从 GGUF 读出 A/B 张量，按目标权重名索引</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">挂载</span><span class="name">llama_set_adapters_lora(ctx, [..], n, scales)</span></div><div class="ld">批量挂到 context、各带 scale；不复制权重（n=0 清空）</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">生效</span><span class="name">build_lora_mm（每次 decode 建图）</span></div><div class="ld">按张量名把 scale·B·A 折进相关 matmul</div></div>
+</div>
 <p>用起来很简单：<span class="mono">llama_adapter_lora_init</span> 从一个 <span class="mono">.gguf</span> 适配器文件读出 A、B 张量，得到一个适配器对象；再用 <span class="mono">llama_set_adapters_lora</span> 把它挂到 context（L17）上、并给一个 scale。之后的每次 decode，建图时就会自动把这个适配器的增量折进去。</p>
 <p>这里有个 API 要特别注意：挂载用的是<strong>复数、批量</strong>的 <span class="mono">llama_set_adapters_lora</span>（一次可以挂多个适配器、各带一个 scale）。早期那套<strong>单数</strong>的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> 已经不存在了——清空适配器就是调批量版、传 <span class="mono">n=0</span>。看老代码时别再找单数那几个。</p>
 <p>"能同时挂多个、各带 scale"不是摆设，而是<strong>能力叠加</strong>的基础：你可以把"中文风格"和"法律领域"两个 LoRA 同时挂上、各给一个权重，让模型同时具备两种特长。批量接口天然支持这种组合——这也是为什么它被设计成一组 <span class="mono">{适配器, scale}</span>，而不是一次只能挂一个。</p>
@@ -532,6 +537,11 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 <span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># batch attach, each with scale</span>
 <span class="cm"># ... decode a few steps, output carries this style ...</span>
 <span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; clear, detach all</span></pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">load</span><span class="name">llama_adapter_lora_init(model, "x.gguf")</span></div><div class="ld">read A/B tensors from GGUF, indexed by target weight name</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">attach</span><span class="name">llama_set_adapters_lora(ctx, [..], n, scales)</span></div><div class="ld">batch-attach to the context, each with a scale; no weight copy (n=0 clears)</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">effect</span><span class="name">build_lora_mm (per-decode graph build)</span></div><div class="ld">fold scale*B*A into the relevant matmul by tensor name</div></div>
+</div>
 <p>It is simple to use: <span class="mono">llama_adapter_lora_init</span> reads the A, B tensors from a <span class="mono">.gguf</span> adapter file, giving an adapter object; then <span class="mono">llama_set_adapters_lora</span> attaches it to the context (L17) with a scale. Every subsequent decode automatically folds this adapter's delta in at graph-build time.</p>
 <p>One API deserves special attention here: attaching uses the <strong>plural, batched</strong> <span class="mono">llama_set_adapters_lora</span> (you can attach several adapters at once, each with a scale). The early <strong>singular</strong> <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> no longer exist - clearing adapters is calling the batched version with <span class="mono">n=0</span>. Do not go looking for those singular ones in old code.</p>
 <p>"Attach several at once, each with a scale" is no ornament but the basis of <strong>stacking abilities</strong>: you can attach a "Chinese style" and a "legal domain" LoRA at once, each with a weight, giving the model both specialties. The batched interface naturally supports this combination - which is why it is designed as a set of <span class="mono">{adapter, scale}</span>, not one-at-a-time.</p>

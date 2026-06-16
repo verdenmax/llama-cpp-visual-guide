@@ -371,6 +371,12 @@ tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span cl
 dest = <span class="st">""</span>
 <span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
 <span class="cm"># add_ass: 末尾追加 assistant 起始标记, 让模型接着写回答</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>模板字符串/名字</h4><p>来自模型 GGUF 元数据或用户指定。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>detect_template</h4><p>先按名精确匹配，认不出就看是否含 &lt;|im_start|&gt;/[INST] 等特征子串。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>apply_template</h4><p>按选定模板，把消息逐条裹上标记、首尾拼成一段字符串。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>add_ass 递话筒</h4><p>为真则末尾追加 assistant 起始标记，让模型接着写回答。</p></div></div>
+</div>
 <p>有了这张表，剩下两件事：一是<strong>认出</strong>该用哪套模板，二是<strong>套用</strong>它把消息拼出来。</p>
 <p>认出靠 <span class="mono">llm_chat_detect_template</span>：它先按名字精确匹配（模型 GGUF 里常自带一个模板名/模板串），认不出就退而看模板内容里有没有 <span class="mono">&lt;|im_start|&gt;</span>、<span class="mono">[INST]</span> 这类特征子串，按特征猜。套用靠 <span class="mono">llm_chat_apply_template</span>：给它模板枚举、消息列表、一个输出字符串，它就按这套格式拼好。</p>
 <p>这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。</p>
@@ -547,6 +553,12 @@ tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span cl
 dest = <span class="st">""</span>
 <span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
 <span class="cm"># add_ass: append the assistant start marker so the model writes the reply</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>template string/name</h4><p>From the model's GGUF metadata or user-specified.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>detect_template</h4><p>Match by name first; failing that, look for feature substrings like &lt;|im_start|&gt;/[INST].</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>apply_template</h4><p>By the chosen template, wrap each message in markers and concatenate into one string.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>add_ass hands the mic</h4><p>If true, append the assistant start marker so the model continues the reply.</p></div></div>
+</div>
 <p>With this table, two things remain: <strong>recognize</strong> which template to use, and <strong>apply</strong> it to assemble the messages.</p>
 <p>Recognizing uses <span class="mono">llm_chat_detect_template</span>: it first matches by name exactly (the model's GGUF often carries a template name/string), and failing that, looks for feature substrings like <span class="mono">&lt;|im_start|&gt;</span> or <span class="mono">[INST]</span> in the template body and guesses by feature. Applying uses <span class="mono">llm_chat_apply_template</span>: give it the template enum, the message list, and an output string, and it assembles per that format.</p>
 <p>One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.</p>

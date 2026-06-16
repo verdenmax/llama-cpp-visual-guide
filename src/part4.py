@@ -1872,6 +1872,13 @@ text = <span class="st">""</span>
 <p>这里有个大坑：2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。</p>
 <p>为什么要这么大动干戈地改名？因为这些操作本质上是<strong>词表的</strong>方法，而不是模型的——把它们从 <span class="mono">llama_*</span> 统一收进 <span class="mono">llama_vocab_*</span>，名实相符，也呼应了内部 <span class="mono">llama_vocab</span> 已经独立成型这件事。改名虽然烦，但让 API 更清晰。</p>
 <p>把这一课接回主线：你输入的文字，先经 L22 的对话模板拼好格式，再经词表 <span class="mono">tokenize</span> 成 id，进模型算出 logits（L17），由采样器（L21）在<strong>这张词表的 token 空间</strong>里选出下一个 id，最后再经 <span class="mono">token_to_piece</span> 变回文字显示给你。词表正是这条回路一进一出的两道门。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>你的文字</h4><p>一句话或一段提示词。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>对话模板(L22) + tokenize</h4><p>先拼好格式，再切成 token id 序列。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>模型算 logits(L17)</h4><p>前向一遍，输出每个 token 一个分数。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>采样选 id(L21)</h4><p>在这张词表的 token 空间里挑下一个。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>token_to_piece -&gt; 文字</h4><p>把 id 还原成文字，显示给你。</p></div></div>
+</div>
 <p>顺带澄清一个常见疑惑：tokenize 的结果是不是唯一的？对确定的词表和同一套规则，答案是肯定的——同样的输入永远切出同样的 id 序列，这正是编码/解码能可靠往返的前提。采样（L21）带来的随机性，发生在"选下一个 token"那一步，和分词无关；分词本身是完全确定的。</p>
 <p>最后留一个串起全局的视角：词表是这套推理系统里少数"人能直接看懂"的部分。权重是一堆浮点、计算图是一串算子，唯独词表，你能把 id 一个个查回文字、亲眼看到模型"读到了什么、想说什么"。调试模型行为时，先把 token 打印出来看看，常常是最快的入手点。</p>
 
@@ -2007,6 +2014,13 @@ text = <span class="st">""</span>
 <p>There is a big trap here: that batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.</p>
 <p>Why such a sweeping rename? Because these operations are essentially <strong>vocabulary</strong> methods, not model ones - folding them from <span class="mono">llama_*</span> into <span class="mono">llama_vocab_*</span> makes name match substance, echoing how <span class="mono">llama_vocab</span> has internally become its own thing. Renames are annoying but make the API clearer.</p>
 <p>Connecting this lesson back to the main line: your input text is first formatted by L22's chat template, then <span class="mono">tokenize</span>d into ids by the vocab, enters the model to compute logits (L17), the sampler (L21) picks the next id in <strong>this vocabulary's token space</strong>, and finally <span class="mono">token_to_piece</span> turns it back into text shown to you. The vocab is exactly the two gates, in and out, of this loop.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>your text</h4><p>A sentence or a prompt.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chat template (L22) + tokenize</h4><p>First format it, then cut into a token id sequence.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>model computes logits (L17)</h4><p>One forward pass, one score per token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>sampling picks an id (L21)</h4><p>Pick the next one in this vocab's token space.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>token_to_piece -&gt; text</h4><p>Turn the id back into text, shown to you.</p></div></div>
+</div>
 <p>A common doubt worth clearing: is tokenize's result unique? For a fixed vocab and the same rules, yes - the same input always cuts into the same id sequence, which is exactly the premise that encoding/decoding round-trips reliably. The randomness sampling (L21) brings happens at the "pick the next token" step, unrelated to tokenization; tokenization itself is fully deterministic.</p>
 <p>One last whole-picture view: the vocab is one of the few parts of this inference system "a human can read directly". Weights are a pile of floats, the compute graph a chain of operators; only the vocab lets you look ids back into text and see with your own eyes "what the model read, what it wants to say". When debugging model behavior, printing the tokens first is often the fastest way in.</p>
 
@@ -2095,6 +2109,11 @@ LESSON_21 = {
     <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// 清状态(可空)</span>
 };
 <span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">必需</span><span class="name">apply(cur_p)</span></div><div class="ld">改写候选数组：划掉 / 重排 / 重算概率——每个采样器的核心</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">可空</span><span class="name">accept · reset · name · clone · free</span></div><div class="ld">accept 把选中 token 喂回有状态采样器；其余按需实现</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">状态</span><span class="name">llama_sampler_context_t ctx</span></div><div class="ld">每个采样器私有的账本：penalties 记历史、mirostat 记反馈</div></div>
+</div>
 <p>看看一个采样器到底是什么。<span class="mono">llama_sampler_i</span> 就是一组函数指针：<span class="mono">apply</span>（核心，改写候选数组）、<span class="mono">accept</span>（把选中的 token 喂回来给有状态采样器记账）、<span class="mono">reset</span>（清状态），还有 name/clone/free。配上一块状态 <span class="mono">ctx</span>，就构成一个 <span class="mono">llama_sampler</span>。</p>
 <p>这里 <span class="mono">apply</span> 是唯一<strong>必需</strong>的——它拿到候选数组，按自己的规则改一改（划掉一些、重排一下、重算概率）。<span class="mono">accept</span> 可空，只有"有记忆"的采样器才用得上：惩罚项要记住前面出过哪些 token、mirostat 要根据反馈调参，它们都靠 accept 把"刚选中的 token"收进自己的状态。</p>
 <p>这种"一组函数指针 + 一块状态"的设计，你应该眼熟——它就是 L10 后端、L19 记忆接口那套<strong>接口 + 实现</strong>的又一次运用。每个采样器只要实现这几个函数，就能被统一调度；引擎不在乎你内部是 top-k 还是 mirostat，只管按顺序调 apply。</p>
@@ -2233,6 +2252,11 @@ Last lesson the vocab turned text into token ids fed to the model; the model com
     <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// clear state (nullable)</span>
 };
 <span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">required</span><span class="name">apply(cur_p)</span></div><div class="ld">rewrite the candidate array: strike out / re-rank / recompute probs - each sampler's core</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">nullable</span><span class="name">accept / reset / name / clone / free</span></div><div class="ld">accept feeds the chosen token back to stateful samplers; the rest as needed</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">state</span><span class="name">llama_sampler_context_t ctx</span></div><div class="ld">each sampler's private ledger: penalties keeps history, mirostat feedback</div></div>
+</div>
 <p>See what a sampler actually is. <span class="mono">llama_sampler_i</span> is just a set of function pointers: <span class="mono">apply</span> (the core, rewrites the candidate array), <span class="mono">accept</span> (feeds the chosen token back so stateful samplers can keep tally), <span class="mono">reset</span> (clear state), plus name/clone/free. With a state blob <span class="mono">ctx</span>, it forms a <span class="mono">llama_sampler</span>.</p>
 <p>Here <span class="mono">apply</span> is the only <strong>required</strong> one - it takes the candidate array and edits it by its own rule (strike some out, re-rank, recompute probabilities). <span class="mono">accept</span> is nullable, needed only by samplers with memory: the penalty must remember which tokens appeared before, mirostat must adjust by feedback; both use accept to take "the just-chosen token" into their state.</p>
 <p>This "a set of function pointers + a state blob" design should look familiar - it is another use of that <strong>interface + implementation</strong> pattern from L10's backends and L19's memory interface. Each sampler need only implement these functions to be scheduled uniformly; the engine does not care whether you are top-k or mirostat inside, it just calls apply in order.</p>
@@ -2399,6 +2423,12 @@ tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span cl
 dest = <span class="st">""</span>
 <span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
 <span class="cm"># add_ass: 末尾追加 assistant 起始标记, 让模型接着写回答</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>模板字符串/名字</h4><p>来自模型 GGUF 元数据或用户指定。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>detect_template</h4><p>先按名精确匹配，认不出就看是否含 &lt;|im_start|&gt;/[INST] 等特征子串。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>apply_template</h4><p>按选定模板，把消息逐条裹上标记、首尾拼成一段字符串。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>add_ass 递话筒</h4><p>为真则末尾追加 assistant 起始标记，让模型接着写回答。</p></div></div>
+</div>
 <p>有了这张表，剩下两件事：一是<strong>认出</strong>该用哪套模板，二是<strong>套用</strong>它把消息拼出来。</p>
 <p>认出靠 <span class="mono">llm_chat_detect_template</span>：它先按名字精确匹配（模型 GGUF 里常自带一个模板名/模板串），认不出就退而看模板内容里有没有 <span class="mono">&lt;|im_start|&gt;</span>、<span class="mono">[INST]</span> 这类特征子串，按特征猜。套用靠 <span class="mono">llm_chat_apply_template</span>：给它模板枚举、消息列表、一个输出字符串，它就按这套格式拼好。</p>
 <p>这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。</p>
@@ -2528,6 +2558,12 @@ tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span cl
 dest = <span class="st">""</span>
 <span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
 <span class="cm"># add_ass: append the assistant start marker so the model writes the reply</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>template string/name</h4><p>From the model's GGUF metadata or user-specified.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>detect_template</h4><p>Match by name first; failing that, look for feature substrings like &lt;|im_start|&gt;/[INST].</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>apply_template</h4><p>By the chosen template, wrap each message in markers and concatenate into one string.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>add_ass hands the mic</h4><p>If true, append the assistant start marker so the model continues the reply.</p></div></div>
+</div>
 <p>With this table, two things remain: <strong>recognize</strong> which template to use, and <strong>apply</strong> it to assemble the messages.</p>
 <p>Recognizing uses <span class="mono">llm_chat_detect_template</span>: it first matches by name exactly (the model's GGUF often carries a template name/string), and failing that, looks for feature substrings like <span class="mono">&lt;|im_start|&gt;</span> or <span class="mono">[INST]</span> in the template body and guesses by feature. Applying uses <span class="mono">llm_chat_apply_template</span>: give it the template enum, the message list, and an output string, and it assembles per that format.</p>
 <p>One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.</p>
@@ -2659,6 +2695,12 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
         cand.logit = -INFINITY        <span class="cm"># 非法 -&gt; 永不会被选中</span>
 <span class="cm"># 选定 token 后: 推进语法状态 (llama_grammar_accept_impl)</span>
 grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># 沿规则栈往前走一步</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>这一步模型给出的所有候选 token 分数。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>grammar.apply 掩码</h4><p>按规则栈把不合语法的候选 logit 设成 -inf（含语法未走完时的 EOG）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>采样选定</h4><p>采样器（L21）只能从剩下的合法候选里选一个 id。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>grammar.accept 推进</h4><p>把选中的 token 喂回，规则栈往前走一格，回到第 1 步循环。</p></div></div>
+</div>
 <p>把 GBNF 文法变成"采样时的掩码"，靠两个内部函数：<span class="mono">llama_grammar_apply_impl</span>（掩码）和 <span class="mono">llama_grammar_accept_impl</span>（推进）。</p>
 <p><span class="mono">apply</span> 这一步：它拿着语法当前的状态（一组<strong>规则栈</strong> <span class="mono">stacks</span>，记着"现在展开到哪、接下来合法的是什么"），逐个检查候选 token——能接上的留着，接不上的把 logit 设成负无穷。EOG（结束符）在语法还没走完时也会被掩掉，免得模型半途而废。</p>
 <p><span class="mono">accept</span> 这一步：采样真正选定一个 token 后，把它喂回语法，让规则栈<strong>往前推进</strong>到新状态。下一轮 apply 就基于这个新状态再算一遍合法集。两步交替，像沿着文法的轨道一步步走，每一步都只踩在合法的枕木上。</p>
@@ -2787,6 +2829,12 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
         cand.logit = -INFINITY        <span class="cm"># illegal -&gt; can never be chosen</span>
 <span class="cm"># after a token is chosen: advance the grammar state (llama_grammar_accept_impl)</span>
 grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># step forward along the rule stacks</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>All candidate token scores the model gives this step.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>grammar.apply mask</h4><p>By the rule stacks, set illegal candidates' logit to -inf (incl. EOG while the grammar is not yet complete).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sampling picks</h4><p>The sampler (L21) can pick an id only from the remaining legal candidates.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>grammar.accept advance</h4><p>Feed the chosen token back, the rule stacks step forward one notch, loop to step 1.</p></div></div>
+</div>
 <p>Turning a GBNF grammar into "a mask at sampling time" relies on two internal functions: <span class="mono">llama_grammar_apply_impl</span> (mask) and <span class="mono">llama_grammar_accept_impl</span> (advance).</p>
 <p>The <span class="mono">apply</span> step: holding the grammar's current state (a set of <strong>rule stacks</strong>, the <span class="mono">stacks</span> field, recording "where the expansion is now, what is legal next"), it checks each candidate token - keep those that fit, set those that do not to negative infinity. EOG (the terminator) is also masked while the grammar is not yet complete, lest the model quit halfway.</p>
 <p>The <span class="mono">accept</span> step: once sampling actually picks a token, feed it back to the grammar so the rule stacks <strong>advance</strong> to a new state. The next apply then recomputes the legal set from this new state. The two alternate, like walking along the grammar's track, each step stepping only on a legal sleeper.</p>
@@ -2911,6 +2959,11 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 <span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># 批量挂载, 各带 scale</span>
 <span class="cm"># ... decode 若干步, 输出带上这个风格 ...</span>
 <span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; 清空, 卸下全部</span></pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">加载</span><span class="name">llama_adapter_lora_init(model, "x.gguf")</span></div><div class="ld">从 GGUF 读出 A/B 张量，按目标权重名索引</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">挂载</span><span class="name">llama_set_adapters_lora(ctx, [..], n, scales)</span></div><div class="ld">批量挂到 context、各带 scale；不复制权重（n=0 清空）</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">生效</span><span class="name">build_lora_mm（每次 decode 建图）</span></div><div class="ld">按张量名把 scale·B·A 折进相关 matmul</div></div>
+</div>
 <p>用起来很简单：<span class="mono">llama_adapter_lora_init</span> 从一个 <span class="mono">.gguf</span> 适配器文件读出 A、B 张量，得到一个适配器对象；再用 <span class="mono">llama_set_adapters_lora</span> 把它挂到 context（L17）上、并给一个 scale。之后的每次 decode，建图时就会自动把这个适配器的增量折进去。</p>
 <p>这里有个 API 要特别注意：挂载用的是<strong>复数、批量</strong>的 <span class="mono">llama_set_adapters_lora</span>（一次可以挂多个适配器、各带一个 scale）。早期那套<strong>单数</strong>的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> 已经不存在了——清空适配器就是调批量版、传 <span class="mono">n=0</span>。看老代码时别再找单数那几个。</p>
 <p>"能同时挂多个、各带 scale"不是摆设，而是<strong>能力叠加</strong>的基础：你可以把"中文风格"和"法律领域"两个 LoRA 同时挂上、各给一个权重，让模型同时具备两种特长。批量接口天然支持这种组合——这也是为什么它被设计成一组 <span class="mono">{适配器, scale}</span>，而不是一次只能挂一个。</p>
@@ -3033,6 +3086,11 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 <span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># batch attach, each with scale</span>
 <span class="cm"># ... decode a few steps, output carries this style ...</span>
 <span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; clear, detach all</span></pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">load</span><span class="name">llama_adapter_lora_init(model, "x.gguf")</span></div><div class="ld">read A/B tensors from GGUF, indexed by target weight name</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">attach</span><span class="name">llama_set_adapters_lora(ctx, [..], n, scales)</span></div><div class="ld">batch-attach to the context, each with a scale; no weight copy (n=0 clears)</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">effect</span><span class="name">build_lora_mm (per-decode graph build)</span></div><div class="ld">fold scale*B*A into the relevant matmul by tensor name</div></div>
+</div>
 <p>It is simple to use: <span class="mono">llama_adapter_lora_init</span> reads the A, B tensors from a <span class="mono">.gguf</span> adapter file, giving an adapter object; then <span class="mono">llama_set_adapters_lora</span> attaches it to the context (L17) with a scale. Every subsequent decode automatically folds this adapter's delta in at graph-build time.</p>
 <p>One API deserves special attention here: attaching uses the <strong>plural, batched</strong> <span class="mono">llama_set_adapters_lora</span> (you can attach several adapters at once, each with a scale). The early <strong>singular</strong> <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> no longer exist - clearing adapters is calling the batched version with <span class="mono">n=0</span>. Do not go looking for those singular ones in old code.</p>
 <p>"Attach several at once, each with a scale" is no ornament but the basis of <strong>stacking abilities</strong>: you can attach a "Chinese style" and a "legal domain" LoRA at once, each with a weight, giving the model both specialties. The batched interface naturally supports this combination - which is why it is designed as a set of <span class="mono">{adapter, scale}</span>, not one-at-a-time.</p>
