@@ -45,20 +45,19 @@ LESSON_04 = {
     <p class="mono">llama_get_logits_ith 取出</p>
   </div></div>
 </div>
-<p>这里有个贯穿全课的关键认识：<strong>只有自注意力这一层，token 之间才会"互相看见"</strong>。FFN、归一化、投影都是
-<strong>对每个 token 各算各的</strong>，位置之间互不影响；唯独注意力会让"当前 token"去参考"其它 token"。所以"模型怎么利用上下文"
-这件事，<strong>全发生在注意力层</strong>——这也是后面因果掩码、KV cache 都围着注意力打转的原因。那两条<strong>残差</strong>支路和
-<strong>归一化</strong>也别小看：残差让梯度能顺畅地穿过几十层不衰减，归一化把每层输入拉回稳定范围，二者合起来才让"<strong>把很多层 block 叠很深</strong>"
-这件事在训练上变得可行。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里有个贯穿全课的关键认识：<strong>只有自注意力这一层，token 之间才会"互相看见"</strong>。FFN、归一化、投影都是<strong>对每个 token 各算各的</strong>，位置之间互不影响；唯独注意力会让"当前 token"去参考"其它 token"。所以"模型怎么利用上下文"这件事，<strong>全发生在注意力层</strong>——这也是后面因果掩码、KV cache 都围着注意力打转的原因。那两条<strong>残差</strong>支路和<strong>归一化</strong>也别小看：残差让梯度能顺畅地穿过几十层不衰减，归一化把每层输入拉回稳定范围，二者合起来才让"<strong>把很多层 block 叠很深</strong>"这件事在训练上变得可行。
+</div>
 <p>顺带说说<strong>词嵌入</strong>为什么重要。它不是简单的"查字典编号"，而是把每个 token 映射到高维空间里的一个点，
 <strong>语义相近的词，向量也彼此靠近</strong>——这正是模型"理解"语言的起点。原始词向量只带"这个词大概什么意思"，还不含上下文；
 真正让它"读懂整句"的，是随后那几十层 block。<strong>你可以把多层 block 想成一条逐级精炼的流水线</strong>：浅层更多在抓局部搭配与语法
 （谁修饰谁、短语边界在哪），深层逐渐组合出更抽象的语义与长程关系（指代、逻辑、主题）。每过一层，token 的向量就被
 "<strong>注入更多来自上下文的信息</strong>"；到顶层时，最后一个位置的向量已经浓缩了"接下来最该说什么"的全部线索，投影到词表就成了 logits。</p>
-<p>再把<strong>注意力到底在干嘛</strong>说透一点：它像在做一次"<strong>带权重的检索</strong>"。当前 token 拿着自己的 Query（一个"我想找什么"的提问），
-去和每个历史 token 的 Key（一个"我是什么"的标签）逐一匹配，越像就给越高的注意力权重；然后按这些权重，把各历史 token 的 Value
-（"我能提供的内容"）<strong>加权求和</strong>，汇成当前 token 的新表示。于是"<strong>理解上下文</strong>"被落实成了"<strong>该重点参考前文哪几个词</strong>"。
-这也再次说明：为什么注意力是 token 之间唯一的交流通道——只有在这里，一个 token 的输出才真正取决于<strong>别的</strong> token。</p>
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  再把<strong>注意力到底在干嘛</strong>说透一点：它像在做一次"<strong>带权重的检索</strong>"。当前 token 拿着自己的 Query（一个"我想找什么"的提问），去和每个历史 token 的 Key（一个"我是什么"的标签）逐一匹配，越像就给越高的注意力权重；然后按这些权重，把各历史 token 的 Value（"我能提供的内容"）<strong>加权求和</strong>，汇成当前 token 的新表示。于是"<strong>理解上下文</strong>"被落实成了"<strong>该重点参考前文哪几个词</strong>"。这也再次说明：为什么注意力是 token 之间唯一的交流通道——只有在这里，一个 token 的输出才真正取决于<strong>别的</strong> token。
+</div>
 <p>还有个常被忽略的点：注意力本身<strong>并不知道词的先后顺序</strong>——它只是在做"按相似度加权汇总"，把同样几个词打乱顺序喂进去，
 纯注意力算出的结果竟然一样。可语言显然讲究语序（"狗咬人"和"人咬狗"天差地别）。<strong>位置信息</strong>就是为此补进来的：llama 系普遍用
 <strong>RoPE（旋转位置编码）</strong>，它不是简单地给每个位置加一个"序号向量"，而是<strong>按位置给 Query / Key 做一次旋转</strong>，
@@ -66,9 +65,10 @@ LESSON_04 = {
 <p>顺手把最后那一步<strong>输出投影</strong>也说明白：它把顶层那个 token 向量，乘上一个"<strong>词表大小 × 隐藏维度</strong>"的大矩阵（lm_head），
 得到<strong>词表里每个 token 各一个分数</strong>——这就是 logits 的长度恒等于词表大小的原因。不少模型还让它和最底层的词嵌入矩阵
 <strong>共享权重</strong>（weight tying），既省参数，又让"输入怎么编码"和"输出怎么打分"保持一致。</p>
-<p>顺便建立一点"体量感"：所谓 7B、13B 模型，<strong>参数量</strong>主要就堆在这些 block 里——每层的注意力投影矩阵、FFN 里两三个大矩阵，
-乘上几十层，再加上巨大的词嵌入与输出投影，加总就是几十亿个数。<strong>层数（n_layer）、隐藏维度（n_embd）、注意力头数</strong>这几个超参，
-基本决定了一个模型有多大、多强、跑起来多吃资源——后面看 GGUF 元数据时，你会在文件头里直接读到它们。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  顺便建立一点"体量感"：所谓 7B、13B 模型，<strong>参数量</strong>主要就堆在这些 block 里——每层的注意力投影矩阵、FFN 里两三个大矩阵，乘上几十层，再加上巨大的词嵌入与输出投影，加总就是几十亿个数。<strong>层数（n_layer）、隐藏维度（n_embd）、注意力头数</strong>这几个超参，基本决定了一个模型有多大、多强、跑起来多吃资源——后面看 GGUF 元数据时，你会在文件头里直接读到它们。
+</div>
 <p>把一层 block 的前向写成伪代码，就是"两条带残差的支路"：</p>
 <pre class="code"><span class="cm"># 一层 block 的前向: 两条带残差的支路</span>
 <span class="kw">def</span> <span class="fn">layer</span>(x):                 <span class="cm"># x: [n_tokens, n_embd]</span>
@@ -137,18 +137,18 @@ kqv = <span class="fn">ggml_mul_mat</span>(ctx, v, kq);           <span class="c
 和"每步都从头重算"得到的值<strong>逐位相等</strong>。它省掉的是<strong>重复劳动</strong>，不是精度。顺带一提，预测下一个词时只需要
 <strong>最后一个位置</strong>的那一行输出，所以取 logits 时只取末位：</p>
 <pre class="code">logits = <span class="fn">llama_get_logits_ith</span>(ctx, -1);  <span class="cm">// 只取最后一个位置, 返回 n_vocab 个分数</span></pre>
-<p>把这件事算笔账就更清楚了：<strong>没有缓存</strong>时，生成第 n 个 token 要重新为前面 n-1 个 token 全算一遍 K/V，整段生成下来
-总计算量大致是 <strong>n 的平方</strong>级别；<strong>有了缓存</strong>，每一步只为<strong>新来的那一个</strong> token 算 K/V，历史部分直接取用，
-于是每步的<strong>新增计算基本是常数</strong>。举个直观的例子：聊到第 2000 个 token 时，没有缓存就得把前面近 2000 个 token 的 K/V
-从头再算一遍，<strong>越聊越慢</strong>；有了缓存，第 2000 步和第 2 步<strong>需要新算的 K/V 一样多（都只有一个 token）</strong>。请注意：这只是把"算过的别再算"，<strong>结果一个数都没变</strong>——这再次印证它是"精确复用"而非"近似加速"。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  把这件事算笔账就更清楚了：<strong>没有缓存</strong>时，生成第 n 个 token 要重新为前面 n-1 个 token 全算一遍 K/V，整段生成下来总计算量大致是 <strong>n 的平方</strong>级别；<strong>有了缓存</strong>，每一步只为<strong>新来的那一个</strong> token 算 K/V，历史部分直接取用，于是每步的<strong>新增计算基本是常数</strong>。举个直观的例子：聊到第 2000 个 token 时，没有缓存就得把前面近 2000 个 token 的 K/V 从头再算一遍，<strong>越聊越慢</strong>；有了缓存，第 2000 步和第 2 步<strong>需要新算的 K/V 一样多（都只有一个 token）</strong>。请注意：这只是把"算过的别再算"，<strong>结果一个数都没变</strong>——这再次印证它是"精确复用"而非"近似加速"。
+</div>
 <p>当然，<strong>KV cache 也不是白来的</strong>：它要为<strong>每一层、每个历史 token</strong> 各存一份 K 和一份 V，占用的显存/内存随
 <strong>上下文长度线性增长</strong>。上下文开到几万 token 时，这块缓存会吃掉相当可观的一片显存——这也是"上下文窗口"为什么总有上限、
 长上下文为什么格外吃硬件的原因之一（分配、写入与复用都在 <span class="mono">src/llama-kv-cache.cpp</span>）。所以工程上既要<strong>靠它省计算</strong>，
 又得<strong>想办法压它的体积</strong>——下面深挖里的 GQA / MQA 正是干这个的，这是一对需要一直权衡的矛盾。</p>
-<p>这里还藏着一个反直觉的事实：<strong>decode 阶段，瓶颈往往不是算力，而是"搬数据"</strong>。每生成一个 token，都要把模型那几个 GB 的权重、
-连同越来越大的 KV cache，从显存/内存里<strong>完整读一遍</strong>，可真正的计算量却只对应"一个 token"。于是单条对话的生成速度，更多是被
-<strong>内存带宽</strong>卡住，而不是被乘法次数卡住——这正好解释了为什么<strong>量化</strong>（把权重压小）能立竿见影地提速：要搬的字节少了，
-每步自然更快。下一部分讲量化时，我们会回到这条线索。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这里还藏着一个反直觉的事实：<strong>decode 阶段，瓶颈往往不是算力，而是"搬数据"</strong>。每生成一个 token，都要把模型那几个 GB 的权重、连同越来越大的 KV cache，从显存/内存里<strong>完整读一遍</strong>，可真正的计算量却只对应"一个 token"。于是单条对话的生成速度，更多是被<strong>内存带宽</strong>卡住，而不是被乘法次数卡住——这正好解释了为什么<strong>量化</strong>（把权重压小）能立竿见影地提速：要搬的字节少了，每步自然更快。下一部分讲量化时，我们会回到这条线索。
+</div>
 
 <h2>深入一点（选读）</h2>
 <p class="acc-intro">下面三个问题，想深究的同学点开看；只想抓主线的可以先跳过。</p>
@@ -253,22 +253,20 @@ every candidate word. Inside one block there are two sub-layers - <strong>self-a
     <p class="mono">read out with llama_get_logits_ith</p>
   </div></div>
 </div>
-<p>Here is the insight that runs through the whole lesson: <strong>only the self-attention layer lets tokens "see each other"</strong>.
-FFN, normalization, and projection all work <strong>on each token independently</strong>; positions do not interact. So "how the model uses context"
-<strong>happens entirely in attention</strong> - which is why the causal mask and the KV cache both revolve around it. Don't overlook the two
-<strong>residual</strong> branches and the <strong>norms</strong> either: residuals let gradients flow cleanly through dozens of layers without fading,
-and norms keep each layer's inputs in a stable range; together they make stacking blocks <strong>very deep</strong> trainable in the first place.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Here is the insight that runs through the whole lesson: <strong>only the self-attention layer lets tokens "see each other"</strong>. FFN, normalization, and projection all work <strong>on each token independently</strong>; positions do not interact. So "how the model uses context" <strong>happens entirely in attention</strong> - which is why the causal mask and the KV cache both revolve around it. Don't overlook the two <strong>residual</strong> branches and the <strong>norms</strong> either: residuals let gradients flow cleanly through dozens of layers without fading, and norms keep each layer's inputs in a stable range; together they make stacking blocks <strong>very deep</strong> trainable in the first place.
+</div>
 <p>A word on why <strong>embeddings</strong> matter. They are not a plain "dictionary lookup into an integer"; each token maps to a point in a
 high-dimensional space where <strong>semantically similar words land close together</strong> - the starting point of the model "understanding" language.
 A raw embedding only carries "roughly what this word means", with no context; what makes it "read the whole sentence" is the dozens of blocks that follow.
 <strong>Think of the stacked blocks as a refinement pipeline</strong>: shallow layers capture local collocations and syntax (what modifies what, phrase
 boundaries), deeper layers compose more abstract semantics and long-range relations (coreference, logic, topic). Each layer <strong>injects more context</strong>
 into a token's vector; by the top, the last position's vector has distilled every clue about "what to say next", which the projection turns into logits.</p>
-<p>To make <strong>what attention does</strong> concrete: it is a kind of <strong>weighted retrieval</strong>. The current token holds a Query
-(a "what am I looking for" question), matches it against every historical token's Key (a "what am I" tag) - the better the match, the higher the
-attention weight - then takes a <strong>weighted sum</strong> of those tokens' Values (the "content I can offer") into its new representation.
-So "understanding context" becomes "which earlier words to lean on". This is also why attention is the only channel between tokens: only here does a
-token's output truly depend on <strong>other</strong> tokens.</p>
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  To make <strong>what attention does</strong> concrete: it is a kind of <strong>weighted retrieval</strong>. The current token holds a Query (a "what am I looking for" question), matches it against every historical token's Key (a "what am I" tag) - the better the match, the higher the attention weight - then takes a <strong>weighted sum</strong> of those tokens' Values (the "content I can offer") into its new representation. So "understanding context" becomes "which earlier words to lean on". This is also why attention is the only channel between tokens: only here does a token's output truly depend on <strong>other</strong> tokens.
+</div>
 <p>An easily missed point: attention itself <strong>does not know word order</strong> - it only does similarity-weighted summing, so shuffling the same
 words and feeding them in gives the same result from pure attention. But language clearly cares about order ("dog bites man" vs "man bites dog").
 <strong>Position information</strong> is added for exactly this: llama-family models commonly use <strong>RoPE (rotary position embedding)</strong>, which
@@ -278,10 +276,10 @@ does not simply add an "index vector" per position but <strong>rotates Query/Key
 (lm_head) to get <strong>one score per vocabulary token</strong> - which is why the logits length always equals the vocabulary size. Many models also
 <strong>tie</strong> this with the bottom embedding matrix (weight tying), saving parameters and keeping "how inputs are encoded" consistent with
 "how outputs are scored".</p>
-<p>A quick sense of <strong>scale</strong>: the parameters of a "7B" or "13B" model live mostly in these blocks - each layer's attention projections,
-the FFN's two or three big matrices, times dozens of layers, plus the large embedding and output projections, sum to billions of numbers. A few
-hyperparameters - <strong>number of layers (n_layer), hidden dim (n_embd), number of heads</strong> - largely decide how big, how strong, and how
-resource-hungry a model is; you will read them straight from the GGUF header later.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  A quick sense of <strong>scale</strong>: the parameters of a "7B" or "13B" model live mostly in these blocks - each layer's attention projections, the FFN's two or three big matrices, times dozens of layers, plus the large embedding and output projections, sum to billions of numbers. A few hyperparameters - <strong>number of layers (n_layer), hidden dim (n_embd), number of heads</strong> - largely decide how big, how strong, and how resource-hungry a model is; you will read them straight from the GGUF header later.
+</div>
 <p>Written as pseudocode, one block's forward pass is "two residual branches":</p>
 <pre class="code"><span class="cm"># one block's forward: two residual branches</span>
 <span class="kw">def</span> <span class="fn">layer</span>(x):                 <span class="cm"># x: [n_tokens, n_embd]</span>
@@ -357,19 +355,18 @@ That is the KV cache:</p>
 reuse: the cached values equal what "recompute every step from scratch" would produce, <strong>bit for bit</strong>. What it saves is
 <strong>repeated work</strong>, not precision. And since predicting the next word needs only the <strong>last position's</strong> row of output, we read logits at the end:</p>
 <pre class="code">logits = <span class="fn">llama_get_logits_ith</span>(ctx, -1);  <span class="cm">// last position only, returns n_vocab scores</span></pre>
-<p>Putting numbers on it makes it clearer: <strong>without the cache</strong>, generating the nth token recomputes K/V for all previous n-1 tokens, so the
-whole generation is roughly <strong>n-squared</strong> in cost; <strong>with the cache</strong>, each step computes K/V for <strong>only the one new</strong> token
-and reuses history, so the per-step extra work is essentially <strong>constant</strong>. A concrete feel: by the 2000th token, no cache means recomputing K/V
-for nearly 2000 prior tokens every step - <strong>slower the longer you chat</strong>; with the cache, step 2000 and step 2 compute the <strong>same amount of new K/V (just one token's)</strong>.
-Note this only avoids recomputing what was already computed - <strong>not a single number changes</strong>, which again shows it is exact reuse, not approximate speedup.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  Putting numbers on it makes it clearer: <strong>without the cache</strong>, generating the nth token recomputes K/V for all previous n-1 tokens, so the whole generation is roughly <strong>n-squared</strong> in cost; <strong>with the cache</strong>, each step computes K/V for <strong>only the one new</strong> token and reuses history, so the per-step extra work is essentially <strong>constant</strong>. A concrete feel: by the 2000th token, no cache means recomputing K/V for nearly 2000 prior tokens every step - <strong>slower the longer you chat</strong>; with the cache, step 2000 and step 2 compute the <strong>same amount of new K/V (just one token's)</strong>. Note this only avoids recomputing what was already computed - <strong>not a single number changes</strong>, which again shows it is exact reuse, not approximate speedup.
+</div>
 <p>Of course, the <strong>KV cache is not free</strong>: it stores one K and one V for <strong>every layer and every historical token</strong>, so its footprint
 grows <strong>linearly with context length</strong>. At tens of thousands of tokens it eats a sizeable chunk of memory - one reason "context windows" always
 have a ceiling and long contexts are so hardware-hungry (allocation, writes, and reuse all live in <span class="mono">src/llama-kv-cache.cpp</span>). So
 engineering must both <strong>save compute with it</strong> and <strong>shrink its size</strong> - GQA/MQA below do exactly that - a tension to keep balancing.</p>
-<p>There is also a counter-intuitive fact here: <strong>during decode the bottleneck is usually not compute but moving data</strong>. Each generated token
-must read the model's several GB of weights, plus the ever-growing KV cache, <strong>in full</strong> from memory, yet the actual math corresponds to just
-"one token". So a single conversation's speed is limited more by <strong>memory bandwidth</strong> than by multiply count - which is exactly why
-<strong>quantization</strong> (shrinking the weights) speeds things up immediately: fewer bytes to move, faster steps. We will return to this thread in the next part on quantization.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  There is also a counter-intuitive fact here: <strong>during decode the bottleneck is usually not compute but moving data</strong>. Each generated token must read the model's several GB of weights, plus the ever-growing KV cache, <strong>in full</strong> from memory, yet the actual math corresponds to just "one token". So a single conversation's speed is limited more by <strong>memory bandwidth</strong> than by multiply count - which is exactly why <strong>quantization</strong> (shrinking the weights) speeds things up immediately: fewer bytes to move, faster steps. We will return to this thread in the next part on quantization.
+</div>
 
 <h2>Going deeper (optional)</h2>
 <p class="acc-intro">Three questions below; open them if you want depth, skip them if you only want the main line.</p>
