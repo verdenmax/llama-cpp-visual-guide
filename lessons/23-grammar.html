@@ -332,11 +332,20 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 <p>先看清它在采样管线里的位置。L21 讲过，采样是在一排 logits 上裁剪塑形、最后选一个 token。grammar 就是往这条管线里插一个<strong>掩码</strong>环节：在选之前，先把所有"此刻语法不允许"的候选的 logit 砸成负无穷，于是它们的概率变成 0，绝无可能被选中。</p>
 <p>选定一个合法 token 之后，还有一步：<strong>推进</strong>语法状态。语法就像一台状态机，刚才放行的那个 token 让它往前走了一格，下一步该允许哪些 token 也随之更新。一掩一进，逐 token 地把整段输出牢牢锁在语法的轨道上。</p>
-<p>为什么非得在 token 级别做、不能事后检查？设想生成一段 JSON，写到一半冒出个非法字符——事后检查只能整段作废重来，又慢又可能反复失败。token 级掩码则保证<strong>每一步都合法</strong>，根本不给"写错"的机会，一次就成。这是"约束前置"对"事后补救"的彻底胜利。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  为什么非得在 token 级别做、不能事后检查？设想生成一段 JSON，写到一半冒出个非法字符——事后检查只能整段作废重来，又慢又可能反复失败。token 级掩码则保证<strong>每一步都合法</strong>，根本不给"写错"的机会，一次就成。这是"约束前置"对"事后补救"的彻底胜利。
+</div>
 <p>还有个微妙的好处：因为非法 token 被设成负无穷、概率归零，剩下的合法 token 会重新归一化概率。也就是说，约束不仅"禁止非法"，还让模型在<strong>合法范围内</strong>按它原本的偏好挑——既守了规矩，又尽量保留了模型的判断。强约束和模型智能，在这里并不冲突。</p>
-<p>这一步发生在词表的 token 空间里（L20）：grammar 要判断的是"这个 token 接上去，整段文本还合不合语法"。所以它和词表、采样器是紧密咬合的——语法用词表的 token 说话，用采样器的接口干活。理解了这层关系，你就明白为什么这一课紧跟在采样（L21）后面。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  这一步发生在词表的 token 空间里（L20）：grammar 要判断的是"这个 token 接上去，整段文本还合不合语法"。所以它和词表、采样器是紧密咬合的——语法用词表的 token 说话，用采样器的接口干活。理解了这层关系，你就明白为什么这一课紧跟在采样（L21）后面。
+</div>
 <p>换个角度感受它的价值。没有语法约束时，让模型输出 JSON，你只能在 prompt 里恳求"请只返回合法 JSON、不要多余文字"，然后祈祷它听话——大模型多数时候听，但偶尔会画蛇添足加段解释、漏个引号、把数字写成中文。这种"绝大多数对、偶尔翻车"在生产环境里恰恰最致命，因为你得为那 1% 的翻车写一堆容错。</p>
-<p>语法约束把这件事从"祈祷"变成"保证"。一旦套上 JSON 文法，模型<strong>物理上</strong>就吐不出非法的东西——该是引号的位置只能是引号，该是数字的地方只能是数字。那 1% 的翻车被从根上消灭了，下游代码可以放心地直接解析，不必再写一层防御。这种确定性，正是把大模型接进严肃系统的前提。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  语法约束把这件事从"祈祷"变成"保证"。一旦套上 JSON 文法，模型<strong>物理上</strong>就吐不出非法的东西——该是引号的位置只能是引号，该是数字的地方只能是数字。那 1% 的翻车被从根上消灭了，下游代码可以放心地直接解析，不必再写一层防御。这种确定性，正是把大模型接进严肃系统的前提。
+</div>
 <p>你可能担心：约束这么死，会不会把模型"框傻"了？不会。语法只规定<strong>结构</strong>（哪儿能放什么），不规定<strong>内容</strong>（具体放什么值）。在合法的位置上，模型依然按自己的理解去填——该填用户名就填用户名、该填年龄就填合理的数。结构由你定死，内容仍由模型的智能决定，两者各司其职。</p>
 
 <h2>GBNF 是什么</h2>
@@ -520,11 +529,20 @@ By now the model can chat (L20-L22). But many real scenarios want more than "tal
 </div>
 <p>First see where it sits in the sampling pipeline. L21 covered that sampling prunes and shapes a row of logits and finally picks one token. The grammar inserts a <strong>mask</strong> stage into this pipeline: before picking, slam to negative infinity the logit of every candidate "the grammar disallows right now", so their probability becomes 0, impossible to be chosen.</p>
 <p>After a legal token is picked, one more step: <strong>advance</strong> the grammar state. The grammar is like a state machine; the token just allowed moved it one notch forward, and which tokens are legal next updates accordingly. Mask then advance, token by token, locks the whole output firmly onto the grammar's track.</p>
-<p>Why must it be done at the token level, not checked afterward? Imagine generating a JSON and an illegal character pops up halfway - an after-the-fact check can only scrap the whole thing and retry, slow and possibly failing repeatedly. Token-level masking guarantees <strong>every step is legal</strong>, never giving "write it wrong" a chance, done in one go. This is the decisive win of "constrain up front" over "patch afterward".</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Why must it be done at the token level, not checked afterward? Imagine generating a JSON and an illegal character pops up halfway - an after-the-fact check can only scrap the whole thing and retry, slow and possibly failing repeatedly. Token-level masking guarantees <strong>every step is legal</strong>, never giving "write it wrong" a chance, done in one go. This is the decisive win of "constrain up front" over "patch afterward".
+</div>
 <p>There is a subtle bonus too: because illegal tokens are set to negative infinity with probability zeroed, the remaining legal tokens re-normalize their probabilities. That is, the constraint not only "forbids the illegal" but lets the model pick <strong>within the legal range</strong> by its own preference - keeping the rules while preserving the model's judgment as much as possible. Strong constraint and model intelligence do not conflict here.</p>
-<p>This step happens in the vocab's token space (L20): the grammar must judge "with this token appended, is the whole text still legal". So it meshes tightly with the vocab and the sampler - the grammar speaks in the vocab's tokens and works through the sampler's interface. Understand this relationship and you see why this lesson follows sampling (L21) closely.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  This step happens in the vocab's token space (L20): the grammar must judge "with this token appended, is the whole text still legal". So it meshes tightly with the vocab and the sampler - the grammar speaks in the vocab's tokens and works through the sampler's interface. Understand this relationship and you see why this lesson follows sampling (L21) closely.
+</div>
 <p>Feel its value from another angle. Without a grammar constraint, to get JSON out of the model you can only beg in the prompt "please return only valid JSON, no extra text" and pray it obeys - a large model mostly does, but occasionally gilds the lily with an explanation, drops a quote, or writes a number as words. This "mostly right, occasionally derailed" is precisely the most lethal in production, because you must write a pile of error-handling for that 1% derailment.</p>
-<p>A grammar constraint turns this from "praying" into "guaranteeing". Once a JSON grammar is on, the model <strong>physically</strong> cannot emit anything illegal - where a quote belongs only a quote can go, where a number belongs only a number can. That 1% derailment is eliminated at the root, and downstream code can parse directly without a defensive layer. This certainty is the prerequisite for wiring a large model into serious systems.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  A grammar constraint turns this from "praying" into "guaranteeing". Once a JSON grammar is on, the model <strong>physically</strong> cannot emit anything illegal - where a quote belongs only a quote can go, where a number belongs only a number can. That 1% derailment is eliminated at the root, and downstream code can parse directly without a defensive layer. This certainty is the prerequisite for wiring a large model into serious systems.
+</div>
 <p>You might worry: with such a rigid constraint, does it "frame the model into stupidity"? No. A grammar dictates only <strong>structure</strong> (what can go where), not <strong>content</strong> (the actual values). At a legal position, the model still fills by its own understanding - a username where a username goes, a sensible number where an age goes. You fix the structure, the model's intelligence still decides the content, each to its job.</p>
 
 <h2>What GBNF is</h2>

@@ -340,12 +340,21 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 };</pre>
 <p>注意这是几个<strong>平行数组</strong>：<span class="mono">token[i]</span>、<span class="mono">pos[i]</span>、<span class="mono">seq_id[i]</span>、<span class="mono">logits[i]</span> 合起来，描述第 i 个 token 的全部信息。这种"结构数组"的布局，让一次塞进很多 token 变得简单——你只要把这几个数组按相同的下标填好，引擎就知道这一步要处理哪些 token、各自怎么对待。</p>
 <p>最常用的构造是 <span class="mono">llama_batch_get_one</span>：把一串 token id 包成一个最简 batch（位置自动从 0 递增、单序列、只最后一个出 logits），适合"喂一段 prompt 或一个新 token"这种最常见的情形。需要更精细控制（多序列、自定义位置）时，再用 <span class="mono">llama_batch_init</span> 手动填那几个数组。</p>
-<p>为什么用几个平行数组、而不是一个"token 对象"的数组？这是性能上的考量。把所有 token 的同一种属性（比如所有 pos）连续放在一起，对 CPU 缓存友好、也方便整批一次性传给后端、整列做向量化处理。这种"<strong>结构数组</strong>"（SoA）布局在高性能数值代码里很常见，和 L05 张量"一块连续内存"的思路一脉相承。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  为什么用几个平行数组、而不是一个"token 对象"的数组？这是性能上的考量。把所有 token 的同一种属性（比如所有 pos）连续放在一起，对 CPU 缓存友好、也方便整批一次性传给后端、整列做向量化处理。这种"<strong>结构数组</strong>"（SoA）布局在高性能数值代码里很常见，和 L05 张量"一块连续内存"的思路一脉相承。
+</div>
 <p>字段里还有个 <span class="mono">embd</span>（上面简化时略过了）：大多数时候你喂的是 token 的<strong>词 id</strong>（走 <span class="mono">token</span>），但有些场景（比如多模态、或外部已算好嵌入）想直接喂<strong>嵌入向量</strong>，就走 <span class="mono">embd</span>。两者二选一：要么给 id 让模型自己查嵌入，要么直接给嵌入。普通文本生成走 token 即可。</p>
 <p>还要理解 batch 的定位：它是一个<strong>纯数据的输入容器</strong>，没有任何方法、不做任何计算。它只负责"把这一步要算的东西描述清楚"，真正的活全在 <span class="mono">llama_decode</span> 里。把"描述要算什么"和"真正去算"分成两个东西（batch 和 decode），是个清爽的接口设计——你填一张表，引擎照表干活。</p>
-<p>再强调一遍这几个数组是"<strong>按列对齐</strong>"的：第 i 个 token 的词 id、位置、序列、输出标志，分别在四个数组的第 i 位。填 batch 时最容易错的，就是某个数组少填一位、或下标对不齐——一旦错位，引擎就会把某个 token 的位置安到另一个 token 头上。所以手动填 batch 时，务必让这几个数组的长度和顺序严格一致。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这几个数组是"<strong>按列对齐</strong>"的：第 i 个 token 的词 id、位置、序列、输出标志，分别在四个数组的第 i 位。填 batch 时最容易错的，就是某个数组少填一位、或下标对不齐——一旦错位，引擎就会把某个 token 的位置安到另一个 token 头上。所以手动填 batch 时，务必让这几个数组的长度和顺序严格一致。
+</div>
 <p>具体感受一下：你在聊天框里发一句话，上层会先把它分词成一串 token id（L20），再把这些 id 填进一个 batch 的 <span class="mono">token</span> 数组、位置填进 <span class="mono">pos</span>、都归到同一个 <span class="mono">seq_id</span>，最后只在末位标 <span class="mono">logits</span>。这个 batch 一交给 <span class="mono">llama_decode</span>，模型就开始算"你这句话之后该接什么"。日常每一次对话，背后都是这样一张张 batch 在流转。</p>
-<p>这套"一张表喂进去"的接口还有个隐性好处：它把"准备数据"和"跑模型"<strong>解耦</strong>了。准备 batch 可以在 CPU 上慢慢攒、可以由上层框架（甚至别的语言）来做，而 <span class="mono">llama_decode</span> 只认这张表、不关心它怎么来的。正因为接口这么简单清晰，各种语言绑定、各种上层服务才能轻松地接到 llama.cpp 上。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这套"一张表喂进去"的接口还有个隐性好处：它把"准备数据"和"跑模型"<strong>解耦</strong>了。准备 batch 可以在 CPU 上慢慢攒、可以由上层框架（甚至别的语言）来做，而 <span class="mono">llama_decode</span> 只认这张表、不关心它怎么来的。正因为接口这么简单清晰，各种语言绑定、各种上层服务才能轻松地接到 llama.cpp 上。
+</div>
 
 <h2>输出标志：不是每个 token 都出 logits</h2>
 <p>那个 <span class="mono">logits</span> 数组是这一课的一个关键。它是个<strong>开关数组</strong>：<span class="mono">logits[i]=1</span> 表示"我要第 i 个 token 的输出 logits"，<span class="mono">=0</span> 则表示"算它，但不用给我它的 logits"。</p>
@@ -388,7 +397,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
   <tr><th>切法</th><th>怎么排</th><th>适用</th></tr>
   <tr><td><span class="mono">split_simple</span></td><td>按顺序切</td><td>普通单序列（最常见）</td></tr>
   <tr><td><span class="mono">split_equal</span></td><td>多序列时各序列尽量均匀分布到每个 ubatch</td><td>多序列并行</td></tr>
-  <tr><td><span class="mono">split_seq</span></td><td>把同一序列的 token 切到一起</td><td>要求"同序列连续"的模型（如 recurrent，L19 变体）</td></tr>
+  <tr><td><span class="mono">split_seq</span></td><td>把同一序列的 token 切到一起</td><td>recurrent 类模型（L19 变体）</td></tr>
 </table>
 <p>为什么要分这么细？因为像 recurrent（L19 变体）这类模型对"同序列 token 要连续"有要求，不同切法是为了照顾不同模型的约束。普通模型用 <span class="mono">split_simple</span> 就够。</p>
 <p>"逻辑批 vs 物理批"这层区分，其实是计算机里很常见的"<strong>提交</strong>和<strong>执行</strong>解耦"：你按方便提交一大批，系统按自己的节奏分批执行。数据库的批量插入、GPU 的 kernel 启动，都是类似套路。llama.cpp 把它用在 token 上：你按一句话、一段 prompt 的粒度提交，引擎按硬件能吃的粒度执行。</p>
@@ -528,12 +537,21 @@ and how it is internally split by <span class="mono">llama_batch_allocr</span> i
 };</pre>
 <p>Note these are several <strong>parallel arrays</strong>: <span class="mono">token[i]</span>, <span class="mono">pos[i]</span>, <span class="mono">seq_id[i]</span>, <span class="mono">logits[i]</span> together describe all of the i-th token's info. This "struct-of-arrays" layout makes stuffing many tokens at once simple - just fill these arrays by the same index and the engine knows which tokens this step processes and how to treat each.</p>
 <p>The most common constructor is <span class="mono">llama_batch_get_one</span>: it wraps a run of token ids into a minimal batch (positions auto-increment from 0, single sequence, only the last emits logits), suited to the very common case of "feed a prompt or one new token". When you need finer control (multi-sequence, custom positions), use <span class="mono">llama_batch_init</span> to fill those arrays manually.</p>
-<p>Why several parallel arrays rather than one array of "token objects"? It is a performance consideration. Putting all tokens' same attribute (say all pos) contiguously is CPU-cache-friendly and convenient for passing a whole batch to the backend at once and vectorizing column-wise. This "<strong>struct-of-arrays</strong>" (SoA) layout is common in high-performance numeric code, of a piece with L05's tensors being "one contiguous block".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Why several parallel arrays rather than one array of "token objects"? It is a performance consideration. Putting all tokens' same attribute (say all pos) contiguously is CPU-cache-friendly and convenient for passing a whole batch to the backend at once and vectorizing column-wise. This "<strong>struct-of-arrays</strong>" (SoA) layout is common in high-performance numeric code, of a piece with L05's tensors being "one contiguous block".
+</div>
 <p>There is also an <span class="mono">embd</span> field (omitted in the simplification above): most of the time you feed token <strong>word ids</strong> (via <span class="mono">token</span>), but some scenarios (e.g. multimodal, or externally pre-computed embeddings) want to feed <strong>embedding vectors</strong> directly, via <span class="mono">embd</span>. The two are either-or: give ids and let the model look up embeddings, or give embeddings directly. Plain text generation uses token.</p>
 <p>Understand the batch's role too: it is a <strong>pure-data input container</strong>, with no methods and no computation. It only "describes what to compute this step", with all the real work in <span class="mono">llama_decode</span>. Splitting "describe what to compute" from "actually compute" into two things (batch and decode) is a clean interface design - you fill a form, the engine works by the form.</p>
-<p>Emphasize again that these arrays are "<strong>column-aligned</strong>": the i-th token's word id, position, sequence, and output flag are at index i of the four arrays respectively. The easiest mistake filling a batch is underfilling one array or misaligning indices - once misaligned, the engine puts one token's position onto another. So when filling a batch manually, keep these arrays strictly equal in length and order.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  These arrays are "<strong>column-aligned</strong>": the i-th token's word id, position, sequence, and output flag are at index i of the four arrays respectively. The easiest mistake filling a batch is underfilling one array or misaligning indices - once misaligned, the engine puts one token's position onto another. So when filling a batch manually, keep these arrays strictly equal in length and order.
+</div>
 <p>Concretely: you send a sentence in a chat box, the upper layer first tokenizes it into a run of token ids (L20), fills those ids into a batch's <span class="mono">token</span> array, positions into <span class="mono">pos</span>, all under one <span class="mono">seq_id</span>, and finally flags <span class="mono">logits</span> only on the last. Hand this batch to <span class="mono">llama_decode</span> and the model starts computing "what follows your sentence". Every everyday conversation is, behind the scenes, such batches flowing.</p>
-<p>This "feed one form in" interface has a hidden benefit too: it <strong>decouples</strong> "preparing data" from "running the model". Preparing a batch can be done slowly on the CPU, by an upper framework (even another language), while <span class="mono">llama_decode</span> only recognizes this form and does not care how it came to be. Precisely because the interface is so simple and clear, all kinds of language bindings and upper services can easily plug into llama.cpp.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  This "feed one form in" interface has a hidden benefit too: it <strong>decouples</strong> "preparing data" from "running the model". Preparing a batch can be done slowly on the CPU, by an upper framework (even another language), while <span class="mono">llama_decode</span> only recognizes this form and does not care how it came to be. Precisely because the interface is so simple and clear, all kinds of language bindings and upper services can easily plug into llama.cpp.
+</div>
 
 <h2>Output flag: not every token emits logits</h2>
 <p>That <span class="mono">logits</span> array is a key point of this lesson. It is a <strong>switch array</strong>: <span class="mono">logits[i]=1</span> means "I want the i-th token's output logits", <span class="mono">=0</span> means "compute it, but I do not need its logits".</p>
@@ -576,7 +594,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
   <tr><th>Split</th><th>How it arranges</th><th>Used for</th></tr>
   <tr><td><span class="mono">split_simple</span></td><td>cut in order</td><td>plain single sequence (most common)</td></tr>
   <tr><td><span class="mono">split_equal</span></td><td>with multiple sequences, distribute each evenly across ubatches</td><td>multi-sequence parallel</td></tr>
-  <tr><td><span class="mono">split_seq</span></td><td>group one sequence's tokens together</td><td>models requiring "same-sequence contiguity" (e.g. recurrent, an L19 variant)</td></tr>
+  <tr><td><span class="mono">split_seq</span></td><td>group one sequence's tokens together</td><td>recurrent-style models (L19 variant)</td></tr>
 </table>
 <p>Why so fine-grained? Because models like recurrent (an L19 variant) require "same-sequence tokens be contiguous", and different splits accommodate different model constraints. Plain models use <span class="mono">split_simple</span>.</p>
 <p>This "logical vs physical batch" distinction is actually computing's common "<strong>submit</strong> and <strong>execute</strong> decoupling": you submit a big batch for convenience, the system executes in batches at its own pace. Database bulk inserts and GPU kernel launches are similar patterns. llama.cpp applies it to tokens: you submit at the granularity of a sentence or a prompt, the engine executes at the granularity hardware can eat.</p>
