@@ -383,7 +383,10 @@ dest = <span class="st">""</span>
 <p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。</p>
 <p>检测这一步其实暗藏玄机。最理想的情况是模型 GGUF 里写明了模板名，一查便知；但现实里常常只给出一段模板<strong>内容</strong>（Jinja 文本），没有名字。这时只能靠"内容里有没有某些特征标记"来反推——看到 <span class="mono">[INST]</span> 就猜 Llama-2、看到 <span class="mono">&lt;|im_start|&gt;</span> 就猜 ChatML。这种基于特征的启发式不是百分百可靠，但覆盖了绝大多数情况。</p>
 <p>套用这一步也比看上去讲究。同一套格式，system 消息有的拼在最前、有的并进第一条 user 消息、有的干脆不支持；多轮对话里，历史消息要不要重复加标记、最后一轮怎么收尾，每种模板都有自己的规矩。<span class="mono">apply_template</span> 把这些细节按模板类型一一处理妥当，你只管递进去一个消息列表，它还你一段格式严丝合缝的提示词。</p>
-<p>一个实际的小建议：调试对话效果时，不妨把 <span class="mono">apply_template</span> 拼出来的那段字符串<strong>原样打印</strong>出来看看。很多"模型不好好回答"的问题，根子就在拼出来的提示词格式不对——少了个标记、system 放错了位置、add_ass 忘了开。先看清喂进去的到底长什么样，往往比反复调参数更快定位问题。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  调试对话效果时，不妨把 <span class="mono">apply_template</span> 拼出来的那段字符串<strong>原样打印</strong>出来看看。很多"模型不好好回答"的问题，根子就在拼出来的提示词格式不对——少了个标记、system 放错了位置、add_ass 忘了开。先看清喂进去的到底长什么样，往往比反复调参数更快定位问题。
+</div>
 
 <h2>两条路：内建 vs Jinja</h2>
 <div class="cols">
@@ -400,7 +403,10 @@ dest = <span class="st">""</span>
 <p>两条路分工很清楚：内建管"已知模型、要快要稳"，Jinja 管"任意模型、要忠实"。衔接上，无论哪条路，拼好的提示词都要再经 L20 的 tokenize、进 L17 的 decode——对话模板只是把"消息"变成"字符串"的那一棒。</p>
 <p>为什么不干脆<strong>全</strong>用 Jinja，省得维护几十种内建模板？因为 Jinja 是一套完整的模板语言，要带一个解释器、要解析执行任意逻辑，开销和复杂度都不小。对那些格式早已固定的常见模型，用几行 C++ 直接拼，又快又稳、还没有解析任意模板带来的安全顾虑。所以内建这条"快路"有它不可替代的价值。</p>
 <p>反过来，为什么又非要有 Jinja 不可？因为模型层出不穷，总有内建表里没有的新格式、或带着复杂条件逻辑的模板（比如"有 system 就这样拼、没有就那样拼""带工具定义时再加一段"）。这些用固定枚举根本表达不了，只能靠一个真正的模板引擎去执行。两条路各补各的短，合起来才既覆盖广、又跑得快。</p>
-<p>把视角拉高一点：对话模板这一层，本质上是在弥合"人类的对话观"和"模型的文本观"之间的鸿沟。人觉得对话是你一言我一语的结构，模型只认一条连续的 token 流。模板就是这两种世界观之间的翻译协议——而它居然能用"一张枚举表 + 一个可选的 Jinja 引擎"就基本搞定，足见把复杂性收进数据是多么有力的一招。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  对话模板这一层，本质上是在弥合"人类的对话观"和"模型的文本观"之间的鸿沟。人觉得对话是你一言我一语的结构，模型只认一条连续的 token 流。模板就是这两种世界观之间的翻译协议——而它居然能用"一张枚举表 + 一个可选的 Jinja 引擎"就基本搞定，足见把复杂性收进数据是多么有力的一招。
+</div>
 <p>还值得一提的是工具调用（function calling）这类高级用法。当你想让模型调用外部工具时，工具的定义、调用的格式、返回的拼接，都要按特定约定塞进提示词——这远超内建模板"拼几条消息"的能力，正是 common 层结合 Jinja 与语法约束（L23）来做的。所以对话模板不只是"聊天"，它还是更复杂的"结构化交互"的地基。</p>
 
 <details class="accordion">
@@ -569,7 +575,10 @@ dest = <span class="st">""</span>
 <p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt.</p>
 <p>Detection actually hides subtlety. Ideally the GGUF states the template name and a lookup settles it; but in reality it often gives only a template <strong>body</strong> (Jinja text) with no name. Then one can only infer from "whether certain feature markers appear in the body" - see <span class="mono">[INST]</span> and guess Llama-2, see <span class="mono">&lt;|im_start|&gt;</span> and guess ChatML. This feature-based heuristic is not 100% reliable but covers the vast majority.</p>
 <p>Application is also fussier than it looks. For the same format, the system message may go at the very front, be merged into the first user message, or not be supported at all; in multi-turn dialogue, whether history repeats the markers and how the last turn closes - each template has its own rules. <span class="mono">apply_template</span> handles these details per template type, so you just hand in a message list and it returns a precisely formatted prompt.</p>
-<p>A practical tip: when debugging chat behavior, print the string <span class="mono">apply_template</span> produces <strong>verbatim</strong> and look at it. Many "the model won't answer properly" issues are rooted in a wrong assembled prompt - a missing marker, the system placed wrong, add_ass forgotten. Seeing exactly what is fed in often locates the problem faster than repeatedly tuning parameters.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  When debugging chat behavior, print the string <span class="mono">apply_template</span> produces <strong>verbatim</strong> and look at it. Many "the model won't answer properly" issues are rooted in a wrong assembled prompt - a missing marker, the system placed wrong, add_ass forgotten. Seeing exactly what is fed in often locates the problem faster than repeatedly tuning parameters.
+</div>
 
 <h2>Two paths: built-in vs Jinja</h2>
 <div class="cols">
@@ -586,7 +595,10 @@ dest = <span class="st">""</span>
 <p>The two paths divide cleanly: built-in for "known models, fast and steady", Jinja for "any model, faithful". For the hand-off, whichever path, the assembled prompt still goes through L20's tokenize and into L17's decode - the chat template is merely the leg that turns "messages" into "a string".</p>
 <p>Why not just use Jinja for <strong>everything</strong> and skip maintaining dozens of built-in templates? Because Jinja is a full template language, requiring an interpreter and executing arbitrary logic, with non-trivial cost and complexity. For common models whose format is long fixed, a few lines of C++ assembling directly is faster, steadier, and free of the security concerns of running arbitrary templates. So the built-in "fast path" has irreplaceable value.</p>
 <p>Conversely, why is Jinja indispensable? Because models keep appearing, and there are always new formats absent from the built-in table, or templates with complex conditional logic ("assemble this way if there is a system message, that way if not", "add a section when tool definitions are present"). A fixed enum simply cannot express these; only a real template engine can execute them. Each path covers the other's weakness; together they are both broad and fast.</p>
-<p>Zoom out: the chat-template layer essentially bridges the gap between "the human view of conversation" and "the model's view of text". People see dialogue as a back-and-forth structure; the model knows only one continuous token stream. The template is the translation protocol between these worldviews - and that it largely manages with "one enum table + an optional Jinja engine" shows how powerful settling complexity into data really is.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The chat-template layer essentially bridges the gap between "the human view of conversation" and "the model's view of text". People see dialogue as a back-and-forth structure; the model knows only one continuous token stream. The template is the translation protocol between these worldviews - and that it largely manages with "one enum table + an optional Jinja engine" shows how powerful settling complexity into data really is.
+</div>
 <p>Also worth mentioning is the advanced use of tool calling (function calling). When you want the model to call an external tool, the tool definitions, the call format, and the splicing of returns must all be packed into the prompt per a specific convention - far beyond the built-in template's "stitch a few messages", and exactly what the common layer does by combining Jinja with grammar constraints (L23). So chat templates are not only "chat"; they are the foundation of more complex "structured interaction" too.</p>
 
 <details class="accordion">

@@ -397,8 +397,10 @@ KV cache（L19）按层数和 KV 头数算该开多大。可以说，hparams 是
 <p>为什么用 <span class="mono">.</span> 点号分层级命名（<span class="mono">blk.0.attn_q.weight</span>）？因为这天然形成一棵<strong>层级树</strong>：<span class="mono">blk</span> 下是各层、层下是各部件、部件下是 weight/bias。这种命名既清晰、又方便按前缀批量匹配——
 比如想找第 0 层的所有权重，匹配 <span class="mono">blk.0.</span> 前缀即可。一个好的命名约定，不只是"起个名"，而是把结构信息编码进了名字本身。</p>
 <p>这套命名还是<strong>跨架构通用</strong>的：不管 llama 还是 qwen2，第 0 层的注意力 Q 投影都叫 <span class="mono">blk.0.attn_q</span>。正因为大家共享同一套名字，针对张量的通用工具（量化、转换、可视化）才能不区分架构地处理任意模型。</p>
-<p>再补一点 <span class="mono">LLM_TN</span> 的细节：它拼出的完整名字通常还带个后缀，区分 <span class="mono">.weight</span> 和 <span class="mono">.bias</span>——同一个部件可能有权重、也可能有偏置。所以 <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> 拼出的是 <span class="mono">blk.il.attn_q.weight</span>。
-把"部件名模板 + 后缀 + 层号"三者交给一个构造器统一拼，既避免了到处手写字符串容易出的错，也让"改个命名规则"只需动一处。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  再补一点 <span class="mono">LLM_TN</span> 的细节：它拼出的完整名字通常还带个后缀，区分 <span class="mono">.weight</span> 和 <span class="mono">.bias</span>——同一个部件可能有权重、也可能有偏置。所以 <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> 拼出的是 <span class="mono">blk.il.attn_q.weight</span>。把"部件名模板 + 后缀 + 层号"三者交给一个构造器统一拼，既避免了到处手写字符串容易出的错，也让"改个命名规则"只需动一处。
+</div>
 <p>顺便提一句：有些张量是<strong>可选</strong>的——比如不少现代模型的线性层没有 bias，那 <span class="mono">.bias</span> 那个张量在文件里就根本不存在。建图时按架构知道"这层该有哪些张量"，缺的可选项就跳过。
 命名约定加上"哪些必需、哪些可选"的知识，才完整描述了一个架构的张量构成。</p>
 
@@ -599,8 +601,10 @@ Every layer replicates this template, prefixed with <span class="mono">blk.&lt;i
 <p>Why dot-separated hierarchical names (<span class="mono">blk.0.attn_q.weight</span>)? Because it naturally forms a <strong>hierarchy tree</strong>: under <span class="mono">blk</span> are the layers, under a layer the parts, under a part weight/bias. Such naming is both clear and convenient for prefix matching in bulk -
 to find all of layer 0's weights, match the <span class="mono">blk.0.</span> prefix. A good naming convention is not just "giving a name"; it encodes structural information into the name itself.</p>
 <p>This naming is also <strong>cross-architecture</strong>: whether llama or qwen2, layer 0's attention Q projection is named <span class="mono">blk.0.attn_q</span>. Because everyone shares one naming set, generic tensor tools (quantization, conversion, visualization) can process any model without caring about architecture.</p>
-<p>A bit more <span class="mono">LLM_TN</span> detail: the full name it builds usually carries a suffix too, distinguishing <span class="mono">.weight</span> from <span class="mono">.bias</span> - a part may have a weight and possibly a bias. So <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> builds <span class="mono">blk.il.attn_q.weight</span>.
-Handing "part-name template + suffix + layer index" to one constructor avoids the errors of hand-writing strings everywhere, and means "changing a naming rule" touches just one place.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  A bit more <span class="mono">LLM_TN</span> detail: the full name it builds usually carries a suffix too, distinguishing <span class="mono">.weight</span> from <span class="mono">.bias</span> - a part may have a weight and possibly a bias. So <span class="mono">tn(LLM_TENSOR_ATTN_Q, "weight", il)</span> builds <span class="mono">blk.il.attn_q.weight</span>. Handing "part-name template + suffix + layer index" to one constructor avoids the errors of hand-writing strings everywhere, and means "changing a naming rule" touches just one place.
+</div>
 <p>By the way: some tensors are <strong>optional</strong> - many modern models' linear layers have no bias, so the <span class="mono">.bias</span> tensor simply does not exist in the file. At graph time, the architecture knows "which tensors this layer should have", and missing optional ones are skipped.
 The naming convention plus knowledge of "which are required, which optional" together fully describe an architecture's tensor makeup.</p>
 
