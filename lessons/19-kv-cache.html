@@ -370,7 +370,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 mem = <span class="fn">llama_get_memory</span>(ctx)
 <span class="fn">llama_memory_seq_rm</span> (mem, seq, p0, p1)      <span class="cm"># 删 [p0,p1) 这段 KV</span>
 <span class="fn">llama_memory_seq_add</span>(mem, seq, p0, p1, d)   <span class="cm"># 上下文移位: 把 pos 平移 d</span></pre>
-<p>注意这套公开 API 的名字是 <span class="mono">llama_memory_seq_*</span>——旧版本叫 <span class="mono">llama_kv_self_seq_*</span>，已经改名移除了。看老教程时容易踩这个坑。改名本身也透露了演进方向：从"KV cache"这个具体概念，抽象成了更一般的"memory"。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  这套公开 API 的名字是 <span class="mono">llama_memory_seq_*</span>——旧版本叫 <span class="mono">llama_kv_self_seq_*</span>，已经改名移除了，看老教程时容易踩这个坑。改名本身也透露了演进方向：从"KV cache"这个具体概念，抽象成了更一般的"memory"。
+</div>
 <p>这里最值得理解的是<strong>上下文移位</strong>（context shift）。当对话长到超过 <span class="mono">n_ctx</span>，缓存满了怎么办？一种办法就是：丢掉最旧的一段 K/V，把剩下那些 token 的 <span class="mono">pos</span> 整体往前挪（<span class="mono">seq_add</span> 一个负的位移），腾出尾部空间继续生成。这样既不用"满了就停"，也不必重算整段——只是把记忆的窗口往前滑了一下。</p>
 <p><span class="mono">seq_cp</span>（复制序列）有个巧妙用途：<strong>共享前缀</strong>。比如一个很长的 system prompt，要同时生成好几个不同回答，可以先把它算一遍、存进序列 0，再 <span class="mono">seq_cp</span> 复制给序列 1、2、3……于是几条序列共享同一段前缀的 KV，不用各算一遍。这是服务器省算力的常用招数。</p>
 <p><span class="mono">seq_keep</span>（只保留某序列）则常用于<strong>清场</strong>：服务器处理完一批请求，想只留下某一条、把其余的 KV 全清掉，一句 <span class="mono">seq_keep</span> 就行。这些序列操作合起来，让 KV cache 不是一块只能整体清空的死内存，而是可以<strong>按序列精细增删</strong>的活内存——这正是高并发服务调度的底层支撑。</p>
@@ -548,7 +551,10 @@ how multiple sequences coexist, and the various <strong>variants</strong> for lo
 mem = <span class="fn">llama_get_memory</span>(ctx)
 <span class="fn">llama_memory_seq_rm</span> (mem, seq, p0, p1)      <span class="cm"># remove the [p0,p1) span of KV</span>
 <span class="fn">llama_memory_seq_add</span>(mem, seq, p0, p1, d)   <span class="cm"># context shift: shift pos by d</span></pre>
-<p>Note the public API names are <span class="mono">llama_memory_seq_*</span> - older versions called them <span class="mono">llama_kv_self_seq_*</span>, now renamed and removed. Old tutorials trip on this. The rename also reveals the direction: from the concrete "KV cache" concept to a more general "memory".</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  The public API names are <span class="mono">llama_memory_seq_*</span> - older versions called them <span class="mono">llama_kv_self_seq_*</span>, now renamed and removed, so old tutorials trip on this. The rename also reveals the direction: from the concrete "KV cache" concept to a more general "memory".
+</div>
 <p>The most worthwhile thing here is <strong>context shift</strong>. When a conversation grows past <span class="mono">n_ctx</span> and the cache fills, what then? One way: drop the oldest span of K/V, shift the remaining tokens' <span class="mono">pos</span> forward as a whole (a negative <span class="mono">seq_add</span>), and free tail space to keep generating. This avoids "stop when full" without recomputing the whole segment - it just slides the memory window forward a bit.</p>
 <p><span class="mono">seq_cp</span> (copy a sequence) has a clever use: <strong>shared prefix</strong>. Say a long system prompt must generate several different answers at once - compute it once into sequence 0, then <span class="mono">seq_cp</span> it to sequences 1, 2, 3... so several sequences share the same prefix's KV without each recomputing it. A common server compute-saving trick.</p>
 <p><span class="mono">seq_keep</span> (keep only one sequence) is often used to <strong>clear the field</strong>: a server, done with a batch of requests, wanting to keep only one and clear all others' KV, does it with one <span class="mono">seq_keep</span>. These sequence operations together make the KV cache not a dead memory clearable only wholesale, but a live memory that can be <strong>finely added to and removed by sequence</strong> - the underlying support for high-concurrency service scheduling.</p>

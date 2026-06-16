@@ -397,7 +397,10 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
 <p>先说最终拍板的两个：<span class="mono">greedy</span> 永远选 logit 最大的那个——确定性，同样输入永远同样输出，适合要复现、要严谨的场景；<span class="mono">dist</span> 则把 logits 经 softmax 变成概率，再按概率<strong>随机</strong>抽一个，带来多样性，靠随机种子 seed 控制。一条链最后接 greedy 还是 dist，决定这次生成是"确定"还是"随机"。</p>
 <p>再说"裁"的两位主力：<span class="mono">top_k</span> 留分数最高的固定 k 个、其余划掉；<span class="mono">top_p</span>（核采样）按概率从高到低累加、留到累计达 p 为止——候选数随分布自适应（分布尖时留得少、平时留得多）。两者常配合：先 top_k 砍掉长尾，再 top_p 自适应收口。</p>
 <p>"塑"的代表是温度 <span class="mono">temp</span>：把 logits 除以一个温度值 T 再 softmax。T 小则分布更尖（更确定），T 大则更平（更随机）。它不改候选集，只改"软硬"。还有 <span class="mono">penalties</span> 压低重复、<span class="mono">mirostat</span> 动态调温稳住困惑度等，各有专长。</p>
-<p>这里要提醒：2023 年那套全局采样函数（<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> 等）<strong>已经全部移除</strong>，统一换成了"采样器对象 + 链"这套模型。看老教程别再找那些函数了。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  2023 年那套全局采样函数（<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> 等）<strong>已经全部移除</strong>，统一换成了"采样器对象 + 链"这套模型。看老教程别再找那些函数了。
+</div>
 <p>单独说说 <span class="mono">penalties</span> 这一类，因为它最贴近日常体验。它盯着最近生成过的 token，对老重复的词施加惩罚（调低 logit），于是模型不容易陷进"复读机"式的循环。常见的有重复惩罚、频率惩罚、存在惩罚几种口味，分别对应"出现过就罚""出现越多越罚""只要出现就一视同仁地罚"。调它们，能在"连贯"和"啰嗦"之间找平衡。</p>
 
 <h2>接回主回路与衔接</h2>
@@ -587,7 +590,10 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
 <p>First the two that make the final call: <span class="mono">greedy</span> always picks the max logit - deterministic, same input always same output, good for reproducible, rigorous scenarios; <span class="mono">dist</span> softmaxes logits into probabilities and then draws one <strong>randomly</strong> by probability, bringing diversity, controlled by a random seed. Whether a chain ends in greedy or dist decides if this generation is "deterministic" or "random".</p>
 <p>Then the two pruning mainstays: <span class="mono">top_k</span> keeps the fixed top k by score and strikes out the rest; <span class="mono">top_p</span> (nucleus) accumulates by probability from high to low, keeping until the cumulative reaches p - the candidate count is <strong>adaptive</strong> (few when the distribution is peaked, many when flat). The two often pair: top_k chops the long tail, then top_p closes adaptively.</p>
 <p>The "shape" representative is temperature <span class="mono">temp</span>: divide logits by a temperature T then softmax. Small T makes the distribution peakier (more deterministic), large T flatter (more random). It does not change the candidate set, only the softness. There are also <span class="mono">penalties</span> to damp repeats, <span class="mono">mirostat</span> to dynamically tune temperature and hold perplexity, each with a specialty.</p>
-<p>A reminder here: the 2023-era global sampling functions (<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> etc.) are <strong>all removed</strong>, unified into this "sampler object + chain" model. Do not go looking for those functions in old tutorials.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  The 2023-era global sampling functions (<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> etc.) are <strong>all removed</strong>, unified into this "sampler object + chain" model. Do not go looking for those functions in old tutorials.
+</div>
 <p>A word on the <span class="mono">penalties</span> family, since it is closest to everyday experience. It watches recently generated tokens and penalizes oft-repeated words (lowering their logit), so the model is less likely to fall into a "broken record" loop. Common flavors are repeat, frequency, and presence penalties - "penalize if seen", "penalize more the more it appears", "penalize once seen, flatly". Tuning them balances "coherent" against "verbose".</p>
 
 <h2>Back to the main loop and the hand-off</h2>

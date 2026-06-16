@@ -369,7 +369,10 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
   <div class="layer l-core"><div class="lh"><span class="badge">生效</span><span class="name">build_lora_mm（每次 decode 建图）</span></div><div class="ld">按张量名把 scale·B·A 折进相关 matmul</div></div>
 </div>
 <p>用起来很简单：<span class="mono">llama_adapter_lora_init</span> 从一个 <span class="mono">.gguf</span> 适配器文件读出 A、B 张量，得到一个适配器对象；再用 <span class="mono">llama_set_adapters_lora</span> 把它挂到 context（L17）上、并给一个 scale。之后的每次 decode，建图时就会自动把这个适配器的增量折进去。</p>
-<p>这里有个 API 要特别注意：挂载用的是<strong>复数、批量</strong>的 <span class="mono">llama_set_adapters_lora</span>（一次可以挂多个适配器、各带一个 scale）。早期那套<strong>单数</strong>的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> 已经不存在了——清空适配器就是调批量版、传 <span class="mono">n=0</span>。看老代码时别再找单数那几个。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  挂载用的是<strong>复数、批量</strong>的 <span class="mono">llama_set_adapters_lora</span>（一次可以挂多个适配器、各带一个 scale）。早期那套<strong>单数</strong>的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> 已经不存在了——清空适配器就是调批量版、传 <span class="mono">n=0</span>。看老代码时别再找单数那几个。
+</div>
 <p>"能同时挂多个、各带 scale"不是摆设，而是<strong>能力叠加</strong>的基础：你可以把"中文风格"和"法律领域"两个 LoRA 同时挂上、各给一个权重，让模型同时具备两种特长。批量接口天然支持这种组合——这也是为什么它被设计成一组 <span class="mono">{适配器, scale}</span>，而不是一次只能挂一个。</p>
 <p>还要强调那个"<strong>不复制权重</strong>"：挂载只是在 context 上记下"现在生效哪些适配器、各什么 scale"，真正的叠加发生在每次 decode 建图时（<span class="mono">build_lora_mm</span>）。所以挂上、卸下 LoRA 几乎是零成本的——不涉及那几十 GB 权重的任何拷贝或修改，切换风格快得像换个滤镜。</p>
 <p>适配器为什么也用 <span class="mono">.gguf</span> 格式（L13）？因为 LoRA 本质上也是"一堆带名字的张量"（A、B 矩阵，按它们要修改的目标权重命名），和模型权重是同一类东西。复用 GGUF 这套自描述格式，意味着加载器（L14）几乎能照搬——读元数据、按名字建张量清单，连工具链都是现成的。一种格式通吃，省了重复造轮子。</p>
@@ -384,7 +387,11 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
   <tr><td>控制向量</td><td>激活（沿固定方向平移）</td><td>加进残差流（set_adapter_cvec）</td></tr>
 </table>
 <p>除了 LoRA，还有一种更轻的"调味"手段：<strong>控制向量</strong>（control vector，cvec）。它不动权重，而是直接在某些层的<strong>激活</strong>（残差流）上，加一个固定方向的向量——好比给模型的"思路"轻轻推一把，让它整体偏向某种语气或倾向（更正式、更乐观之类）。</p>
-<p>两者的区别值得记牢：LoRA 改的是<strong>权重</strong>（给 matmul 加低秩增量，影响那一层的全部计算），表达力强、能学复杂适配；控制向量改的是<strong>激活</strong>（沿一个方向平移残差流），更轻、更像"调味"，擅长沿某个语义方向微调风格。C API 上，cvec 用 <span class="mono">llama_set_adapter_cvec</span>（旧的 <span class="mono">llama_apply_adapter_cvec</span> 已移除）。</p>
+<p>两者的区别值得记牢：LoRA 改的是<strong>权重</strong>（给 matmul 加低秩增量，影响那一层的全部计算），表达力强、能学复杂适配；控制向量改的是<strong>激活</strong>（沿一个方向平移残差流），更轻、更像"调味"，擅长沿某个语义方向微调风格。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  C API 上，cvec 用 <span class="mono">llama_set_adapter_cvec</span>（旧的 <span class="mono">llama_apply_adapter_cvec</span> 已移除）。
+</div>
 <p>把这一课接回第四部分的主线：适配器挂在 <span class="mono">llama_context</span>（L17）上，每次 <span class="mono">llama_decode</span> 建图（L16）时，<span class="mono">build_lora_mm</span> 把增量折进相关的 matmul。所以 LoRA/cvec 不是另起炉灶的新系统，而是<strong>嵌在已有推理回路里</strong>的一层薄薄的"行为调节"——复用了你前面学的建图、上下文这些机制。</p>
 <p>至此，第四部分（llama 推理内部）就完整了：从一个 .gguf 被<strong>加载</strong>成模型（L14-15），<strong>搭成计算图</strong>（L16），装进<strong>上下文</strong>按批用 KV 高效<strong>推理</strong>（L17-19），再到<strong>分词</strong>、<strong>采样</strong>、<strong>对话模板</strong>、<strong>语法约束</strong>、以及这一课的<strong>轻量微调</strong>（L20-24）。你已经把"一个大模型如何被驱动、控制、改造"从头到尾走了一遍。</p>
 <p>控制向量是怎么"算"出来的，值得一提。它往往不需要训练，而是用<strong>对比</strong>的办法：拿一批"正面例子"（比如语气正式的文本）和一批"负面例子"（随意的文本），分别跑过模型、取某层的激活，两组激活的<strong>差</strong>的方向，就大致是"正式"这个概念在模型内部的方向。把这个方向向量加进残差流，就能把输出往"更正式"推。简单、直接、还不用训练。</p>
@@ -543,7 +550,10 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
   <div class="layer l-core"><div class="lh"><span class="badge">effect</span><span class="name">build_lora_mm (per-decode graph build)</span></div><div class="ld">fold scale*B*A into the relevant matmul by tensor name</div></div>
 </div>
 <p>It is simple to use: <span class="mono">llama_adapter_lora_init</span> reads the A, B tensors from a <span class="mono">.gguf</span> adapter file, giving an adapter object; then <span class="mono">llama_set_adapters_lora</span> attaches it to the context (L17) with a scale. Every subsequent decode automatically folds this adapter's delta in at graph-build time.</p>
-<p>One API deserves special attention here: attaching uses the <strong>plural, batched</strong> <span class="mono">llama_set_adapters_lora</span> (you can attach several adapters at once, each with a scale). The early <strong>singular</strong> <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> no longer exist - clearing adapters is calling the batched version with <span class="mono">n=0</span>. Do not go looking for those singular ones in old code.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  Attaching uses the <strong>plural, batched</strong> <span class="mono">llama_set_adapters_lora</span> (you can attach several adapters at once, each with a scale). The early <strong>singular</strong> <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> no longer exist - clearing adapters is calling the batched version with <span class="mono">n=0</span>. Do not go looking for those singular ones in old code.
+</div>
 <p>"Attach several at once, each with a scale" is no ornament but the basis of <strong>stacking abilities</strong>: you can attach a "Chinese style" and a "legal domain" LoRA at once, each with a weight, giving the model both specialties. The batched interface naturally supports this combination - which is why it is designed as a set of <span class="mono">{adapter, scale}</span>, not one-at-a-time.</p>
 <p>Stress that "<strong>no weight copy</strong>" again: attaching merely records on the context "which adapters are active now, each at what scale"; the real addition happens at each decode's graph build (<span class="mono">build_lora_mm</span>). So attaching and detaching a LoRA is nearly free - involving no copy or modification of those GB of weights, switching styles as fast as swapping a filter.</p>
 <p>Why is an adapter also in <span class="mono">.gguf</span> format (L13)? Because a LoRA is essentially also "a bunch of named tensors" (the A, B matrices, named after the target weights they modify), the same kind of thing as model weights. Reusing GGUF's self-describing format means the loader (L14) can be reused almost verbatim - read metadata, build the tensor list by name, even the toolchain is ready-made. One format fits all, sparing reinvented wheels.</p>

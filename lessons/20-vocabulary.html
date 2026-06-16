@@ -393,7 +393,10 @@ text = <span class="st">""</span>
 
 <h2>C API 与衔接</h2>
 <p>从 C API 用词表，路径很直白：先 <span class="mono">llama_model_get_vocab(model)</span> 从模型拿到词表，再 <span class="mono">llama_vocab_n_tokens(vocab)</span> 问大小、<span class="mono">llama_tokenize</span> 编码、<span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> 解码。这些函数都收一个 <span class="mono">const llama_vocab *</span>。</p>
-<p>这里有个大坑：2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。
+</div>
 <p>为什么要这么大动干戈地改名？因为这些操作本质上是<strong>词表的</strong>方法，而不是模型的——把它们从 <span class="mono">llama_*</span> 统一收进 <span class="mono">llama_vocab_*</span>，名实相符，也呼应了内部 <span class="mono">llama_vocab</span> 已经独立成型这件事。改名虽然烦，但让 API 更清晰。</p>
 <p>把这一课接回主线：你输入的文字，先经 L22 的对话模板拼好格式，再经词表 <span class="mono">tokenize</span> 成 id，进模型算出 logits（L17），由采样器（L21）在<strong>这张词表的 token 空间</strong>里选出下一个 id，最后再经 <span class="mono">token_to_piece</span> 变回文字显示给你。词表正是这条回路一进一出的两道门。</p>
 <div class="vflow">
@@ -582,7 +585,10 @@ text = <span class="st">""</span>
 
 <h2>The C API and the hand-off</h2>
 <p>Using the vocab from the C API is straightforward: first <span class="mono">llama_model_get_vocab(model)</span> to get the vocab from the model, then <span class="mono">llama_vocab_n_tokens(vocab)</span> for the size, <span class="mono">llama_tokenize</span> to encode, <span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> to decode. These all take a <span class="mono">const llama_vocab *</span>.</p>
-<p>There is a big trap here: that batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  That batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.
+</div>
 <p>Why such a sweeping rename? Because these operations are essentially <strong>vocabulary</strong> methods, not model ones - folding them from <span class="mono">llama_*</span> into <span class="mono">llama_vocab_*</span> makes name match substance, echoing how <span class="mono">llama_vocab</span> has internally become its own thing. Renames are annoying but make the API clearer.</p>
 <p>Connecting this lesson back to the main line: your input text is first formatted by L22's chat template, then <span class="mono">tokenize</span>d into ids by the vocab, enters the model to compute logits (L17), the sampler (L21) picks the next id in <strong>this vocabulary's token space</strong>, and finally <span class="mono">token_to_piece</span> turns it back into text shown to you. The vocab is exactly the two gates, in and out, of this loop.</p>
 <div class="vflow">

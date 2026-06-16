@@ -391,7 +391,11 @@ dest = <span class="st">""</span>
   <div class="col"><h4>Jinja（common/jinja）</h4><p>渲染<strong>任意</strong>模板：模型自带的 Jinja chat_template 原样执行，最忠实。<span class="mono">common/chat.cpp</span> 封装，还支持工具调用。</p></div>
 </div>
 <p>内建模板只覆盖"已知的那些模型"。要是来了个全新模型、带着自己独特的模板呢？这就引出第二条路：<strong>Jinja</strong>。</p>
-<p>内建这条路（<span class="mono">src/llama-chat.cpp</span>）是纯 C++ 字符串拼接，固定枚举、零依赖、快，但只认预定义的那几十种。C API <span class="mono">llama_chat_apply_template</span> 走的就是这条——注意它<strong>只收模板字符串、不带模型参数</strong>（旧版带 model 的重载已移除），注释也明说"不用 jinja，只支持预定义列表"。</p>
+<p>内建这条路（<span class="mono">src/llama-chat.cpp</span>）是纯 C++ 字符串拼接，固定枚举、零依赖、快，但只认预定义的那几十种。C API <span class="mono">llama_chat_apply_template</span> 走的就是这条。</p>
+<div class="card warn">
+  <div class="tag">⚠ 注意</div>
+  C API <span class="mono">llama_chat_apply_template</span> <strong>只收模板字符串、不带模型参数</strong>（旧版带 <span class="mono">llama_model *</span> 的重载已移除），注释也明说"不用 jinja，只支持预定义列表"。
+</div>
 <p>Jinja 这条路（vendored 在 <span class="mono">common/jinja/</span>）能渲染<strong>任意</strong>模板：模型在 GGUF 里自带的 chat_template（往往是一段 Jinja 文本）可以被原样执行，最忠实。上层 <span class="mono">common/chat.cpp</span> 的 <span class="mono">common_chat_templates</span> 封装了它，还顺带支持工具调用、输出解析等高级花样。</p>
 <p>两条路分工很清楚：内建管"已知模型、要快要稳"，Jinja 管"任意模型、要忠实"。衔接上，无论哪条路，拼好的提示词都要再经 L20 的 tokenize、进 L17 的 decode——对话模板只是把"消息"变成"字符串"的那一棒。</p>
 <p>为什么不干脆<strong>全</strong>用 Jinja，省得维护几十种内建模板？因为 Jinja 是一套完整的模板语言，要带一个解释器、要解析执行任意逻辑，开销和复杂度都不小。对那些格式早已固定的常见模型，用几行 C++ 直接拼，又快又稳、还没有解析任意模板带来的安全顾虑。所以内建这条"快路"有它不可替代的价值。</p>
@@ -573,7 +577,11 @@ dest = <span class="st">""</span>
   <div class="col"><h4>Jinja (common/jinja)</h4><p>renders <strong>any</strong> template: the model's own Jinja chat_template runs as-is, most faithful. <span class="mono">common/chat.cpp</span> wraps it and even supports tool calls.</p></div>
 </div>
 <p>The built-in templates cover only "the known models". What about a brand-new model bringing its own unique template? That leads to the second path: <strong>Jinja</strong>.</p>
-<p>The built-in path (<span class="mono">src/llama-chat.cpp</span>) is pure C++ string assembly - fixed enum, zero deps, fast, but recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path - note it <strong>only takes a template string, no model parameter</strong> (the old model-taking overload is removed), and its comment plainly says "no jinja, only the predefined list".</p>
+<p>The built-in path (<span class="mono">src/llama-chat.cpp</span>) is pure C++ string assembly - fixed enum, zero deps, fast, but recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path.</p>
+<div class="card warn">
+  <div class="tag">⚠ Heads-up</div>
+  The C API <span class="mono">llama_chat_apply_template</span> <strong>only takes a template string, no model parameter</strong> (the old <span class="mono">llama_model *</span> overload is removed), and its comment plainly says "no jinja, only the predefined list".
+</div>
 <p>The Jinja path (vendored in <span class="mono">common/jinja/</span>) can render <strong>any</strong> template: the chat_template a model carries in GGUF (often a piece of Jinja text) runs as-is, most faithful. The upper layer <span class="mono">common/chat.cpp</span>'s <span class="mono">common_chat_templates</span> wraps it and also supports tool calls, output parsing, and other advanced tricks.</p>
 <p>The two paths divide cleanly: built-in for "known models, fast and steady", Jinja for "any model, faithful". For the hand-off, whichever path, the assembled prompt still goes through L20's tokenize and into L17's decode - the chat template is merely the leg that turns "messages" into "a string".</p>
 <p>Why not just use Jinja for <strong>everything</strong> and skip maintaining dozens of built-in templates? Because Jinja is a full template language, requiring an interpreter and executing arbitrary logic, with non-trivial cost and complexity. For common models whose format is long fixed, a few lines of C++ assembling directly is faster, steadier, and free of the security concerns of running arbitrary templates. So the built-in "fast path" has irreplaceable value.</p>
