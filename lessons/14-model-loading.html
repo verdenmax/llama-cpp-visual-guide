@@ -341,16 +341,22 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 键是张量名（如 <span class="mono">blk.0.attn_q.weight</span>），值记着这张量来自第几个文件（<span class="mono">idx</span>，为分片准备）、在文件里的偏移（<span class="mono">offs</span>）、以及对应的 <span class="mono">ggml_tensor</span>。</p>
 <p>注意一个关键设计：清单用的是 <strong>map（按名字）</strong>，不是 vector（按顺序）。为什么？因为接下来（L15）这些张量要<strong>按名字</strong>对应到模型架构里的具体位置；而且分片时同一个逻辑模型的张量散在多个文件里，
 按名字查比按下标稳得多。loader 在这里就把"散落的字节"收敛成了"一张能按名字点名的清单"。</p>
-<p>把 loader 放到整个推理流程里看，它的位置很特别：<strong>加载只发生一次</strong>，而后面的 decode（L17）会被反复调用成千上万次。正因为只做一次，loader 可以"慢工出细活"地把模型整理周全——
-读全 metadata、建好完整清单、接好所有数据指针；之后得到的 <span class="mono">llama_model</span> 是<strong>只读</strong>的，可以被许多次推理、甚至许多个会话反复复用，不必再碰磁盘。把"一次性的重活"和"反复做的快活"分开，是这套设计省时省力的根源。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  把 loader 放到整个推理流程里看，它的位置很特别：<strong>加载只发生一次</strong>，而后面的 decode（L17）会被反复调用成千上万次。正因为只做一次，loader 可以"慢工出细活"地把模型整理周全——读全 metadata、建好完整清单、接好所有数据指针；之后得到的 <span class="mono">llama_model</span> 是<strong>只读</strong>的，可以被许多次推理、甚至许多个会话反复复用，不必再碰磁盘。把"一次性的重活"和"反复做的快活"分开，是这套设计省时省力的根源。
+</div>
 <p>"整理成清单"这一步看似平淡，其实是把后面一切操作变简单的关键。磁盘上的张量只是一段段连续字节，彼此之间没有任何"我是谁"的信息；loader 给它们配上名字、记下位置、建好索引，
 之后无论是按架构建图（L16）、还是热插拔 LoRA（L24 预告），都能<strong>按名字精确点到某一个张量</strong>。先把混沌整理成有序，后面才能从容操作——这是工程里很常见、却常被忽视的一步。</p>
-<p>这里也能看清几个层次的分工：最底下是 <span class="mono">gguf</span> 库（L13），只懂"GGUF 这种文件怎么解析"，连"权重"是什么都不关心；往上是 <span class="mono">ggml</span>（L08-L12），只懂张量和计算，不关心文件；
-而 loader 正好<strong>夹在两者之间</strong>——它用 gguf 库读出原始信息，再用 ggml 建出张量，把"文件世界"翻译成"张量世界"。理解 loader，其实就是理解这道翻译是怎么发生的。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  这里也能看清几个层次的分工：最底下是 <span class="mono">gguf</span> 库（L13），只懂"GGUF 这种文件怎么解析"，连"权重"是什么都不关心；往上是 <span class="mono">ggml</span>（L08-L12），只懂张量和计算，不关心文件；而 loader 正好<strong>夹在两者之间</strong>——它用 gguf 库读出原始信息，再用 ggml 建出张量，把"文件世界"翻译成"张量世界"。理解 loader，其实就是理解这道翻译是怎么发生的。
+</div>
 <p>你平时跑 llama.cpp 时，启动那一大段刷屏的日志——"loaded meta data with N key-value pairs"、一行行张量名和类型——多半就是 loader 在汇报它的工作：读了多少 KV、识别出哪种架构、每个张量多大、用没用上 mmap。
 下次看到这些日志，你就知道屏幕背后正是这一课讲的流程在跑。</p>
-<p>要补一句：上面"四步"是<strong>概念上</strong>的顺序，真实代码里它们常交织在一起——比如读 tensor info 的同时就建好了 weights_map 的条目，建条目时就记下了 mmap 里的偏移。
-教学上分成四步是为了看清职责，工程上则是一遍扫描尽量把能做的都做了。理解了每一步"在干什么"，看真实代码时就不会被它们交错的写法绕晕。</p>
+<div class="card spark">
+  <div class="tag">💡 实战</div>
+  上面"四步"是<strong>概念上</strong>的顺序，真实代码里它们常交织在一起——比如读 tensor info 的同时就建好了 weights_map 的条目，建条目时就记下了 mmap 里的偏移。教学上分成四步是为了看清职责，工程上则是一遍扫描尽量把能做的都做了。理解了每一步"在干什么"，看真实代码时就不会被它们交错的写法绕晕。
+</div>
 
 <h2>读超参与张量</h2>
 <p>loader 怎么知道模型有几层、多宽？不靠猜，全从 GGUF 的 metadata KV 里读——用一个模板方法 <span class="mono">get_key</span>，把"键"映射到具体的超参字段。键本身是自描述的（L13），下一课（L15）会讲这些键怎么按架构拼出来。</p>
@@ -542,16 +548,22 @@ inferable <span class="mono">llama_model</span>" sits this loader layer. Read it
 key is the tensor name (e.g. <span class="mono">blk.0.attn_q.weight</span>) and whose value records which file the tensor came from (<span class="mono">idx</span>, for splits), its offset in the file (<span class="mono">offs</span>), and the matching <span class="mono">ggml_tensor</span>.</p>
 <p>Note a key design: the list is a <strong>map (by name)</strong>, not a vector (by order). Why? Because next (L15) these tensors must be matched <strong>by name</strong> to specific positions in the model architecture; and with splits, one logical model's tensors are
 scattered across several files, where look-up by name is far steadier than by index. Right here the loader collapses "scattered bytes" into "a list you can call by name".</p>
-<p>Placed in the whole inference pipeline, the loader's position is special: <strong>loading happens once</strong>, while the decode that follows (L17) is called thousands of times. Precisely because it runs once, the loader can take its time to organize the model thoroughly -
-read all metadata, build the complete list, wire up every data pointer; the resulting <span class="mono">llama_model</span> is <strong>read-only</strong> and can be reused across many inferences, even many sessions, without touching disk again. Separating "the one-time heavy work" from "the repeated fast work" is the root of this design's efficiency.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Placed in the whole inference pipeline, the loader's position is special: <strong>loading happens once</strong>, while the decode that follows (L17) is called thousands of times. Precisely because it runs once, the loader can take its time to organize the model thoroughly - read all metadata, build the complete list, wire up every data pointer; the resulting <span class="mono">llama_model</span> is <strong>read-only</strong> and can be reused across many inferences, even many sessions, without touching disk again. Separating "the one-time heavy work" from "the repeated fast work" is the root of this design's efficiency.
+</div>
 <p>This "organize into a list" step looks mundane but is the key to making everything later simple. On disk, tensors are just runs of contiguous bytes with no "who am I" information; the loader gives them names, records positions, and builds an index,
 so that whether building a graph by architecture (L16) or hot-swapping a LoRA (L24), the engine can <strong>point precisely at one tensor by name</strong>. Turning chaos into order first is what lets everything afterward proceed calmly - a common but underappreciated step in engineering.</p>
-<p>You can also see the division of labor across layers here: at the bottom is the <span class="mono">gguf</span> library (L13), which only knows "how to parse a GGUF file" and cares nothing for what a "weight" is; above it is <span class="mono">ggml</span> (L08-L12), which only knows tensors and computation, not files;
-and the loader sits <strong>exactly between them</strong> - using the gguf library to read raw info, then ggml to build tensors, translating the "file world" into the "tensor world". Understanding the loader is really understanding how that translation happens.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  You can also see the division of labor across layers here: at the bottom is the <span class="mono">gguf</span> library (L13), which only knows "how to parse a GGUF file" and cares nothing for what a "weight" is; above it is <span class="mono">ggml</span> (L08-L12), which only knows tensors and computation, not files; and the loader sits <strong>exactly between them</strong> - using the gguf library to read raw info, then ggml to build tensors, translating the "file world" into the "tensor world". Understanding the loader is really understanding how that translation happens.
+</div>
 <p>When you run llama.cpp, that wall of startup logs - "loaded meta data with N key-value pairs", lines of tensor names and types - is mostly the loader reporting its work: how many KVs it read, which architecture it recognized, how big each tensor is, whether mmap was used.
 Next time you see those logs, you will know the process behind the screen is exactly what this lesson describes.</p>
-<p>One caveat: the "four steps" above are a <strong>conceptual</strong> order; in real code they often interleave - e.g. reading a tensor info also builds its weights_map entry, and building the entry records the offset into the mmap.
-Splitting into four steps is for seeing the responsibilities clearly; in engineering, one pass does as much as it can at once. Once you grasp what each step "is doing", the interleaved real code will not confuse you.</p>
+<div class="card spark">
+  <div class="tag">💡 Tip</div>
+  The "four steps" above are a <strong>conceptual</strong> order; in real code they often interleave - e.g. reading a tensor info also builds its weights_map entry, and building the entry records the offset into the mmap. Splitting into four steps is for seeing the responsibilities clearly; in engineering, one pass does as much as it can at once. Once you grasp what each step "is doing", the interleaved real code will not confuse you.
+</div>
 
 <h2>Reading hyperparameters and tensors</h2>
 <p>How does the loader know how many layers, how wide? Not by guessing - it reads it all from the GGUF metadata KVs, via a templated <span class="mono">get_key</span> that maps a "key" to a specific hyperparameter field. The keys are self-describing (L13); the next lesson (L15) covers how they are templated per architecture.</p>
