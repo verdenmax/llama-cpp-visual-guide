@@ -115,8 +115,8 @@ ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="c
 <p>加载到此为止。下一课（L15）我们就接着问：这一堆"带名字的张量"，怎么知道自己属于哪种架构（llama？qwen2？）、每层有哪些部件、怎么按超参组织起来——也就是 loader 读出的东西，到底要<strong>按什么图纸</strong>拼成一个模型。</p>
 <p>稍微展开一下加载完拿到的 <span class="mono">llama_model</span> 到底是什么：它是一个<strong>只读</strong>的对象，装着所有权重张量（data 指针指进 mmap）、加上从 metadata 读出的超参（L15 会装进 <span class="mono">llama_hparams</span>）和词表（L20）。
 它不含任何"会话状态"——没有 KV cache、没有当前算到哪。这正是下一层（L17）要把 <span class="mono">llama_model</span> 和 <span class="mono">llama_context</span> 分开的伏笔：知识（权重）只读可共享，状态（KV/进度）每会话一份。加载这一课，交付的就是那份"只读的知识"。</p>
-<div class="card warn">
-  <div class="tag">⚠ 注意</div>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
   顺带一提：加载失败是有明确信号的——magic 不对、version 不认识、某个必需张量缺失，loader 都会当场报错而不是带病继续。这种"加载期就把问题暴露出来"的做法，比"跑到一半才崩"友好得多，也是把校验集中在 loader 这一层的好处。
 </div>
 <p>把这一课收个尾：loader 站在"格式"和"模型"之间，向下它只关心 GGUF 的字节怎么排（L13），向上它只交付一份干净的、按名字可查的、数据已就位的张量集合。它不懂什么是注意力、不懂 llama 和 qwen 有什么不同——这些是上面几课的事。
@@ -282,8 +282,8 @@ and returns a <span class="mono">llama_model</span> - whose weight tensors alrea
 <p>Loading ends here. The next lesson (L15) asks what comes next: this pile of "named tensors" - how does it know which architecture it belongs to (llama? qwen2?), which parts each layer has, how it is organized by the hyperparameters - that is, <strong>by what blueprint</strong> the loader's output is assembled into a model.</p>
 <p>A bit more on what the <span class="mono">llama_model</span> you get after loading actually is: a <strong>read-only</strong> object holding all weight tensors (data pointers into mmap), plus the hyperparameters read from metadata (L15 packs them into <span class="mono">llama_hparams</span>) and the vocab (L20).
 It contains no "session state" - no KV cache, no notion of where computation currently is. That foreshadows why the next layer (L17) separates <span class="mono">llama_model</span> from <span class="mono">llama_context</span>: knowledge (weights) is read-only and shareable, state (KV/progress) is per-session. What this loading lesson delivers is exactly that "read-only knowledge".</p>
-<div class="card warn">
-  <div class="tag">⚠ Heads-up</div>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
   By the way: load failures are signaled clearly - a wrong magic, an unknown version, a missing required tensor, and the loader errors out on the spot rather than limping on. This "surface problems at load time" approach is far friendlier than "crash halfway through", and is a benefit of centralizing validation in the loader layer.
 </div>
 <p>To close this lesson: the loader stands between "format" and "model" - downward it only cares how GGUF's bytes are laid out (L13), upward it only delivers a clean, name-addressable set of tensors with data in place. It knows nothing of attention, nothing of how llama differs from qwen - those belong to the lessons above.
