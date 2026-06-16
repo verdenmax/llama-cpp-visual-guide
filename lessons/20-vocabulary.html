@@ -396,6 +396,13 @@ text = <span class="st">""</span>
 <p>这里有个大坑：2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。</p>
 <p>为什么要这么大动干戈地改名？因为这些操作本质上是<strong>词表的</strong>方法，而不是模型的——把它们从 <span class="mono">llama_*</span> 统一收进 <span class="mono">llama_vocab_*</span>，名实相符，也呼应了内部 <span class="mono">llama_vocab</span> 已经独立成型这件事。改名虽然烦，但让 API 更清晰。</p>
 <p>把这一课接回主线：你输入的文字，先经 L22 的对话模板拼好格式，再经词表 <span class="mono">tokenize</span> 成 id，进模型算出 logits（L17），由采样器（L21）在<strong>这张词表的 token 空间</strong>里选出下一个 id，最后再经 <span class="mono">token_to_piece</span> 变回文字显示给你。词表正是这条回路一进一出的两道门。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>你的文字</h4><p>一句话或一段提示词。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>对话模板(L22) + tokenize</h4><p>先拼好格式，再切成 token id 序列。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>模型算 logits(L17)</h4><p>前向一遍，输出每个 token 一个分数。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>采样选 id(L21)</h4><p>在这张词表的 token 空间里挑下一个。</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>token_to_piece -&gt; 文字</h4><p>把 id 还原成文字，显示给你。</p></div></div>
+</div>
 <p>顺带澄清一个常见疑惑：tokenize 的结果是不是唯一的？对确定的词表和同一套规则，答案是肯定的——同样的输入永远切出同样的 id 序列，这正是编码/解码能可靠往返的前提。采样（L21）带来的随机性，发生在"选下一个 token"那一步，和分词无关；分词本身是完全确定的。</p>
 <p>最后留一个串起全局的视角：词表是这套推理系统里少数"人能直接看懂"的部分。权重是一堆浮点、计算图是一串算子，唯独词表，你能把 id 一个个查回文字、亲眼看到模型"读到了什么、想说什么"。调试模型行为时，先把 token 打印出来看看，常常是最快的入手点。</p>
 
@@ -578,6 +585,13 @@ text = <span class="st">""</span>
 <p>There is a big trap here: that batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.</p>
 <p>Why such a sweeping rename? Because these operations are essentially <strong>vocabulary</strong> methods, not model ones - folding them from <span class="mono">llama_*</span> into <span class="mono">llama_vocab_*</span> makes name match substance, echoing how <span class="mono">llama_vocab</span> has internally become its own thing. Renames are annoying but make the API clearer.</p>
 <p>Connecting this lesson back to the main line: your input text is first formatted by L22's chat template, then <span class="mono">tokenize</span>d into ids by the vocab, enters the model to compute logits (L17), the sampler (L21) picks the next id in <strong>this vocabulary's token space</strong>, and finally <span class="mono">token_to_piece</span> turns it back into text shown to you. The vocab is exactly the two gates, in and out, of this loop.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>your text</h4><p>A sentence or a prompt.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chat template (L22) + tokenize</h4><p>First format it, then cut into a token id sequence.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>model computes logits (L17)</h4><p>One forward pass, one score per token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>sampling picks an id (L21)</h4><p>Pick the next one in this vocab's token space.</p></div></div>
+  <div class="step"><div class="num">5</div><div class="sc"><h4>token_to_piece -&gt; text</h4><p>Turn the id back into text, shown to you.</p></div></div>
+</div>
 <p>A common doubt worth clearing: is tokenize's result unique? For a fixed vocab and the same rules, yes - the same input always cuts into the same id sequence, which is exactly the premise that encoding/decoding round-trips reliably. The randomness sampling (L21) brings happens at the "pick the next token" step, unrelated to tokenization; tokenization itself is fully deterministic.</p>
 <p>One last whole-picture view: the vocab is one of the few parts of this inference system "a human can read directly". Weights are a pile of floats, the compute graph a chain of operators; only the vocab lets you look ids back into text and see with your own eyes "what the model read, what it wants to say". When debugging model behavior, printing the tokens first is often the fastest way in.</p>
 

@@ -346,6 +346,11 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// 清状态(可空)</span>
 };
 <span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">必需</span><span class="name">apply(cur_p)</span></div><div class="ld">改写候选数组：划掉 / 重排 / 重算概率——每个采样器的核心</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">可空</span><span class="name">accept · reset · name · clone · free</span></div><div class="ld">accept 把选中 token 喂回有状态采样器；其余按需实现</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">状态</span><span class="name">llama_sampler_context_t ctx</span></div><div class="ld">每个采样器私有的账本：penalties 记历史、mirostat 记反馈</div></div>
+</div>
 <p>看看一个采样器到底是什么。<span class="mono">llama_sampler_i</span> 就是一组函数指针：<span class="mono">apply</span>（核心，改写候选数组）、<span class="mono">accept</span>（把选中的 token 喂回来给有状态采样器记账）、<span class="mono">reset</span>（清状态），还有 name/clone/free。配上一块状态 <span class="mono">ctx</span>，就构成一个 <span class="mono">llama_sampler</span>。</p>
 <p>这里 <span class="mono">apply</span> 是唯一<strong>必需</strong>的——它拿到候选数组，按自己的规则改一改（划掉一些、重排一下、重算概率）。<span class="mono">accept</span> 可空，只有"有记忆"的采样器才用得上：惩罚项要记住前面出过哪些 token、mirostat 要根据反馈调参，它们都靠 accept 把"刚选中的 token"收进自己的状态。</p>
 <p>这种"一组函数指针 + 一块状态"的设计，你应该眼熟——它就是 L10 后端、L19 记忆接口那套<strong>接口 + 实现</strong>的又一次运用。每个采样器只要实现这几个函数，就能被统一调度；引擎不在乎你内部是 top-k 还是 mirostat，只管按顺序调 apply。</p>
@@ -531,6 +536,11 @@ Last lesson the vocab turned text into token ids fed to the model; the model com
     <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// clear state (nullable)</span>
 };
 <span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">required</span><span class="name">apply(cur_p)</span></div><div class="ld">rewrite the candidate array: strike out / re-rank / recompute probs - each sampler's core</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">nullable</span><span class="name">accept / reset / name / clone / free</span></div><div class="ld">accept feeds the chosen token back to stateful samplers; the rest as needed</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">state</span><span class="name">llama_sampler_context_t ctx</span></div><div class="ld">each sampler's private ledger: penalties keeps history, mirostat feedback</div></div>
+</div>
 <p>See what a sampler actually is. <span class="mono">llama_sampler_i</span> is just a set of function pointers: <span class="mono">apply</span> (the core, rewrites the candidate array), <span class="mono">accept</span> (feeds the chosen token back so stateful samplers can keep tally), <span class="mono">reset</span> (clear state), plus name/clone/free. With a state blob <span class="mono">ctx</span>, it forms a <span class="mono">llama_sampler</span>.</p>
 <p>Here <span class="mono">apply</span> is the only <strong>required</strong> one - it takes the candidate array and edits it by its own rule (strike some out, re-rank, recompute probabilities). <span class="mono">accept</span> is nullable, needed only by samplers with memory: the penalty must remember which tokens appeared before, mirostat must adjust by feedback; both use accept to take "the just-chosen token" into their state.</p>
 <p>This "a set of function pointers + a state blob" design should look familiar - it is another use of that <strong>interface + implementation</strong> pattern from L10's backends and L19's memory interface. Each sampler need only implement these functions to be scheduled uniformly; the engine does not care whether you are top-k or mirostat inside, it just calls apply in order.</p>

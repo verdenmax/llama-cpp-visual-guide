@@ -370,6 +370,12 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
         cand.logit = -INFINITY        <span class="cm"># 非法 -&gt; 永不会被选中</span>
 <span class="cm"># 选定 token 后: 推进语法状态 (llama_grammar_accept_impl)</span>
 grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># 沿规则栈往前走一步</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>这一步模型给出的所有候选 token 分数。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>grammar.apply 掩码</h4><p>按规则栈把不合语法的候选 logit 设成 -inf（含语法未走完时的 EOG）。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>采样选定</h4><p>采样器（L21）只能从剩下的合法候选里选一个 id。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>grammar.accept 推进</h4><p>把选中的 token 喂回，规则栈往前走一格，回到第 1 步循环。</p></div></div>
+</div>
 <p>把 GBNF 文法变成"采样时的掩码"，靠两个内部函数：<span class="mono">llama_grammar_apply_impl</span>（掩码）和 <span class="mono">llama_grammar_accept_impl</span>（推进）。</p>
 <p><span class="mono">apply</span> 这一步：它拿着语法当前的状态（一组<strong>规则栈</strong> <span class="mono">stacks</span>，记着"现在展开到哪、接下来合法的是什么"），逐个检查候选 token——能接上的留着，接不上的把 logit 设成负无穷。EOG（结束符）在语法还没走完时也会被掩掉，免得模型半途而废。</p>
 <p><span class="mono">accept</span> 这一步：采样真正选定一个 token 后，把它喂回语法，让规则栈<strong>往前推进</strong>到新状态。下一轮 apply 就基于这个新状态再算一遍合法集。两步交替，像沿着文法的轨道一步步走，每一步都只踩在合法的枕木上。</p>
@@ -545,6 +551,12 @@ string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span clas
         cand.logit = -INFINITY        <span class="cm"># illegal -&gt; can never be chosen</span>
 <span class="cm"># after a token is chosen: advance the grammar state (llama_grammar_accept_impl)</span>
 grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># step forward along the rule stacks</span></pre>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>logits</h4><p>All candidate token scores the model gives this step.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>grammar.apply mask</h4><p>By the rule stacks, set illegal candidates' logit to -inf (incl. EOG while the grammar is not yet complete).</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sampling picks</h4><p>The sampler (L21) can pick an id only from the remaining legal candidates.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>grammar.accept advance</h4><p>Feed the chosen token back, the rule stacks step forward one notch, loop to step 1.</p></div></div>
+</div>
 <p>Turning a GBNF grammar into "a mask at sampling time" relies on two internal functions: <span class="mono">llama_grammar_apply_impl</span> (mask) and <span class="mono">llama_grammar_accept_impl</span> (advance).</p>
 <p>The <span class="mono">apply</span> step: holding the grammar's current state (a set of <strong>rule stacks</strong>, the <span class="mono">stacks</span> field, recording "where the expansion is now, what is legal next"), it checks each candidate token - keep those that fit, set those that do not to negative infinity. EOG (the terminator) is also masked while the grammar is not yet complete, lest the model quit halfway.</p>
 <p>The <span class="mono">accept</span> step: once sampling actually picks a token, feed it back to the grammar so the rule stacks <strong>advance</strong> to a new state. The next apply then recomputes the legal set from this new state. The two alternate, like walking along the grammar's track, each step stepping only on a legal sleeper.</p>
