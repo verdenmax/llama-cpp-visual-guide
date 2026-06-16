@@ -364,7 +364,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 <p>为什么要这个开关？因为算 logits 不便宜——它是一次"隐藏向量 -&gt; 词表大小（<span class="mono">n_vocab</span>）"的大矩阵乘。而很多 token 的 logits 我们根本用不到：prefill 把整段 prompt 过一遍时，中间那些 token 只是为了把 K/V 填进 KV cache，<strong>只有最后一个</strong>的 logits 才用来预测下一个词。</p>
 <p>所以这个标志直接省算力：标了几个位置，就只算几次输出投影，其余 token 算到隐藏向量为止、不做那次大矩阵乘。decode 阶段每步只新增一个 token、只它要 logits；prefill 整段只要末位。这套"<strong>按需算输出</strong>"，正是 L17 讲 logits 时说的"只在某些 token 上有"的来源。</p>
-<p>从实现看，引擎会数一遍 batch 里标了多少个输出位置，记成 <span class="mono">n_outputs</span>，然后只为这么多行准备输出缓冲、只做这么多次输出投影。L17 讲的那个 <span class="mono">buffer_view&lt;float&gt; logits</span>，其行数正是 <span class="mono">n_outputs</span>、每行 <span class="mono">n_vocab</span> 个数。所以"标了几个"直接决定了"输出缓冲多大、投影做几次"。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  从实现看，引擎会数一遍 batch 里标了多少个输出位置，记成 <span class="mono">n_outputs</span>，然后只为这么多行准备输出缓冲、只做这么多次输出投影。L17 讲的那个 <span class="mono">buffer_view&lt;float&gt; logits</span>，其行数正是 <span class="mono">n_outputs</span>、每行 <span class="mono">n_vocab</span> 个数。所以"标了几个"直接决定了"输出缓冲多大、投影做几次"。
+</div>
 <p>顺带解释源码里那句 <span class="mono">rename this to "output"</span> 的注释：<span class="mono">logits</span> 这个名字其实有点窄——这个标志控制的是"<strong>要不要这个位置的输出</strong>"，而输出既可以是 logits（生成任务），也可以是嵌入向量（embedding 任务，L17 的 embd）。叫 output 更准确。知道这点，你看到 logits 这个字段名时就不会被它字面意思框住。</p>
 <p>多序列场景下，这个标志更显灵活：同时给三个不同 prompt 各做 prefill，可以把它们的 token 全塞进一个 batch，只在<strong>每条序列各自的最后一个</strong> token 上标 1。一次 decode，三条序列的下一个词 logits 都拿到了。这种"一批里多条序列、各取各的输出"的玩法，正是服务器批量处理多个请求的基础。</p>
 <div class="card warn">
@@ -409,7 +412,10 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
 <p>把 batch 放回整条链路：是<strong>你</strong>（或上层框架）准备 batch -&gt; <span class="mono">llama_decode</span> 吃 batch、切 ubatch、建图执行 -&gt; logits 出来 -&gt; 采样（L21）挑词 -&gt; 把新词包成下一个 batch…… batch 就是这条循环里"每一圈的输入"。读懂它，你就握住了和引擎对话的那张"订单格式"。</p>
 <p>一个常见的节奏：开头 prefill 时，把整段 prompt 的几十上百个 token 一次塞进一个<strong>大 batch</strong>（高效地一次填满 KV cache）；之后 decode 时，每步只喂一个新 token 的<strong>小 batch</strong>。同一个 <span class="mono">llama_batch</span> 结构，一会儿装很多、一会儿装一个——它的弹性，正好贴合 prefill/decode 这一快一慢的两段节奏（L03）。</p>
 <p>顺带埋个伏笔：服务器为了榨干吞吐，会玩一种"<strong>连续批处理</strong>"（continuous batching）——把<strong>多个用户、不同进度</strong>的请求，按 seq_id 拼进同一个 batch 一起算，谁生成完了就把谁换出、把新请求换进。这套高级调度（第五部分会提）能成立，底层正是因为 batch 支持"一批里多条序列、各自独立"。你现在学的这个朴素的 batch 结构，撑起的是相当复杂的服务能力。</p>
-<p>"批处理"（batch）这个词本身也点明了思路：与其一个 token 一个 token 地单独喂、单独算（那样每次的固定开销都要重付一遍），不如<strong>攒一批一起算</strong>，把固定开销摊薄。prefill 之所以能比 decode 快很多，正是因为它把整段 prompt 攒成一大批并行算；而 decode 受"必须等上一个词"的制约（L04），只能一个一个来，享受不到批的红利。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  "批处理"（batch）这个词本身也点明了思路：与其一个 token 一个 token 地单独喂、单独算（那样每次的固定开销都要重付一遍），不如<strong>攒一批一起算</strong>，把固定开销摊薄。prefill 之所以能比 decode 快很多，正是因为它把整段 prompt 攒成一大批并行算；而 decode 受"必须等上一个词"的制约（L04），只能一个一个来，享受不到批的红利。
+</div>
 <p>还有个实践细节：decode 循环里，每步那个"只装一个新 token"的小 batch，常常是<strong>复用同一块</strong> batch 内存反复填的——不必每步都重新分配。配合上 L16 说的"图结构可复用"，连续 decode 其实相当轻量：同一张图、同一个 batch 壳子，每步只换里头那一个 token id 和位置。这就是逐字生成能那么快的工程细节之一。</p>
 <p>再把 ubatch 这个词的来历点破：u 是 "micro"（微）的意思，<span class="mono">ubatch</span> 就是"微批"。它和 <span class="mono">batch</span> 的关系，就像"你下的一整单"和"厨房一锅锅做的小份"。这个命名本身就提示了它的角色——它是 batch 在物理执行层面被切细后的产物，是真正一次性送进硬件计算的最小单位。</p>
 
@@ -561,7 +567,10 @@ and how it is internally split by <span class="mono">llama_batch_allocr</span> i
 </div>
 <p>Why this switch? Because computing logits is not cheap - it is a big "hidden vector -&gt; vocab size (<span class="mono">n_vocab</span>)" matmul. And many tokens' logits we never use: when prefill passes a whole prompt through, those middle tokens are just there to fill K/V into the KV cache, and <strong>only the last one's</strong> logits are used to predict the next word.</p>
 <p>So this flag directly saves compute: however many positions are flagged, that many output projections are done, while other tokens stop at the hidden vector without that big matmul. In decode each step adds one token and only it needs logits; prefill needs only the final position. This "<strong>compute output on demand</strong>" is the source of L17's "logits only on some tokens".</p>
-<p>In implementation, the engine counts how many output positions the batch flags, records it as <span class="mono">n_outputs</span>, then prepares output buffer for only that many rows and does only that many output projections. L17's <span class="mono">buffer_view&lt;float&gt; logits</span> has exactly <span class="mono">n_outputs</span> rows, each <span class="mono">n_vocab</span> numbers. So "how many are flagged" directly decides "how big the output buffer and how many projections".</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  In implementation, the engine counts how many output positions the batch flags, records it as <span class="mono">n_outputs</span>, then prepares output buffer for only that many rows and does only that many output projections. L17's <span class="mono">buffer_view&lt;float&gt; logits</span> has exactly <span class="mono">n_outputs</span> rows, each <span class="mono">n_vocab</span> numbers. So "how many are flagged" directly decides "how big the output buffer and how many projections".
+</div>
 <p>By the way, that source comment <span class="mono">rename this to "output"</span>: the name <span class="mono">logits</span> is actually a bit narrow - this flag controls "<strong>do we want this position's output</strong>", and output can be logits (generation tasks) or embedding vectors (embedding tasks, L17's embd). "output" is more accurate. Knowing this, the field name logits will not box you in by its literal meaning.</p>
 <p>In multi-sequence scenarios this flag shows more flexibility: prefilling three different prompts at once, you can stuff all their tokens into one batch and flag 1 only on <strong>each sequence's last</strong> token. One decode, and all three sequences' next-word logits are obtained. This "multiple sequences in one batch, each taking its own output" is the basis for a server batch-processing multiple requests.</p>
 <div class="card warn">
@@ -606,7 +615,10 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
 <p>Put the batch back into the whole pipeline: <strong>you</strong> (or an upper framework) prepare a batch -&gt; <span class="mono">llama_decode</span> eats the batch, splits ubatch, builds and executes -&gt; logits come out -&gt; sampling (L21) picks a word -&gt; the new word is wrapped into the next batch... The batch is "each round's input" in this loop. Read it and you hold the "order format" for conversing with the engine.</p>
 <p>A common rhythm: at the start, prefill stuffs a whole prompt's tens-to-hundreds of tokens into one <strong>big batch</strong> (efficiently filling the KV cache at once); then decode feeds a <strong>small batch</strong> of one new token each step. The same <span class="mono">llama_batch</span> structure, sometimes holding many, sometimes one - its elasticity fits exactly the fast/slow two-phase rhythm of prefill/decode (L03).</p>
 <p>A foreshadow: to squeeze throughput, servers play a "<strong>continuous batching</strong>" - splicing <strong>multiple users' requests at different progress</strong> into one batch by seq_id to compute together, swapping out whoever finishes and swapping in new requests. That advanced scheduling (mentioned in Part 5) works precisely because the batch supports "multiple independent sequences in one batch". The plain batch structure you are learning now upholds quite complex serving capability.</p>
-<p>The word "batch" itself hints at the idea: rather than feeding and computing one token at a time (paying the fixed overhead anew each time), <strong>gather a batch to compute together</strong> and amortize the fixed overhead. The reason prefill is much faster than decode is precisely that it gathers a whole prompt into one big batch computed in parallel; decode, constrained by "must wait for the previous word" (L04), can only go one by one, missing the batch dividend.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The word "batch" itself hints at the idea: rather than feeding and computing one token at a time (paying the fixed overhead anew each time), <strong>gather a batch to compute together</strong> and amortize the fixed overhead. The reason prefill is much faster than decode is precisely that it gathers a whole prompt into one big batch computed in parallel; decode, constrained by "must wait for the previous word" (L04), can only go one by one, missing the batch dividend.
+</div>
 <p>Another practical detail: in the decode loop, that small batch "holding just one new token" each step is often <strong>refilled into the same</strong> batch memory - no need to reallocate every step. Together with L16's "reusable graph structure", consecutive decode is quite lightweight: the same graph, the same batch shell, each step swapping only that one token id and position. This is one of the engineering details behind word-by-word generation being so fast.</p>
 <p>Unpack the word ubatch: the u means "micro", so <span class="mono">ubatch</span> is "micro-batch". Its relation to <span class="mono">batch</span> is like "the whole order you placed" versus "the small portions the kitchen cooks pot by pot". The name itself hints at its role - it is the product of a batch split fine at the physical-execution level, the smallest unit actually sent to hardware to compute at once.</p>
 
