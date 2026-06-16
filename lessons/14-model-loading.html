@@ -354,6 +354,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <h2>读超参与张量</h2>
 <p>loader 怎么知道模型有几层、多宽？不靠猜，全从 GGUF 的 metadata KV 里读——用一个模板方法 <span class="mono">get_key</span>，把"键"映射到具体的超参字段。键本身是自描述的（L13），下一课（L15）会讲这些键怎么按架构拼出来。</p>
+<div class="cols">
+  <div class="col"><h4>读超参</h4><p><span class="mono">get_key("llama.block_count")</span> 等 -&gt; 填进 <span class="mono">llama_hparams</span> 的字段（n_layer / n_embd ...，L15）。读的是 GGUF 头里的 <strong>metadata KV</strong>。</p></div>
+  <div class="col"><h4>读张量</h4><p>按名字进 <span class="mono">weights_map</span> -&gt; <span class="mono">create_tensor</span> 建元数据 -&gt; <span class="mono">load_data_for</span> 落数据（mmap 零拷贝）。读的是 GGUF 头里的 <strong>tensor info</strong> 与数据段。</p></div>
+</div>
 <pre class="code"><span class="cm"># 伪代码: loader 的典型用法</span>
 ml = <span class="fn">llama_model_loader</span>(path)              <span class="cm"># 内部 gguf_init_from_file 读头部</span>
 ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="cm"># 从 KV 读超参(L15)</span>
@@ -551,6 +555,10 @@ Splitting into four steps is for seeing the responsibilities clearly; in enginee
 
 <h2>Reading hyperparameters and tensors</h2>
 <p>How does the loader know how many layers, how wide? Not by guessing - it reads it all from the GGUF metadata KVs, via a templated <span class="mono">get_key</span> that maps a "key" to a specific hyperparameter field. The keys are self-describing (L13); the next lesson (L15) covers how they are templated per architecture.</p>
+<div class="cols">
+  <div class="col"><h4>Read hyperparameters</h4><p><span class="mono">get_key("llama.block_count")</span> etc. -&gt; fill fields of <span class="mono">llama_hparams</span> (n_layer / n_embd ..., L15). Reads the <strong>metadata KV</strong> in the GGUF header.</p></div>
+  <div class="col"><h4>Read tensors</h4><p>By name into <span class="mono">weights_map</span> -&gt; <span class="mono">create_tensor</span> builds metadata -&gt; <span class="mono">load_data_for</span> places data (mmap zero-copy). Reads the <strong>tensor info</strong> in the GGUF header, then the data section.</p></div>
+</div>
 <pre class="code"><span class="cm"># pseudocode: typical loader usage</span>
 ml = <span class="fn">llama_model_loader</span>(path)              <span class="cm"># internally gguf_init_from_file reads the header</span>
 ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="cm"># read a hyperparameter from the KVs(L15)</span>

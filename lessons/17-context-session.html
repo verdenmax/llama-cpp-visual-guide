@@ -399,6 +399,15 @@ llama.cpp 把它用在了推理上：权重是无状态的"程序"，context 是
 
 <h2>一步推理与取结果</h2>
 <p>万事俱备，跑推理就是反复调 <span class="mono">llama_decode</span>。它吃一个 batch（L18），内部把建图、执行、更新 KV 一气呵成，最后把 logits 放进 context 的输出缓冲。</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_batch</div><div class="nd">这步喂的 token<br>(L18)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">llama_decode</div><div class="nd">建图(L16)+执行(L10)<br>+更新 KV(L19)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">logits 缓冲</div><div class="nd">写进 context<br>输出缓冲</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llama_get_logits_ith</div><div class="nd">取第 i 个位置<br>(n_vocab 维)</div></div>
+</div>
 <pre class="code"><span class="cm"># 伪代码: 一步推理(llama_decode 内部)</span>
 <span class="fn">llama_decode</span>(ctx, batch)              <span class="cm"># 跑一步前向</span>
 <span class="cm">#   -&gt; 切 ubatch(L18) -&gt; build_graph(L16) -&gt; sched 执行(L10) -&gt; 更新 KV(L19)</span>
@@ -601,6 +610,15 @@ Decoupling session parameters from the model is exactly for this flexibility.</p
 
 <h2>One inference step and reading the result</h2>
 <p>With everything ready, running inference is repeatedly calling <span class="mono">llama_decode</span>. It eats a batch (L18), internally does graph-building, execution, and KV update in one go, then puts the logits into the context's output buffer.</p>
+<div class="flow">
+  <div class="node"><div class="nt">llama_batch</div><div class="nd">tokens fed this step<br>(L18)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">llama_decode</div><div class="nd">build(L16)+execute(L10)<br>+update KV(L19)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">logits buffer</div><div class="nd">into context's<br>output buffer</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">llama_get_logits_ith</div><div class="nd">get i-th position<br>(n_vocab-dim)</div></div>
+</div>
 <pre class="code"><span class="cm"># pseudocode: one inference step (inside llama_decode)</span>
 <span class="fn">llama_decode</span>(ctx, batch)              <span class="cm"># run one forward step</span>
 <span class="cm">#   -&gt; split ubatch(L18) -&gt; build_graph(L16) -&gt; sched execute(L10) -&gt; update KV(L19)</span>
