@@ -1443,6 +1443,67 @@ QUIZZES = {
             },
         ],
     },
+    "22-chat-templates.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "对话模板（chat template）做什么？",
+                    "en": "What does a chat template do?",
+                },
+                "opts": [
+                    {"zh": "把带角色的消息列表拼成该模型约定格式的提示词字符串", "en": "assemble a role-tagged message list into a prompt string in the model's agreed format"},
+                    {"zh": "把文本切成 token", "en": "cut text into tokens"},
+                    {"zh": "给回答打分", "en": "score the reply"},
+                    {"zh": "压缩对话历史", "en": "compress the conversation history"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "模板负责把 system/user/assistant 的消息列表，按这个模型训练时的格式（插入特殊标记）拼成一段字符串，再交给词表 tokenize。切 token 是 L20、打分是 L21 的事。",
+                    "en": "The template assembles the system/user/assistant message list into a string per the model's training format (inserting special markers), then hands it to the vocab to tokenize. Cutting tokens is L20, scoring is L21.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ChatML 模板用哪对标记包裹每条消息？",
+                    "en": "Which pair of markers does ChatML use to wrap each message?",
+                },
+                "opts": [
+                    {"zh": "&lt;|im_start|&gt; 和 &lt;|im_end|&gt;", "en": "&lt;|im_start|&gt; and &lt;|im_end|&gt;"},
+                    {"zh": "[INST] 和 [/INST]", "en": "[INST] and [/INST]"},
+                    {"zh": "&lt;s&gt; 和 &lt;/s&gt;", "en": "&lt;s&gt; and &lt;/s&gt;"},
+                    {"zh": "{{ 和 }}", "en": "{{ and }}"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ChatML 用 &lt;|im_start|&gt;role ... &lt;|im_end|&gt; 包每条消息；[INST]/[/INST] 是 Llama-2 的；&lt;s&gt;/&lt;/s&gt; 是序列起止符；{{ }} 是 Jinja 语法。",
+                    "en": "ChatML wraps each message as &lt;|im_start|&gt;role ... &lt;|im_end|&gt;; [INST]/[/INST] is Llama-2's; &lt;s&gt;/&lt;/s&gt; are sequence delimiters; {{ }} is Jinja syntax.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "add_ass（add assistant）为真时会做什么？",
+                    "en": "What does add_ass (add assistant) do when true?",
+                },
+                "opts": [
+                    {"zh": "在末尾追加 assistant 起始标记，让模型接着生成回答", "en": "append the assistant start marker at the end so the model continues generating the reply"},
+                    {"zh": "删除 system 消息", "en": "remove the system message"},
+                    {"zh": "把回答翻译成英文", "en": "translate the reply into English"},
+                    {"zh": "关闭采样", "en": "turn off sampling"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "add_ass 在拼好的提示词末尾补上 assistant 的起始标记（不含内容），相当于把话筒递给模型，让它从\"该助手说话\"处续写。聊天时开、纯补全时关。",
+                    "en": "add_ass appends the assistant's start marker (no content) at the end of the assembled prompt, like handing over the mic so the model continues from 'the assistant's turn'. On for chat, off for plain completion.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L20，说说为什么要\"先套对话模板、再 tokenize\"，如果把顺序反过来会出什么问题。",
+                "en": "Drawing on L20, explain why you 'apply the chat template first, then tokenize', and what goes wrong if you reverse the order.",
+            },
+        ],
+    },
 }
 
 

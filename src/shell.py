@@ -88,6 +88,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("21-sampling.html", "采样", "Sampling",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("22-chat-templates.html", "对话模板", "Chat templates",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -543,6 +545,8 @@ SUBTITLES = {
                            "llama_vocab; tokenize/detokenize; SPM/BPE/WPM; byte fallback"),
     "21-sampling.html": ("llama_sampler · 采样链 · top-k/top-p/温度 · greedy vs dist",
                          "llama_sampler; sampler chain; top-k/top-p/temp; greedy vs dist"),
+    "22-chat-templates.html": ("llm_chat_template · 内建 vs Jinja · ChatML/Llama/Gemma",
+                               "llm_chat_template; built-in vs Jinja; ChatML/Llama/Gemma"),
 }
 
 

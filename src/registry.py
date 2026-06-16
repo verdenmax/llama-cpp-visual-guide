@@ -32,4 +32,5 @@ CONTENT = {
     "19-kv-cache.html": part4.LESSON_19,
     "20-vocabulary.html": part4.LESSON_20,
     "21-sampling.html": part4.LESSON_21,
+    "22-chat-templates.html": part4.LESSON_22,
 }
