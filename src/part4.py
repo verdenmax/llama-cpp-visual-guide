@@ -1782,3 +1782,1322 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
 """,
 }
 
+LESSON_20 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+到这里，M4a 的模型已经能"算"了——加载（L14）、定架构（L15）、建图（L16）、装进上下文（L17）、按批处理（L18）、用 KV cache 高效自回归（L19），最后吐出一排 logits。可有个根本问题一直被绕过去：模型从头到尾只认<strong>数字</strong>（token id），它根本不认识"你好"这两个字。文本怎么变成数字、数字又怎么变回文本？这一课的主角 <span class="mono">llama_vocab</span>（词表），就是文本世界和 token 世界之间唯一的翻译官。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">它干两件互逆的事：<span class="mono">tokenize</span> 把字符串切成一串 token id 喂进模型；<span class="mono">detokenize</span>/<span class="mono">token_to_piece</span> 把模型吐出的 token id 还原成文字片段、拼回人能读的句子。一次完整的对话生成，进口要过它（把你的话变成 id），出口也要过它（把模型选出的 id 变成字）。没有这层翻译，"模型只会算数字"和"人类只说文字"这两个世界就永远接不上。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  词表像一本<strong>双向密码本</strong>：编码时，把人话按一套固定规则切成一串号码（token id）；解码时，再按号码查回对应的文字片段。不同模型用的"切法"不一样（SentencePiece、BPE、WordPiece……），但本质都是同一本"号码 &lt;-&gt; 文本片段"的对照表——查得过去，也查得回来。
+</div>
+
+<h2>为什么需要词表</h2>
+<div class="flow">
+  <div class="node"><div class="nt">文本</div><div class="nd">"你好"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">tokenize</div><div class="nd">编码</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">token id</div><div class="nd">[9707, ...]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token_to_piece</div><div class="nd">解码</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">文本</div><div class="nd">"好"</div></div>
+</div>
+<p>模型内部全是数字。它的输入是一串 token id、输出也是一个 token id 的概率分布；从头到尾，它<strong>碰不到、也不需要</strong>字符串。词表就横在文本世界和 token 世界的边界上，进出两头都得过它这一关——这是它必须存在的根本原因。</p>
+<p>为什么不直接按"字"或"字母"喂模型？因为太细则序列太长（一个汉字若干字节、一句话上千步）、太粗则词表爆炸（穷举所有词不现实）。<strong>子词（subword）</strong>切分是个折中：常见词整块给一个 id，生僻词拆成几个常见片段。于是词表大小可控（几万），序列长度也合理。</p>
+<p>这也解释了为什么"同一句话，不同模型切出的 token 数不一样"。切分规则是模型训练时就定死的、随权重一起存在 GGUF 里（L13 的自描述）；用的时候必须用<strong>同一套</strong>词表，错一套，切出来的 id 就对不上模型学过的东西，输出立刻变成乱码。</p>
+<p>所以词表不是可有可无的配件，而是和权重<strong>绑定</strong>的一部分。加载模型（L14）时，词表也一并从 GGUF 里读出来；它定义了这个模型的"token 空间"——后面采样（L21）选下一个词，选的也正是这张词表里的某个 id。</p>
+<p>换个角度看，词表其实是模型和人之间"约定俗成"的接口。模型在训练时反复见过的每一个片段，都对应词表里的一个 id；它学到的所有规律，都建立在"这些片段"之上。所以词表一旦定下，就等于划定了模型"认得的世界"——它能流利处理的，永远是这张词表切得出来的片段的组合。</p>
+<p>也正因如此，词表的好坏会直接影响表现。一套切得好的词表，能让常用表达只占很少的 token，让模型把注意力花在"意思"而不是"拼写"上；切得糙则会把简单的词拆得七零八落，既浪费序列长度、又抬高学习难度。可以说，分词是模型训练和推理共同的起跑线。</p>
+<p>不妨用一个数字建立直觉：一个英文单词平均约切成 1.3 个 token，一个汉字常占 1 到 2 个 token，而一段几百字的提示词，往往对应上千个 token。模型的"上下文长度"（L17 的 n_ctx）数的就是 token、不是字符；你能塞进多少对话，最终由分词后的 token 数决定。想明白这点，才能理解为什么"同样几屏文字，有时就超了上下文"。</p>
+
+<h2>llama_vocab 是什么</h2>
+<pre class="code"><span class="cm">// 简化自 src/llama-vocab.h</span>
+<span class="kw">struct</span> <span class="fn">llama_vocab</span> {
+    uint32_t <span class="fn">n_tokens</span>() <span class="kw">const</span>;                          <span class="cm">// 词表大小(L15 的 n_vocab 来源)</span>
+    int32_t  <span class="fn">tokenize</span>(<span class="kw">const char</span> * text, ...) <span class="kw">const</span>;       <span class="cm">// 文本 -&gt; token id</span>
+    int32_t  <span class="fn">token_to_piece</span>(llama_token id, <span class="kw">char</span> * buf, ...) <span class="kw">const</span>; <span class="cm">// id -&gt; 文本片段</span>
+<span class="kw">private</span>:
+    <span class="kw">struct</span> impl;                              <span class="cm">// pimpl: 藏起分词器实现</span>
+    std::unique_ptr&lt;impl&gt; pimpl;
+};</pre>
+<p><span class="mono">llama_vocab</span> 对外是一套统一接口：<span class="mono">n_tokens()</span> 给词表大小、<span class="mono">tokenize</span> 编码、<span class="mono">token_to_piece</span> 解码，还有一堆查询单个 token 属性的方法。但它把"具体用哪种分词算法"的实现细节，全藏在一个私有的 <span class="mono">impl</span> 结构里——这就是 <strong>pimpl</strong>（pointer to implementation）手法。</p>
+<p>为什么要 pimpl？因为分词算法五花八门（下一节细讲），每种的内部数据结构、合并规则都不同。把它们统统塞进 <span class="mono">impl</span>，对外只露 <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> 这层薄薄的接口，于是<strong>用的人完全无感</strong>：不管底下是 SPM 还是 BPE，调用方式一模一样。换算法、改实现，都不会惊动上层代码。</p>
+<p>这和你前面见过的解耦是一个味道：L14 的 loader 把"解析格式"和"使用模型"分开，L17 的 context 把"只读知识"和"会话状态"分开。这里则是把"分词的脏活"和"统一的接口"分开。一道清晰的边界，让复杂性被关在盒子里。</p>
+<p>还有一组以 <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span> 为代表的标志位，记录"这个模型 tokenize 时该不该自动前置 BOS、后置 EOS"。这些也是随模型定的（写在 GGUF 里），词表忠实地照做——又一次体现 L13 的自描述精神。</p>
+<p>再具体看这套接口的分工。编码这头，<span class="mono">tokenize</span> 要处理的细节其实不少：要不要加空格前缀、要不要规范化、遇到连续空白怎么合并——这些都是不同分词器各自的"脾气"，但全被收进了 <span class="mono">impl</span>。上层只管把字符串递进去、把 id 取出来，完全不必关心底下在折腾什么。</p>
+<p>解码那头同样有讲究。<span class="mono">token_to_piece</span> 不是简单"查表取字符串"，它还要处理特殊 token 该不该显示、字节 token 怎么按 UTF-8 拼、首词要不要补空格这些琐碎规则。把它们也一并封进词表，是为了让"还原文本"在任何模型上都一致正确——你只管循环调用、拼接结果。</p>
+
+<h2>几种分词算法</h2>
+<table class="t">
+  <tr><th>类型</th><th>算法</th><th>代表模型</th></tr>
+  <tr><td>SPM</td><td>SentencePiece（字节级 BPE + 字节回退）</td><td>LLaMA</td></tr>
+  <tr><td>BPE</td><td>字节级 byte-pair 合并</td><td>GPT-2 / Qwen</td></tr>
+  <tr><td>WPM</td><td>WordPiece</td><td>BERT</td></tr>
+  <tr><td>UGM</td><td>Unigram</td><td>T5</td></tr>
+  <tr><td>RWKV</td><td>贪心匹配</td><td>RWKV</td></tr>
+  <tr><td>PLAMO2</td><td>Aho-Corasick + 动态规划</td><td>PLaMo-2</td></tr>
+</table>
+<p>主流分词算法就那么几种，<span class="mono">enum llama_vocab_type</span> 把它们一一列出。它们的差别在"怎么把词拆成子词、怎么合并"，但对上层都是同一个 <span class="mono">tokenize</span>。GGUF 的 tokenizer 元数据（L13）决定这个模型用哪种。</p>
+<p><strong>SPM</strong>（SentencePiece）是 LLaMA 系的传统，基于字节级 BPE 且自带字节回退；<strong>BPE</strong>（byte-pair encoding）是 GPT-2 系的字节级合并；<strong>WPM</strong>（WordPiece）是 BERT 系；<strong>UGM</strong>（Unigram）是 T5 系；<strong>RWKV</strong> 用贪心匹配；还有较新的 <strong>PLAMO2</strong>（Aho-Corasick + 动态规划）。这些缩写背后，是不同的历史生态和语言/效率取舍。</p>
+<p>为什么有这么多？因为不同模型家族沿用各自生态的工具链，而每种算法在多语言、代码、压缩率上各有长短。llama.cpp 不强求统一，而是用一套接口（pimpl）把它们都兼容进来——这正是它能跑几十种模型的工程基础之一。</p>
+<p>你不需要记住每种的细节，只要建立一个直觉：<strong>同一句话，换种算法就换种切法</strong>，token 数和边界都可能不同；但只要"编码用的词表"和"模型训练用的词表"是同一套，往返就严丝合缝。</p>
+<p>举个直观的例子体会差异。"unhappiness"这个词，BPE 可能切成"un"+"happiness"或"un"+"happy"+"ness"，靠的是训练时统计出来的高频合并；Unigram 则从一个大候选集里、按概率挑出最可能的一种切分。两条路线殊途同归，都想用尽量少的片段覆盖尽量多的文本，只是挑片段的"哲学"不同。</p>
+<p>对中文这种没有天然空格的语言，分词更见功夫。字节级方案会先把汉字降到 UTF-8 字节再合并，于是不依赖"词的边界"也能工作——这也是为什么一个主要用英文训练的模型，往往也能磕磕绊绊地处理中文：因为最底层它认的是字节，而不是某种语言的"词"。</p>
+<p>还有一个常被问到的点：词表该做多大？太小则每个词都得拆成很多片段、序列变长、推理变慢；太大则嵌入表和输出层都跟着膨胀、显存吃紧。所以词表大小是个折中，主流模型大多落在几万到十几万这个区间。它一旦定下，就深深影响着模型的体量与速度——又一次印证"词表和模型是绑在一起的"。</p>
+
+<h2>特殊 token 与字节回退</h2>
+<p>词表里除了普通的"文字片段 token"，还有一类<strong>特殊 token</strong>：<span class="mono">BOS</span>（序列开始）、<span class="mono">EOS</span>（序列结束）、<span class="mono">EOT</span>（一轮结束）、<span class="mono">PAD</span>/<span class="mono">SEP</span>/<span class="mono">UNK</span> 等。它们不对应具体文字，而是<strong>控制标记</strong>，由访问器 <span class="mono">token_bos()</span>/<span class="mono">token_eos()</span>/<span class="mono">token_eot()</span> 取出。比如模型生成出 EOS，就意味着"我说完了"，上层据此停止。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>字节回退</b>：词表里没有的字符 -&gt; 按 UTF-8 拆成字节 -&gt; 每字节一个 &lt;0xXX&gt; token</div>
+  <div class="cells"><span class="lab">生僻字/emoji</span><span class="cell hl">词表外</span><span class="lab">-&gt;</span><span class="cell">&lt;0xF0&gt;</span><span class="cell">&lt;0x9F&gt;</span><span class="cell">&lt;0x8E&gt;</span><span class="cell">&lt;0x89&gt;</span></div>
+</div>
+<p>那遇到词表里压根没有的字符怎么办（生僻字、emoji）？靠<strong>字节回退</strong>（byte fallback）：把这个字符按 UTF-8 拆成若干字节，每个字节映射到一个形如 <span class="mono">&lt;0xF0&gt;</span> 的字节 token（带 <span class="mono">LLAMA_TOKEN_ATTR_BYTE</span> 属性）。于是<strong>任何</strong> UTF-8 文本最差也能逐字节编码，永远不会"无法编码"。这一手解决的是经典的 <strong>OOV</strong>（未登录词）难题。一次往返大致如下：</p>
+<pre class="code"><span class="cm"># 伪代码: tokenize 往返</span>
+ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, add_special=<span class="kw">True</span>)   <span class="cm"># 可自动前置 BOS</span>
+<span class="cm"># ids = [&lt;bos&gt;, 9906, ...]</span>
+text = <span class="st">""</span>
+<span class="kw">for</span> id <span class="kw">in</span> ids:
+    text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># 逐 token 还原拼接</span></pre>
+<p><span class="mono">tokenize</span> 时可以让它自动前置 BOS（由前面那个 <span class="mono">get_add_bos()</span> 标志控制）；解码时则逐个 token 调 <span class="mono">token_to_piece</span> 把片段拼回去。注意字节 token 还原时要按 UTF-8 把几个字节<strong>拼起来</strong>才是一个完整字符——这也是为什么解码要逐步累积、而不是"一个 token 一个字"。</p>
+<p>特殊 token 之所以重要，是因为它们承载着"文字之外"的结构信息。一段对话里，谁说的、一轮在哪结束、要不要停下，都靠这些标记界定（后面 L22 的对话模板，正是在大量使用它们）。可以把普通 token 看成"内容"、特殊 token 看成"标点和段落标记"——少了后者，模型就分不清对话的骨架。</p>
+<p>字节回退还有个容易被忽略的好处：它让词表可以做得相对"小"而不担心覆盖不全。既然有 256 个字节 token 兜底，词表就不必为塞下每个生僻字而无限膨胀，只收高频片段即可，罕见的交给字节去拼。这是"常见的走捷径、罕见的走通路"的务实设计，和很多系统里"快路径 + 慢路径"异曲同工。</p>
+<p>这里还要点出一个细节：判断"该不该停"靠的不是单一的 EOS，而是一组"生成结束"（EOG）标记。不同模型用的结束标记不一样，有的用 EOS、有的用 EOT、有的两者皆可；词表里用一个专门的判断（是否属于 EOG 集合）来统一处理。上层只要问一句"这个 token 是不是结束符"，就能正确收尾，而不必记住每个模型的具体约定。</p>
+
+<h2>C API 与衔接</h2>
+<p>从 C API 用词表，路径很直白：先 <span class="mono">llama_model_get_vocab(model)</span> 从模型拿到词表，再 <span class="mono">llama_vocab_n_tokens(vocab)</span> 问大小、<span class="mono">llama_tokenize</span> 编码、<span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> 解码。这些函数都收一个 <span class="mono">const llama_vocab *</span>。</p>
+<p>这里有个大坑：2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。</p>
+<p>为什么要这么大动干戈地改名？因为这些操作本质上是<strong>词表的</strong>方法，而不是模型的——把它们从 <span class="mono">llama_*</span> 统一收进 <span class="mono">llama_vocab_*</span>，名实相符，也呼应了内部 <span class="mono">llama_vocab</span> 已经独立成型这件事。改名虽然烦，但让 API 更清晰。</p>
+<p>把这一课接回主线：你输入的文字，先经 L22 的对话模板拼好格式，再经词表 <span class="mono">tokenize</span> 成 id，进模型算出 logits（L17），由采样器（L21）在<strong>这张词表的 token 空间</strong>里选出下一个 id，最后再经 <span class="mono">token_to_piece</span> 变回文字显示给你。词表正是这条回路一进一出的两道门。</p>
+<p>顺带澄清一个常见疑惑：tokenize 的结果是不是唯一的？对确定的词表和同一套规则，答案是肯定的——同样的输入永远切出同样的 id 序列，这正是编码/解码能可靠往返的前提。采样（L21）带来的随机性，发生在"选下一个 token"那一步，和分词无关；分词本身是完全确定的。</p>
+<p>最后留一个串起全局的视角：词表是这套推理系统里少数"人能直接看懂"的部分。权重是一堆浮点、计算图是一串算子，唯独词表，你能把 id 一个个查回文字、亲眼看到模型"读到了什么、想说什么"。调试模型行为时，先把 token 打印出来看看，常常是最快的入手点。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么有这么多分词算法（SPM/BPE/WPM…）？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>直接原因是<strong>历史与生态</strong>：LLaMA 系沿用 SentencePiece，GPT 系用字节级 BPE，BERT 系用 WordPiece，T5 系用 Unigram。每个模型家族训练时用什么，推理时就得用什么——词表和权重是配套的，换不得。</p>
+    <p>更深一层是<strong>取舍</strong>：不同算法在多语言覆盖、对代码/数字的友好度、压缩率（同样文本切成多少 token）上各有高下。比如字节级 BPE 对任何语言都鲁棒（先降到字节），WordPiece 对英文形态友好。没有银弹，所以百花齐放。</p>
+    <p>llama.cpp 的态度是<strong>全都支持</strong>：用 pimpl 把各算法的实现差异藏起来，对上层暴露同一个 <span class="mono">tokenize</span>。于是它不挑模型——这正是一个"通用推理引擎"该有的样子，和 L15 表驱动支持多架构是同一种胸怀。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 字节回退到底解决什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>解决 <strong>OOV</strong>（out-of-vocabulary，未登录词）。任何固定词表都不可能穷尽世界上所有字符（新 emoji、生僻字、各种符号层出不穷）。没有兜底机制的话，遇到没见过的字符就只能丢一个 <span class="mono">&lt;UNK&gt;</span>，信息彻底丢失。</p>
+    <p>字节回退的兜底很优雅：UTF-8 本身就是字节序列，把任意字符拆成 1-4 个字节，每个字节对应一个 <span class="mono">&lt;0xXX&gt;</span> token（共 256 个，必然覆盖）。于是"词表外"这个概念被消灭了——再罕见的字符也能被无损编码，只是占的 token 多一点。</p>
+    <p>代价值得一提：一个生僻字可能占 3-4 个字节 token，比常见字"贵"几倍。所以模型处理大量生僻字/某些语言时，token 消耗会明显偏高——这也是有些语言"显得更费 token"的底层原因之一。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么 n_vocab 在词表里、不在 hparams（L15）？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为词表大小是<strong>词表的属性</strong>，由 tokenizer 决定，而不是网络结构的属性。L15 的 <span class="mono">llama_hparams</span> 描述"网络多少层、多宽、几个头"；词表描述"token 空间多大、怎么切分"。两者职责不同，理应分家。</p>
+    <p>实践中确实有这个坑：L15 特意强调过 <span class="mono">n_vocab</span> 不在 <span class="mono">hparams</span> 里，权威来源是 <span class="mono">llama_vocab::n_tokens()</span>。虽然嵌入层和输出层的形状要用到词表大小（它们的一个维度就是 <span class="mono">n_vocab</span>），但这个数的"主人"是词表。</p>
+    <p>这种"谁的属性归谁管"的划分，让代码各司其职：改词表不动 hparams、改网络结构不动词表。边界清晰，是这套代码能长期维护的隐形功臣——你在 L14（loader vs 模型）、L17（model vs context）已经反复见到同一种纪律。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama_vocab</span> 是文本 &lt;-&gt; token 的双向翻译官：<span class="mono">tokenize</span> 编码、<span class="mono">token_to_piece</span>/<span class="mono">detokenize</span> 解码。</li>
+    <li>它是 <strong>pimpl</strong>：把具体分词算法藏进 <span class="mono">impl</span>，对外只露统一接口。</li>
+    <li>类型 <span class="mono">enum llama_vocab_type</span>：SPM/BPE/WPM/UGM/RWKV/PLAMO2，差在"怎么切"，由 GGUF 元数据选定。</li>
+    <li>特殊 token（<span class="mono">token_bos/eos/eot</span>）是控制标记；<strong>字节回退</strong> <span class="mono">&lt;0xXX&gt;</span> 让任何 UTF-8 都能编码、消灭 OOV。</li>
+    <li>C API：<span class="mono">llama_model_get_vocab</span> -&gt; <span class="mono">llama_vocab_n_tokens</span>/<span class="mono">llama_tokenize</span>/<span class="mono">llama_token_to_piece</span>；旧名 <span class="mono">llama_n_vocab</span>/<span class="mono">llama_token_bos</span> 已弃用、改 <span class="mono">llama_vocab_*</span>。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  词表把"<strong>文本世界</strong>"和"<strong>token 世界</strong>"干净地隔开——模型只在 token 空间里活，永远不碰字符串；几种截然不同的切分算法，被 pimpl 一藏，在上层眼里就是同一个 <span class="mono">tokenize</span>。这层薄薄的翻译官，是"模型只会算数字"和"人类只说文字"之间唯一的桥。读懂了它，你就明白每次对话一进一出，文字是怎么悄悄变成数字、又变回文字的。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+By now M4a's model can "compute" - loading (L14), architecture (L15), graph-building (L16), context (L17), batching (L18), efficient autoregression via the KV cache (L19), finally emitting a row of logits. But one basic question kept getting skipped: from start to finish the model only knows <strong>numbers</strong> (token ids); it has no idea what the characters "hi" are. How does text turn into numbers, and numbers back into text? This lesson's star, <span class="mono">llama_vocab</span> (the vocabulary), is the sole translator between the text world and the token world.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">It does two inverse jobs: <span class="mono">tokenize</span> cuts a string into a list of token ids to feed the model; <span class="mono">detokenize</span>/<span class="mono">token_to_piece</span> turns the token ids the model emits back into text pieces, reassembled into a human-readable sentence. A full chat generation passes through it on the way in (your words become ids) and on the way out (the chosen ids become characters). Without this translation, "the model only does numbers" and "humans only speak text" never connect.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A vocabulary is like a <strong>two-way codebook</strong>: encoding cuts human speech by a fixed set of rules into a string of numbers (token ids); decoding looks each number back up to its text piece. Different models use different "cuts" (SentencePiece, BPE, WordPiece...), but at heart it is the same "number &lt;-&gt; text-piece" table - it maps forward, and it maps back.
+</div>
+
+<h2>Why a vocabulary is needed</h2>
+<div class="flow">
+  <div class="node"><div class="nt">text</div><div class="nd">"hi"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">tokenize</div><div class="nd">encode</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">token id</div><div class="nd">[9707, ...]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token_to_piece</div><div class="nd">decode</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">text</div><div class="nd">"hi"</div></div>
+</div>
+<p>Inside, the model is all numbers. Its input is a list of token ids and its output is a probability distribution over a token id; from end to end it <strong>never touches, and never needs</strong>, strings. The vocabulary sits exactly on the border between the text world and the token world, and both directions must pass through it - that is why it must exist.</p>
+<p>Why not feed the model by "character" or "letter" directly? Too fine and the sequence is too long (one CJK glyph is several bytes, one sentence thousands of steps); too coarse and the vocab explodes (enumerating all words is hopeless). <strong>Subword</strong> splitting is the compromise: common words get one id whole, rare words split into a few common pieces. So the vocab size stays manageable (tens of thousands) and the sequence length stays reasonable.</p>
+<p>This also explains why "the same sentence, split by different models, yields a different token count". The splitting rules are fixed at training time and stored with the weights in GGUF (L13's self-description); at use time you must use the <strong>same</strong> vocab - the wrong one and the ids no longer match what the model learned, and the output instantly turns to garbage.</p>
+<p>So the vocabulary is not an optional accessory but a part <strong>bound</strong> to the weights. When the model loads (L14), the vocab is read out of GGUF along with it; it defines this model's "token space" - and when sampling (L21) later picks the next word, it is picking some id from exactly this vocabulary.</p>
+<p>From another angle, the vocabulary is really an agreed-upon interface between the model and people. Every piece the model saw repeatedly during training maps to one id in the vocab; all the patterns it learned are built on "those pieces". So once the vocab is fixed, it delimits the model's "known world" - what it handles fluently is always combinations of pieces this vocab can produce.</p>
+<p>For that reason the vocab's quality directly affects performance. A well-cut vocab lets common expressions take very few tokens, letting the model spend attention on "meaning" rather than "spelling"; a crude one shatters simple words into fragments, wasting sequence length and raising the learning difficulty. Tokenization is, in a sense, the shared starting line of both training and inference.</p>
+<p>Build intuition with a number: an English word averages about 1.3 tokens, a CJK glyph often takes 1 to 2 tokens, and a prompt of a few hundred characters often maps to over a thousand tokens. The model's "context length" (L17's n_ctx) counts tokens, not characters; how much conversation you can fit is ultimately decided by the post-tokenization token count. Grasp this and you see why "the same few screens of text sometimes overflows the context".</p>
+
+<h2>What llama_vocab is</h2>
+<pre class="code"><span class="cm">// simplified from src/llama-vocab.h</span>
+<span class="kw">struct</span> <span class="fn">llama_vocab</span> {
+    uint32_t <span class="fn">n_tokens</span>() <span class="kw">const</span>;                          <span class="cm">// vocab size (source of L15's n_vocab)</span>
+    int32_t  <span class="fn">tokenize</span>(<span class="kw">const char</span> * text, ...) <span class="kw">const</span>;       <span class="cm">// text -&gt; token id</span>
+    int32_t  <span class="fn">token_to_piece</span>(llama_token id, <span class="kw">char</span> * buf, ...) <span class="kw">const</span>; <span class="cm">// id -&gt; text piece</span>
+<span class="kw">private</span>:
+    <span class="kw">struct</span> impl;                              <span class="cm">// pimpl: hides the tokenizer internals</span>
+    std::unique_ptr&lt;impl&gt; pimpl;
+};</pre>
+<p>Outwardly <span class="mono">llama_vocab</span> is one unified interface: <span class="mono">n_tokens()</span> gives the vocab size, <span class="mono">tokenize</span> encodes, <span class="mono">token_to_piece</span> decodes, plus a batch of methods to query a single token's attributes. But it hides all the "which tokenizer algorithm exactly" implementation detail inside a private <span class="mono">impl</span> struct - this is the <strong>pimpl</strong> (pointer to implementation) idiom.</p>
+<p>Why pimpl? Because tokenizer algorithms vary wildly (next section), each with different internal data structures and merge rules. Stuffing them all into <span class="mono">impl</span> and exposing only the thin <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> interface means <strong>the caller feels nothing</strong>: whether SPM or BPE underneath, the call is identical. Swapping algorithms or changing internals never disturbs the upper code.</p>
+<p>This is the same flavor of decoupling you have seen before: L14's loader splits "parse the format" from "use the model", L17's context splits "read-only knowledge" from "session state". Here it splits "the dirty work of tokenizing" from "the unified interface". A clear boundary keeps the complexity locked in a box.</p>
+<p>There is also a set of flags led by <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span>, recording "should this model auto-prepend BOS, auto-append EOS when tokenizing". These too are set per model (written in GGUF), and the vocab faithfully obeys - once more L13's self-description spirit.</p>
+<p>Look more concretely at this interface's division of labor. On the encoding side, <span class="mono">tokenize</span> handles quite a few details: whether to add a space prefix, whether to normalize, how to merge consecutive whitespace - each tokenizer's own "temperament", all gathered into <span class="mono">impl</span>. The upper layer just hands in a string and takes out ids, never minding what churns below.</p>
+<p>The decoding side is equally subtle. <span class="mono">token_to_piece</span> is not a plain "look up a string"; it also handles whether a special token should show, how byte tokens join by UTF-8, whether the first word needs a leading space. Sealing these into the vocab too keeps "restoring text" consistently correct across any model - you just call in a loop and concatenate.</p>
+
+<h2>A few tokenizer algorithms</h2>
+<table class="t">
+  <tr><th>Type</th><th>Algorithm</th><th>Example model</th></tr>
+  <tr><td>SPM</td><td>SentencePiece (byte-level BPE + byte fallback)</td><td>LLaMA</td></tr>
+  <tr><td>BPE</td><td>byte-level byte-pair merges</td><td>GPT-2 / Qwen</td></tr>
+  <tr><td>WPM</td><td>WordPiece</td><td>BERT</td></tr>
+  <tr><td>UGM</td><td>Unigram</td><td>T5</td></tr>
+  <tr><td>RWKV</td><td>greedy matching</td><td>RWKV</td></tr>
+  <tr><td>PLAMO2</td><td>Aho-Corasick + dynamic programming</td><td>PLaMo-2</td></tr>
+</table>
+<p>There are only a handful of mainstream tokenizer algorithms, and <span class="mono">enum llama_vocab_type</span> lists them out. They differ in "how to split a word into subwords and how to merge", but to the upper layer they are all the same <span class="mono">tokenize</span>. GGUF's tokenizer metadata (L13) decides which one this model uses.</p>
+<p><strong>SPM</strong> (SentencePiece) is the LLaMA-family tradition, based on byte-level BPE with built-in byte fallback; <strong>BPE</strong> (byte-pair encoding) is the GPT-2-family byte-level merging; <strong>WPM</strong> (WordPiece) is the BERT family; <strong>UGM</strong> (Unigram) is the T5 family; <strong>RWKV</strong> uses greedy matching; and the newer <strong>PLAMO2</strong> (Aho-Corasick + dynamic programming). Behind these abbreviations lie different historical ecosystems and language/efficiency trade-offs.</p>
+<p>Why so many? Because different model families inherit their own ecosystem's toolchain, and each algorithm has strengths and weaknesses across multilingual coverage, code, and compression rate. llama.cpp does not force uniformity; it makes them all compatible behind one interface (pimpl) - one of the engineering foundations for running dozens of models.</p>
+<p>You need not memorize each one's details, only build an intuition: <strong>the same sentence, a different algorithm means a different cut</strong>, with possibly different token counts and boundaries; but as long as "the vocab used to encode" and "the vocab the model trained with" are the same, the round-trip fits perfectly.</p>
+<p>A concrete example brings out the difference. The word "unhappiness", BPE might cut into "un"+"happiness" or "un"+"happy"+"ness", relying on high-frequency merges counted at training time; Unigram instead picks, from a large candidate set, the most probable single split by probability. The two routes converge - both want to cover the most text with the fewest pieces - they just differ in the "philosophy" of choosing pieces.</p>
+<p>For a language like Chinese with no natural spaces, tokenization shows its craft. Byte-level schemes first drop a glyph to UTF-8 bytes and then merge, so they work without relying on "word boundaries" - which is also why a model trained mostly on English can often stumble through Chinese: at the bottom it knows bytes, not any language's "words".</p>
+<p>Another frequently asked point: how big should the vocab be? Too small and every word splits into many pieces, lengthening sequences and slowing inference; too large and the embedding table and output layer bloat with it, straining VRAM. So vocab size is a compromise, and mainstream models mostly land between tens of thousands and a hundred-odd thousand. Once fixed, it deeply shapes the model's size and speed - once more proof that "the vocab and the model are bound together".</p>
+
+<h2>Special tokens and byte fallback</h2>
+<p>Beyond ordinary "text-piece tokens", the vocab has a class of <strong>special tokens</strong>: <span class="mono">BOS</span> (begin sequence), <span class="mono">EOS</span> (end sequence), <span class="mono">EOT</span> (end of turn), <span class="mono">PAD</span>/<span class="mono">SEP</span>/<span class="mono">UNK</span>, etc. They map to no specific text but are <strong>control markers</strong>, fetched by accessors <span class="mono">token_bos()</span>/<span class="mono">token_eos()</span>/<span class="mono">token_eot()</span>. For example, when the model emits EOS it means "I am done", and the upper layer stops accordingly.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Byte fallback</b>: a char not in the vocab -&gt; split into UTF-8 bytes -&gt; one &lt;0xXX&gt; token per byte</div>
+  <div class="cells"><span class="lab">rare glyph/emoji</span><span class="cell hl">out of vocab</span><span class="lab">-&gt;</span><span class="cell">&lt;0xF0&gt;</span><span class="cell">&lt;0x9F&gt;</span><span class="cell">&lt;0x8E&gt;</span><span class="cell">&lt;0x89&gt;</span></div>
+</div>
+<p>So what about a character the vocab simply does not have (rare glyphs, emoji)? <strong>Byte fallback</strong>: split the character into its UTF-8 bytes and map each byte to a byte token shaped like <span class="mono">&lt;0xF0&gt;</span> (carrying the <span class="mono">LLAMA_TOKEN_ATTR_BYTE</span> attribute). So <strong>any</strong> UTF-8 text can, worst case, be encoded byte by byte, and is never "unencodable". This solves the classic <strong>OOV</strong> (out-of-vocabulary) problem. A round-trip looks roughly like:</p>
+<pre class="code"><span class="cm"># pseudocode: a tokenize round-trip</span>
+ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, add_special=<span class="kw">True</span>)   <span class="cm"># may auto-prepend BOS</span>
+<span class="cm"># ids = [&lt;bos&gt;, 9906, ...]</span>
+text = <span class="st">""</span>
+<span class="kw">for</span> id <span class="kw">in</span> ids:
+    text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># rebuild piece by piece</span></pre>
+<p><span class="mono">tokenize</span> can auto-prepend BOS (controlled by that <span class="mono">get_add_bos()</span> flag); decoding then calls <span class="mono">token_to_piece</span> per token to stitch pieces back. Note that restoring byte tokens means <strong>joining</strong> several bytes by UTF-8 to form one complete character - which is why decoding accumulates step by step, not "one token, one character".</p>
+<p>Special tokens matter because they carry structural information "beyond the text". In a conversation, who spoke, where a turn ends, whether to stop - all are delimited by these markers (L22's chat template, a later lesson, uses them heavily). Think of ordinary tokens as "content" and special tokens as "punctuation and paragraph marks" - without the latter, the model cannot tell the conversation's skeleton.</p>
+<p>Byte fallback has an easily overlooked benefit too: it lets the vocab stay relatively "small" without fearing incomplete coverage. Since 256 byte tokens are the safety net, the vocab need not bloat endlessly to fit every rare glyph - it keeps only high-frequency pieces and leaves the rare ones to bytes. This "shortcut for the common, full path for the rare" is the same pragmatic spirit as many systems' "fast path + slow path".</p>
+<p>One more detail to call out: deciding "whether to stop" relies not on a single EOS but on a set of "end-of-generation" (EOG) markers. Different models use different end markers - some EOS, some EOT, some either; the vocab handles them uniformly with a dedicated test (whether a token belongs to the EOG set). The upper layer need only ask "is this token a terminator", finishing correctly without memorizing each model's specific convention.</p>
+
+<h2>The C API and the hand-off</h2>
+<p>Using the vocab from the C API is straightforward: first <span class="mono">llama_model_get_vocab(model)</span> to get the vocab from the model, then <span class="mono">llama_vocab_n_tokens(vocab)</span> for the size, <span class="mono">llama_tokenize</span> to encode, <span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> to decode. These all take a <span class="mono">const llama_vocab *</span>.</p>
+<p>There is a big trap here: that batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.</p>
+<p>Why such a sweeping rename? Because these operations are essentially <strong>vocabulary</strong> methods, not model ones - folding them from <span class="mono">llama_*</span> into <span class="mono">llama_vocab_*</span> makes name match substance, echoing how <span class="mono">llama_vocab</span> has internally become its own thing. Renames are annoying but make the API clearer.</p>
+<p>Connecting this lesson back to the main line: your input text is first formatted by L22's chat template, then <span class="mono">tokenize</span>d into ids by the vocab, enters the model to compute logits (L17), the sampler (L21) picks the next id in <strong>this vocabulary's token space</strong>, and finally <span class="mono">token_to_piece</span> turns it back into text shown to you. The vocab is exactly the two gates, in and out, of this loop.</p>
+<p>A common doubt worth clearing: is tokenize's result unique? For a fixed vocab and the same rules, yes - the same input always cuts into the same id sequence, which is exactly the premise that encoding/decoding round-trips reliably. The randomness sampling (L21) brings happens at the "pick the next token" step, unrelated to tokenization; tokenization itself is fully deterministic.</p>
+<p>One last whole-picture view: the vocab is one of the few parts of this inference system "a human can read directly". Weights are a pile of floats, the compute graph a chain of operators; only the vocab lets you look ids back into text and see with your own eyes "what the model read, what it wants to say". When debugging model behavior, printing the tokens first is often the fastest way in.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why so many tokenizer algorithms (SPM/BPE/WPM...)? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>The direct reason is <strong>history and ecosystem</strong>: the LLaMA family inherits SentencePiece, the GPT family uses byte-level BPE, the BERT family uses WordPiece, the T5 family uses Unigram. Whatever a model family trains with, it must infer with - vocab and weights are a matched set, not swappable.</p>
+    <p>One layer deeper is <strong>trade-offs</strong>: algorithms differ in multilingual coverage, friendliness to code/numbers, and compression rate (how many tokens the same text becomes). Byte-level BPE is robust for any language (it drops to bytes first); WordPiece is friendly to English morphology. No silver bullet, hence the variety.</p>
+    <p>llama.cpp's stance is <strong>support them all</strong>: hide each algorithm's implementation difference behind pimpl and expose the same <span class="mono">tokenize</span> upward. So it is not picky about models - exactly what a "general inference engine" should be, the same breadth as L15's table-driven multi-architecture support.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What does byte fallback actually solve? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>It solves <strong>OOV</strong> (out-of-vocabulary). No fixed vocab can exhaust every character in the world (new emoji, rare glyphs, all kinds of symbols keep appearing). Without a fallback, an unseen character can only yield a single <span class="mono">&lt;UNK&gt;</span>, losing the information entirely.</p>
+    <p>Byte fallback's safety net is elegant: UTF-8 is itself a byte sequence, so split any character into 1-4 bytes, each mapping to a <span class="mono">&lt;0xXX&gt;</span> token (256 of them, guaranteed to cover). The concept of "out of vocab" is thus abolished - even the rarest character is encoded losslessly, just at a few more tokens.</p>
+    <p>The cost is worth noting: a rare glyph may take 3-4 byte tokens, several times "pricier" than a common one. So a model processing lots of rare glyphs / certain languages spends noticeably more tokens - one underlying reason some languages "seem more token-hungry".</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why is n_vocab in the vocab, not in hparams (L15)? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because the vocab size is a <strong>property of the vocabulary</strong>, decided by the tokenizer, not a property of the network structure. L15's <span class="mono">llama_hparams</span> describes "how many layers, how wide, how many heads"; the vocab describes "how big the token space is, how to split". Different responsibilities, rightly separated.</p>
+    <p>In practice this is a real trap: L15 deliberately stressed that <span class="mono">n_vocab</span> is not in <span class="mono">hparams</span>, the authoritative source being <span class="mono">llama_vocab::n_tokens()</span>. Although the embedding and output layers' shapes use the vocab size (one of their dimensions is <span class="mono">n_vocab</span>), that number's "owner" is the vocab.</p>
+    <p>This "whose property, whose responsibility" division lets the code stay clean: changing the vocab does not touch hparams, changing the network does not touch the vocab. Clear boundaries are the invisible hero of long-term maintainability - the same discipline you saw again and again in L14 (loader vs model) and L17 (model vs context).</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama_vocab</span> is the two-way translator between text and tokens: <span class="mono">tokenize</span> encodes, <span class="mono">token_to_piece</span>/<span class="mono">detokenize</span> decodes.</li>
+    <li>It is <strong>pimpl</strong>: the concrete tokenizer algorithm is hidden in <span class="mono">impl</span>, exposing only a unified interface.</li>
+    <li>Type <span class="mono">enum llama_vocab_type</span>: SPM/BPE/WPM/UGM/RWKV/PLAMO2, differing in "how to cut", selected by GGUF metadata.</li>
+    <li>Special tokens (<span class="mono">token_bos/eos/eot</span>) are control markers; <strong>byte fallback</strong> <span class="mono">&lt;0xXX&gt;</span> lets any UTF-8 be encoded, abolishing OOV.</li>
+    <li>C API: <span class="mono">llama_model_get_vocab</span> -&gt; <span class="mono">llama_vocab_n_tokens</span>/<span class="mono">llama_tokenize</span>/<span class="mono">llama_token_to_piece</span>; old names <span class="mono">llama_n_vocab</span>/<span class="mono">llama_token_bos</span> are deprecated, use <span class="mono">llama_vocab_*</span>.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The vocabulary cleanly separates the "<strong>text world</strong>" from the "<strong>token world</strong>" - the model lives only in token space and never touches strings; several utterly different splitting algorithms, hidden by pimpl, look like the same <span class="mono">tokenize</span> from above. This thin translator is the only bridge between "the model only does numbers" and "humans only speak text". Understand it, and you see how, every turn in and out, text quietly becomes numbers and becomes text again.
+</div>
+""",
+}
+
+LESSON_21 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课词表把文字变成 token id 喂进模型，模型一路计算（M4a），最后在<strong>输出层</strong>吐出一排 <span class="mono">logits</span>——词表里每个 token 各对应一个原始分数，分数越高代表模型越"看好"它当下一个词。可下一个词只能有一个，怎么从几万个分数里挑出它？这一课讲的<strong>采样</strong>（sampling），就是"从一排分数到一个 token"的最后一步。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">采样远不止"选最大的"那么简单。每次都选最高分，模型会死板、重复、毫无新意；可纯随机又会胡言乱语。真正的采样是一套<strong>裁剪 + 塑形 + 抽选</strong>的组合拳：先划掉没希望的候选、再调分布的软硬、压一压老重复的词，最后才按概率抽一个。llama.cpp 把这些手段做成一个个可插拔的<strong>采样器</strong>，串成一条<strong>采样链</strong>。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  采样像<strong>摇号抽奖</strong>：<span class="mono">logits</span> 是每个号码的原始权重，温度调节"凭实力还是凭运气"，top-k/top-p 先划掉没希望的号，惩罚项压低最近老出现的号，最后 <span class="mono">dist</span> 按权重摇一个出来——或者 <span class="mono">greedy</span> 干脆选权重最大的那个。同一堆号码，配不同的规则，摇出来的"性格"就完全不同。
+</div>
+
+<h2>从 logits 到 token</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">每个 token 一个分数</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">penalties</div><div class="nd">压低重复</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_k / top_p</div><div class="nd">裁剪候选</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">塑形分布</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">dist</div><div class="nd">选一个 token</div></div>
+</div>
+<p>先看清采样的输入和输出。输入是一个<strong>候选数组</strong>：词表里每个 token 一条记录，含 token id、它的 logit（原始分数）、以及待会儿算出来的概率 p。输出是其中<strong>一个</strong>被选中的 id。采样要做的，就是在这个数组上一通操作，最后挑出一条。</p>
+<p>这个候选数组在 llama.cpp 里叫 <span class="mono">llama_token_data_array</span>，每条记录是 <span class="mono">llama_token_data</span>。整条采样管线，本质上就是<strong>不断改写这个数组</strong>：有的采样器把某些候选的 logit 砸成负无穷（等于划掉），有的重新算概率、重新排序，最后一步从中选定一个、把它的下标记在数组的 <span class="mono">selected</span> 字段上。</p>
+<p>为什么要分这么多步、而不是一步选完？因为"选下一个词"需求多样：写代码要严谨（偏确定），写诗要发散（偏随机），还要避免老车轱辘话来回说。把这些需求拆成一个个独立的小操作、按需组合，远比写一个巨大的"全能采样函数"灵活。</p>
+<p>于是管线大致长这样：先用惩罚压低重复，再用 top-k/top-p 砍掉长尾候选，接着用温度调节剩下分布的软硬，最后用 dist 按概率抽一个（或 greedy 直接取最大）。每一步只做一件小事，叠起来就是一套完整的采样策略。</p>
+<p>要强调的是，这套管线只动 logits/概率、<strong>不碰模型本身</strong>。模型每步老老实实算出同一排 logits，至于怎么从中选词，全由采样这层说了算。所以"换个生成风格"根本不用动模型，调调采样参数即可——这也是同一个模型能时而严谨、时而天马行空的原因。</p>
+<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。</p>
+
+<h2>采样器接口</h2>
+<pre class="code"><span class="cm">// 简化自 include/llama.h</span>
+<span class="kw">struct</span> <span class="fn">llama_sampler_i</span> {
+    <span class="kw">const char</span> * (*name)  (...);                          <span class="cm">// 名字(可空)</span>
+    <span class="kw">void</span> (*accept)(llama_sampler *, llama_token);          <span class="cm">// 喂回选中 token(可空)</span>
+    <span class="kw">void</span> (*apply) (llama_sampler *, llama_token_data_array * cur_p); <span class="cm">// 改/排候选(必需)</span>
+    <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// 清状态(可空)</span>
+};
+<span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<p>看看一个采样器到底是什么。<span class="mono">llama_sampler_i</span> 就是一组函数指针：<span class="mono">apply</span>（核心，改写候选数组）、<span class="mono">accept</span>（把选中的 token 喂回来给有状态采样器记账）、<span class="mono">reset</span>（清状态），还有 name/clone/free。配上一块状态 <span class="mono">ctx</span>，就构成一个 <span class="mono">llama_sampler</span>。</p>
+<p>这里 <span class="mono">apply</span> 是唯一<strong>必需</strong>的——它拿到候选数组，按自己的规则改一改（划掉一些、重排一下、重算概率）。<span class="mono">accept</span> 可空，只有"有记忆"的采样器才用得上：惩罚项要记住前面出过哪些 token、mirostat 要根据反馈调参，它们都靠 accept 把"刚选中的 token"收进自己的状态。</p>
+<p>这种"一组函数指针 + 一块状态"的设计，你应该眼熟——它就是 L10 后端、L19 记忆接口那套<strong>接口 + 实现</strong>的又一次运用。每个采样器只要实现这几个函数，就能被统一调度；引擎不在乎你内部是 top-k 还是 mirostat，只管按顺序调 apply。</p>
+<p>把采样器抽象成统一接口，最大的好处是<strong>可组合</strong>。既然它们长一个样，就能像积木一样排成一队，挨个作用在同一个候选数组上。下一节的"采样链"，就是这种可组合性的直接产物。</p>
+<p>顺带说状态 <span class="mono">ctx</span>：它是每个采样器私有的小账本。无状态的采样器（如 top_k）ctx 几乎是空的；有状态的（penalties/mirostat/grammar）则把历史、参数、反馈都存在这里。采样器之间互不干扰，各记各的账。</p>
+<p>为什么接口里好几个函数都标着"可空"？因为不是每个采样器都用得上每件事。像 top_k 这种纯粹"裁一刀"的，根本不需要记忆，也就不必实现 accept；而 reset 只在复用同一个采样器跑多段生成时才有意义。把这些做成可选，让最简单的采样器可以只写一个 apply，既省事又清晰——接口只要求"必需的那件事"，其余按需。</p>
+
+<h2>采样链</h2>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>chain_init</h4><p>建一条空的采样链（<span class="mono">llama_sampler_chain</span>）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chain_add 若干采样器</h4><p>按顺序加入 penalties、top_k、top_p、temp、dist……每个都是独立采样器。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sample</h4><p>对候选数组按加入顺序逐个 apply，最后一个（dist/greedy）选出 token。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>accept</h4><p>把选中 token 喂回链，让有状态采样器（penalties 等）记住它。</p></div></div>
+</div>
+<p>采样链 <span class="mono">llama_sampler_chain</span> 本身也是一个采样器——它内部装着一串子采样器，它的 <span class="mono">apply</span> 就是<strong>按加入顺序</strong>把每个子采样器的 apply 挨个跑一遍。这是典型的"组合模式"：一条链对外看也是一个采样器，对内是许多采样器的队列。</p>
+<pre class="code"><span class="cm"># 伪代码: 组一条采样链</span>
+chain = <span class="fn">llama_sampler_chain_init</span>(params)
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_penalties</span>(...))    <span class="cm"># 压低重复</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_k</span>(40))         <span class="cm"># 留前 40</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_p</span>(0.95, 1))     <span class="cm"># 核采样</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_temp</span>(0.8))          <span class="cm"># 温度</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_dist</span>(seed))         <span class="cm"># 按概率随机选</span>
+id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span class="cm"># 跑全链 -&gt; 返回 token id</span></pre>
+<p>用起来很直观：先 <span class="mono">chain_init</span> 建空链，再 <span class="mono">chain_add</span> 按想要的顺序把采样器一个个塞进去，最后 <span class="mono">llama_sampler_sample</span> 一把梭——它读出某位置的 logits、组成候选数组、跑完整条链、返回选中的 token id，并顺手把这个 token <span class="mono">accept</span> 回去。</p>
+<p><strong>顺序很重要</strong>。同样几个采样器，排列不同，结果可能不同：一般先做惩罚和裁剪（缩小候选集），再做温度（调软硬），最后才是 dist/greedy（真正选定）。把"选定"放最后，是因为前面每一步都在为这"临门一脚"准备一个更合理的候选分布。</p>
+<p>注意链会<strong>接管</strong>加进来的采样器的所有权——一旦 add 进去，释放链时会一并释放它们，你不用单独操心。这种"加进去就交给链管"的约定，让组装采样策略很省心：拼好一条链，用完整体释放即可。</p>
+<p>这套"链"的设计，本质上是把"采样策略"变成了<strong>数据</strong>（一串采样器配置），而不是写死的代码。于是用户在命令行/配置里调几个参数，就能拼出千变万化的采样行为，引擎主干一行都不用改——又是一次"会变的部分集中起来"的体现。</p>
+<p>举个顺序影响结果的例子。假如你把温度放在 top-p <strong>之前</strong>，温度会先把分布整体烫平、再让 top-p 去圈范围，圈出来的核就偏大、偏发散；反过来先 top-p 圈定再升温，则是在一个已经收紧的小集合里调随机性，结果更可控。同样的零件、不同的次序，最终"性格"就有微妙差别——这正是把顺序交给用户配置的价值。</p>
+<p>实际项目里，这条链常有个约定俗成的默认顺序。llama.cpp 的上层（<span class="mono">common</span>）大致按"惩罚 -&gt; 裁剪（top-k/top-p/min-p 等）-&gt; 温度 -&gt; dist"来排。你不必死记，但记住那个大原则就够了：<strong>先缩小候选、再调软硬、最后才抽签</strong>。绝大多数采样策略，都是在这条主轴上加加减减。</p>
+
+<h2>常见采样器与 greedy vs dist</h2>
+<table class="t">
+  <tr><th>采样器</th><th>作用</th></tr>
+  <tr><td>greedy</td><td>选 logit 最大的（argmax，确定）</td></tr>
+  <tr><td>dist</td><td>按概率随机选（靠 seed）</td></tr>
+  <tr><td>top_k</td><td>只留前 k 个候选</td></tr>
+  <tr><td>top_p</td><td>核采样：留累积概率达 p 的最小集</td></tr>
+  <tr><td>min_p</td><td>留概率不低于"最大值 × p"的候选</td></tr>
+  <tr><td>temp</td><td>缩放 logits，调随机性</td></tr>
+  <tr><td>penalties</td><td>压低重复/高频/已出现的 token</td></tr>
+  <tr><td>mirostat</td><td>动态调温，稳住困惑度</td></tr>
+</table>
+<p>来认认常用的几个采样器。它们各管一段：有的负责"裁"（缩小候选集），有的负责"塑"（改分布形状），有的负责"选"（最终拍板）。</p>
+<p>先说最终拍板的两个：<span class="mono">greedy</span> 永远选 logit 最大的那个——确定性，同样输入永远同样输出，适合要复现、要严谨的场景；<span class="mono">dist</span> 则把 logits 经 softmax 变成概率，再按概率<strong>随机</strong>抽一个，带来多样性，靠随机种子 seed 控制。一条链最后接 greedy 还是 dist，决定这次生成是"确定"还是"随机"。</p>
+<p>再说"裁"的两位主力：<span class="mono">top_k</span> 留分数最高的固定 k 个、其余划掉；<span class="mono">top_p</span>（核采样）按概率从高到低累加、留到累计达 p 为止——候选数随分布自适应（分布尖时留得少、平时留得多）。两者常配合：先 top_k 砍掉长尾，再 top_p 自适应收口。</p>
+<p>"塑"的代表是温度 <span class="mono">temp</span>：把 logits 除以一个温度值 T 再 softmax。T 小则分布更尖（更确定），T 大则更平（更随机）。它不改候选集，只改"软硬"。还有 <span class="mono">penalties</span> 压低重复、<span class="mono">mirostat</span> 动态调温稳住困惑度等，各有专长。</p>
+<p>这里要提醒：2023 年那套全局采样函数（<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> 等）<strong>已经全部移除</strong>，统一换成了"采样器对象 + 链"这套模型。看老教程别再找那些函数了。</p>
+<p>单独说说 <span class="mono">penalties</span> 这一类，因为它最贴近日常体验。它盯着最近生成过的 token，对老重复的词施加惩罚（调低 logit），于是模型不容易陷进"复读机"式的循环。常见的有重复惩罚、频率惩罚、存在惩罚几种口味，分别对应"出现过就罚""出现越多越罚""只要出现就一视同仁地罚"。调它们，能在"连贯"和"啰嗦"之间找平衡。</p>
+
+<h2>接回主回路与衔接</h2>
+<p>把采样接回主回路：每生成一个 token，<span class="mono">llama_decode</span>（L17）算出 logits，采样链从中选一个 id，这个 id 一边经词表（L20）变回文字显示、一边被包成新 batch 喂回 <span class="mono">llama_decode</span> 进入下一步。采样就是自回归循环里"<strong>挑下一个词</strong>"那一环。</p>
+<p>还有一个和 grammar（L23）的衔接要先打招呼：语法约束本质上也是一个采样器（它的 apply 把不合语法的 token 划掉）。但它通常<strong>不</strong>塞进主链，而是作为独立对象、按 <span class="mono">grammar_first</span> 决定在链前还是链后单独施加——这一课熟悉了采样器接口，L23 再看 grammar 就水到渠成。</p>
+<p>所以这一课真正要带走的，是一个心智模型：<strong>采样 = 在候选数组上排一队小变换，最后选一个</strong>。模型决定"每个词多大概率合适"，采样决定"这次到底挑谁"。理解了它，你就理解了为什么同一个模型、同一句提示，调调参数就能从"一本正经"变到"天马行空"。</p>
+<p>顺带点一个实用细节：要让随机生成<strong>可复现</strong>，关键在 <span class="mono">dist</span> 的那个随机种子 seed。固定 seed、固定采样参数，同一段提示就能跑出完全一样的结果——这在调试、对比实验时极有用。反过来，想要每次都不一样，让 seed 随时间变即可。确定性到底掌握在你手里。</p>
+<p>最后澄清一个常见误解：采样调不出模型本来没有的能力。它只能在模型给出的那排 logits 上做文章——好的采样能让一个模型<strong>扬长避短</strong>（少出昏招、保持多样），但变不出模型压根学不会的知识。所以效果不好时，先分清是"模型不行"还是"采样没调好"：前者要换模型/微调（L24），后者调调参数即可。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 温度（temperature）到底在做什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>温度 T 的作用是缩放 logits：把每个分数除以 T，再 softmax 变概率。T=1 是原样；T 小于 1，大分数被进一步放大、小分数被压扁，分布更<strong>尖锐</strong>，模型更倾向选最可能的词（更确定、更保守）；T 大于 1 则把差距拉平，分布更<strong>平坦</strong>，冷门词也有机会（更随机、更有创意）。</p>
+    <p>两个极端很有意思：T 趋近 0，分布尖到只剩最大那个，温度采样就<strong>退化成 greedy</strong>；T 很大时分布趋于均匀，几乎是瞎猜。所以温度是一个连续的"确定 &lt;-&gt; 随机"旋钮，greedy 不过是它的一个极端特例。</p>
+    <p>要记住温度<strong>只改软硬、不改候选集</strong>——它不删任何 token，只重新分配大家的概率。删候选是 top-k/top-p 的活。两类操作正交，组合才好用：先用 top-p 圈定合理候选集，再用温度调这个集合内部的随机程度。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> top-k 和 top-p 有何不同？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">top_k</span> 留<strong>固定个数</strong>：把候选按分数排序，留前 k 个、其余划掉。简单直接，但有个毛病——分布尖时 k 个里混进很多没希望的，分布平时又可能把好候选挡在门外。它不看分布形状，只数个数。</p>
+    <p><span class="mono">top_p</span>（核采样 nucleus）留<strong>累积概率达 p 的最小集合</strong>：按概率从高到低累加，加到超过 p 就停。它的候选数是<strong>自适应</strong>的——分布尖时可能只留两三个，分布平时可能留几十个。这种"按概率密度收口"往往比固定 k 更合理。</p>
+    <p>实践中常<strong>两者叠用</strong>：先 top_k（比如 40）砍掉绝大多数长尾、控制开销，再 top_p（比如 0.95）在剩下的里自适应收口。一个管"最多留多少"，一个管"按质量留多少"，配合起来既快又稳。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么做成"链"而不是一个大函数？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为<strong>可组合 + 可配置 + 状态隔离</strong>。每个采样器是独立小部件、自带状态（penalties 记历史、mirostat 记反馈、dist 记随机数），顺序可调、增删自由。用户在配置里写一串采样器名字和参数，引擎照单拼出一条链——想要什么策略就拼什么，不必改一行引擎代码。</p>
+    <p>对比"一个写死的大采样函数"：那样每加一种新手段都得改主函数、各种 if 越堆越多，参数也纠缠不清。拆成链之后，新增一种采样器只是多写一个独立实现，对已有的零影响。这正是 L11 算子、L16 建图积木一脉相承的"小部件组合出复杂行为"。</p>
+    <p>还有个细节：grammar（L23）这种采样器通常<strong>不进主链</strong>，而是按 <span class="mono">grammar_first</span> 在链前或链后单独施加。这说明"链"也不死板——它给特殊约束留了在合适位置插入的余地，足够灵活。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>采样 = 在候选数组 <span class="mono">llama_token_data_array</span> 上裁剪塑形、最后选一个 token。</li>
+    <li>采样器 <span class="mono">llama_sampler_i</span>：<span class="mono">apply</span>（必需，改候选）+ <span class="mono">accept</span>（喂回选中 token）+ reset；配状态 <span class="mono">ctx</span> 成 <span class="mono">llama_sampler</span>。</li>
+    <li>采样链：<span class="mono">chain_init</span> -&gt; <span class="mono">chain_add</span> 若干采样器 -&gt; <span class="mono">sample</span>，按<strong>顺序</strong>逐个 apply。</li>
+    <li><span class="mono">greedy</span>=选最大（确定）、<span class="mono">dist</span>=按概率随机；<span class="mono">top_k</span>/<span class="mono">top_p</span> 裁候选、<span class="mono">temp</span> 调软硬、<span class="mono">penalties</span>/<span class="mono">mirostat</span> 各有专长。</li>
+    <li>旧全局 <span class="mono">llama_sample_*</span> 已移除，统一为采样器对象 + 链；grammar（L23）是链外的特殊采样器。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把采样从"一个写死的大函数"拆成"一串可插拔的小变换"，是典型的<strong>责任链 / 管道</strong>设计——和你在 ggml 算子链（L09）、建图积木（L16）里见过的是同一种味道：用小而独立的部件，组合出复杂多变的行为。于是"换一种生成风格"只是换链里几个环、调几个数，模型和引擎主干纹丝不动。读懂采样，你就握住了把模型从"一本正经"调到"天马行空"的那几个旋钮。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson the vocab turned text into token ids fed to the model; the model computes all the way through (M4a) and finally, at the <strong>output layer</strong>, emits a row of <span class="mono">logits</span> - one raw score per token in the vocab, a higher score meaning the model "favors" it more as the next word. But the next word can be only one, so how do you pick it from tens of thousands of scores? This lesson's topic, <strong>sampling</strong>, is that last step "from a row of scores to one token".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Sampling is far more than "pick the max". Always picking the top score makes the model rigid, repetitive, dull; but pure randomness babbles. Real sampling is a combo of <strong>prune + shape + draw</strong>: first cut hopeless candidates, then tune the distribution's softness, push down words that keep repeating, and only then draw one by probability. llama.cpp makes these means into pluggable <strong>samplers</strong>, strung into a <strong>sampler chain</strong>.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Sampling is like a <strong>lottery draw</strong>: <span class="mono">logits</span> are each ticket's raw weight, temperature tunes "by skill or by luck", top-k/top-p first strike out hopeless tickets, the penalty pushes down tickets that keep showing up lately, and finally <span class="mono">dist</span> draws one by weight - or <span class="mono">greedy</span> simply takes the heaviest. The same pile of tickets, with different rules, draws an entirely different "personality".
+</div>
+
+<h2>From logits to a token</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">one score per token</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">penalties</div><div class="nd">damp repeats</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_k / top_p</div><div class="nd">prune candidates</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">shape distribution</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">dist</div><div class="nd">pick one token</div></div>
+</div>
+<p>First, see sampling's input and output clearly. The input is a <strong>candidate array</strong>: one record per token in the vocab, holding the token id, its logit (raw score), and a probability p computed later. The output is <strong>one</strong> selected id among them. What sampling does is work over this array and finally pick one record.</p>
+<p>This candidate array is called <span class="mono">llama_token_data_array</span> in llama.cpp, each record a <span class="mono">llama_token_data</span>. The whole pipeline is essentially <strong>repeatedly rewriting this array</strong>: some samplers slam certain candidates' logit to negative infinity (a strike-out), some recompute probabilities and re-sort, and the last step selects one, recording its index in the array's <span class="mono">selected</span> field.</p>
+<p>Why so many steps instead of picking in one shot? Because "pick the next word" has varied needs: code wants rigor (lean deterministic), poetry wants divergence (lean random), and you must avoid rehashing the same phrases. Splitting these needs into independent small operations to combine on demand is far more flexible than one giant "do-it-all sampling function".</p>
+<p>So the pipeline looks roughly like this: penalties damp repeats first, top-k/top-p chop the long tail, then temperature tunes the softness of what remains, and finally dist draws one by probability (or greedy takes the max). Each step does one small thing; stacked together they are a complete sampling strategy.</p>
+<p>Worth stressing: this pipeline touches only logits/probabilities, <strong>never the model itself</strong>. The model dutifully computes the same row of logits each step; how a word is chosen from them is entirely up to the sampling layer. So "change the generation style" needs no change to the model, just sampling parameters - which is why one model can be rigorous one moment and wildly imaginative the next.</p>
+<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy.</p>
+
+<h2>The sampler interface</h2>
+<pre class="code"><span class="cm">// simplified from include/llama.h</span>
+<span class="kw">struct</span> <span class="fn">llama_sampler_i</span> {
+    <span class="kw">const char</span> * (*name)  (...);                          <span class="cm">// name (nullable)</span>
+    <span class="kw">void</span> (*accept)(llama_sampler *, llama_token);          <span class="cm">// feed back chosen token (nullable)</span>
+    <span class="kw">void</span> (*apply) (llama_sampler *, llama_token_data_array * cur_p); <span class="cm">// edit/rank candidates (required)</span>
+    <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// clear state (nullable)</span>
+};
+<span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<p>See what a sampler actually is. <span class="mono">llama_sampler_i</span> is just a set of function pointers: <span class="mono">apply</span> (the core, rewrites the candidate array), <span class="mono">accept</span> (feeds the chosen token back so stateful samplers can keep tally), <span class="mono">reset</span> (clear state), plus name/clone/free. With a state blob <span class="mono">ctx</span>, it forms a <span class="mono">llama_sampler</span>.</p>
+<p>Here <span class="mono">apply</span> is the only <strong>required</strong> one - it takes the candidate array and edits it by its own rule (strike some out, re-rank, recompute probabilities). <span class="mono">accept</span> is nullable, needed only by samplers with memory: the penalty must remember which tokens appeared before, mirostat must adjust by feedback; both use accept to take "the just-chosen token" into their state.</p>
+<p>This "a set of function pointers + a state blob" design should look familiar - it is another use of that <strong>interface + implementation</strong> pattern from L10's backends and L19's memory interface. Each sampler need only implement these functions to be scheduled uniformly; the engine does not care whether you are top-k or mirostat inside, it just calls apply in order.</p>
+<p>Abstracting samplers into a unified interface buys <strong>composability</strong> above all. Since they look alike, they can line up like blocks, each acting on the same candidate array. Next section's "sampler chain" is the direct product of this composability.</p>
+<p>A word on the state <span class="mono">ctx</span>: it is each sampler's private ledger. A stateless sampler (like top_k) has an almost-empty ctx; a stateful one (penalties/mirostat/grammar) keeps history, parameters, feedback here. Samplers do not interfere with one another, each keeping its own books.</p>
+<p>Why are several interface functions marked "nullable"? Because not every sampler needs everything. A pure "one cut" sampler like top_k needs no memory and thus need not implement accept; reset matters only when reusing one sampler across several generations. Making these optional lets the simplest sampler write just an apply - tidy and clear; the interface demands only "the required thing", the rest on demand.</p>
+
+<h2>The sampler chain</h2>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>chain_init</h4><p>Build an empty sampler chain (<span class="mono">llama_sampler_chain</span>).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chain_add several samplers</h4><p>Add penalties, top_k, top_p, temp, dist... in order; each is an independent sampler.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sample</h4><p>apply over the candidate array in add-order; the last (dist/greedy) picks the token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>accept</h4><p>Feed the chosen token back into the chain so stateful samplers (penalties etc.) remember it.</p></div></div>
+</div>
+<p>The sampler chain <span class="mono">llama_sampler_chain</span> is itself a sampler - it holds a list of child samplers, and its <span class="mono">apply</span> simply runs each child's apply <strong>in add-order</strong>. This is the classic "composite" pattern: a chain looks like one sampler outside, while inside it is a queue of many.</p>
+<pre class="code"><span class="cm"># pseudocode: build a sampler chain</span>
+chain = <span class="fn">llama_sampler_chain_init</span>(params)
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_penalties</span>(...))    <span class="cm"># damp repeats</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_k</span>(40))         <span class="cm"># keep top 40</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_p</span>(0.95, 1))     <span class="cm"># nucleus</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_temp</span>(0.8))          <span class="cm"># temperature</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_dist</span>(seed))         <span class="cm"># draw by probability</span>
+id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span class="cm"># run the whole chain -&gt; return a token id</span></pre>
+<p>It is straightforward to use: <span class="mono">chain_init</span> an empty chain, <span class="mono">chain_add</span> samplers in the order you want, and finally <span class="mono">llama_sampler_sample</span> does it all - it reads a position's logits, forms the candidate array, runs the whole chain, returns the chosen token id, and conveniently <span class="mono">accept</span>s that token back.</p>
+<p><strong>Order matters</strong>. The same few samplers in a different arrangement can give different results: generally do penalties and pruning first (shrink the candidate set), then temperature (tune softness), and dist/greedy last (the actual selection). Putting "selection" last is because every earlier step is preparing a more reasonable candidate distribution for that "final kick".</p>
+<p>Note the chain <strong>takes ownership</strong> of the samplers added to it - once added, freeing the chain frees them too, so you need not track them separately. This "add it and the chain manages it" convention makes assembling a strategy carefree: build a chain, free it whole when done.</p>
+<p>This "chain" design essentially turns "the sampling strategy" into <strong>data</strong> (a list of sampler configs) rather than hardcoded code. So a user tuning a few parameters on the command line / config can assemble endlessly varied sampling behavior with not a line of the engine trunk changed - once more "gather the parts that vary".</p>
+<p>An example of order affecting the result. If you put temperature <strong>before</strong> top-p, temperature first flattens the whole distribution and then top-p draws the range, so the nucleus comes out larger and more divergent; conversely, top-p fencing first then heating tunes randomness within an already-tightened small set, more controllable. Same parts, different order, subtly different "personality" - exactly the value of leaving order to user config.</p>
+<p>In real projects this chain often has a conventional default order. llama.cpp's upper layer (<span class="mono">common</span>) roughly arranges "penalties -&gt; pruning (top-k/top-p/min-p etc.) -&gt; temperature -&gt; dist". You need not memorize it, but the big principle suffices: <strong>shrink candidates first, tune softness next, draw last</strong>. The vast majority of sampling strategies are just additions and subtractions along this main axis.</p>
+
+<h2>Common samplers and greedy vs dist</h2>
+<table class="t">
+  <tr><th>Sampler</th><th>What it does</th></tr>
+  <tr><td>greedy</td><td>pick the max logit (argmax, deterministic)</td></tr>
+  <tr><td>dist</td><td>draw randomly by probability (via seed)</td></tr>
+  <tr><td>top_k</td><td>keep only the top k candidates</td></tr>
+  <tr><td>top_p</td><td>nucleus: keep the smallest set with cumulative prob p</td></tr>
+  <tr><td>min_p</td><td>keep candidates with prob no less than "max x p"</td></tr>
+  <tr><td>temp</td><td>scale logits, tune randomness</td></tr>
+  <tr><td>penalties</td><td>damp repeated/frequent/seen tokens</td></tr>
+  <tr><td>mirostat</td><td>dynamically tune temperature to hold perplexity</td></tr>
+</table>
+<p>Meet the common samplers. Each owns a stage: some "prune" (shrink the candidate set), some "shape" (change the distribution's form), some "select" (the final call).</p>
+<p>First the two that make the final call: <span class="mono">greedy</span> always picks the max logit - deterministic, same input always same output, good for reproducible, rigorous scenarios; <span class="mono">dist</span> softmaxes logits into probabilities and then draws one <strong>randomly</strong> by probability, bringing diversity, controlled by a random seed. Whether a chain ends in greedy or dist decides if this generation is "deterministic" or "random".</p>
+<p>Then the two pruning mainstays: <span class="mono">top_k</span> keeps the fixed top k by score and strikes out the rest; <span class="mono">top_p</span> (nucleus) accumulates by probability from high to low, keeping until the cumulative reaches p - the candidate count is <strong>adaptive</strong> (few when the distribution is peaked, many when flat). The two often pair: top_k chops the long tail, then top_p closes adaptively.</p>
+<p>The "shape" representative is temperature <span class="mono">temp</span>: divide logits by a temperature T then softmax. Small T makes the distribution peakier (more deterministic), large T flatter (more random). It does not change the candidate set, only the softness. There are also <span class="mono">penalties</span> to damp repeats, <span class="mono">mirostat</span> to dynamically tune temperature and hold perplexity, each with a specialty.</p>
+<p>A reminder here: the 2023-era global sampling functions (<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> etc.) are <strong>all removed</strong>, unified into this "sampler object + chain" model. Do not go looking for those functions in old tutorials.</p>
+<p>A word on the <span class="mono">penalties</span> family, since it is closest to everyday experience. It watches recently generated tokens and penalizes oft-repeated words (lowering their logit), so the model is less likely to fall into a "broken record" loop. Common flavors are repeat, frequency, and presence penalties - "penalize if seen", "penalize more the more it appears", "penalize once seen, flatly". Tuning them balances "coherent" against "verbose".</p>
+
+<h2>Back to the main loop and the hand-off</h2>
+<p>Connecting sampling back to the main loop: per generated token, <span class="mono">llama_decode</span> (L17) computes logits, the chain picks one id from them, and this id is both turned back into text via the vocab (L20) for display and wrapped into a new batch fed back to <span class="mono">llama_decode</span> for the next step. Sampling is the "<strong>pick the next word</strong>" link in the autoregressive loop.</p>
+<p>One hand-off with grammar (L23) to flag early: a grammar constraint is essentially a sampler too (its apply strikes out tokens that break the grammar). But it usually does <strong>not</strong> go into the main chain; it is a separate object applied before or after the chain per <span class="mono">grammar_first</span> - having learned the sampler interface here, grammar in L23 will come naturally.</p>
+<p>So what to truly take from this lesson is a mental model: <strong>sampling = line up a queue of small transforms over the candidate array, then pick one</strong>. The model decides "how likely each word is appropriate", sampling decides "who exactly gets picked this time". Understand it and you see why one model, one prompt, can go from "buttoned-up" to "wildly free" just by tuning parameters.</p>
+<p>A practical detail in passing: to make random generation <strong>reproducible</strong>, the key is <span class="mono">dist</span>'s random seed. Fix the seed and the sampling parameters, and the same prompt runs to identical results - invaluable for debugging and comparison experiments. Conversely, to vary each run, let the seed change with time. Determinism is firmly in your hands.</p>
+<p>Finally, clear a common misconception: sampling cannot conjure abilities the model lacks. It can only work on the row of logits the model gives - good sampling lets a model <strong>play to its strengths</strong> (fewer blunders, kept diversity), but cannot invent knowledge the model never learned. So when results are poor, first tell "the model is weak" from "the sampling is mistuned": the former needs a different model / fine-tuning (L24), the latter just parameter tweaks.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What does temperature actually do? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Temperature T scales logits: divide each score by T, then softmax into probabilities. T=1 is as-is; T below 1 amplifies big scores further and squashes small ones, making the distribution <strong>peakier</strong>, the model leaning toward the most likely word (more deterministic, more conservative); T above 1 flattens the gaps, making it <strong>flatter</strong> so longshots get a chance (more random, more creative).</p>
+    <p>The two extremes are interesting: as T approaches 0, the distribution peaks down to just the max, and temperature sampling <strong>degenerates into greedy</strong>; at very large T the distribution nears uniform, almost blind guessing. So temperature is a continuous "deterministic &lt;-&gt; random" knob, and greedy is merely one extreme special case of it.</p>
+    <p>Remember temperature <strong>only changes softness, not the candidate set</strong> - it deletes no token, only redistributes everyone's probability. Deleting candidates is top-k/top-p's job. The two operations are orthogonal and combine well: use top-p to fence a reasonable candidate set, then temperature to tune the randomness within that set.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> How do top-k and top-p differ? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">top_k</span> keeps a <strong>fixed count</strong>: sort candidates by score, keep the top k, strike out the rest. Simple and direct, but with a flaw - when the distribution is peaked, many hopeless ones sneak into the k, and when it is flat, good candidates may be shut out. It does not look at the distribution's shape, only counts.</p>
+    <p><span class="mono">top_p</span> (nucleus) keeps the <strong>smallest set whose cumulative probability reaches p</strong>: accumulate by probability from high to low, stopping once it passes p. Its candidate count is <strong>adaptive</strong> - maybe just two or three when peaked, dozens when flat. This "closing by probability density" is often more reasonable than a fixed k.</p>
+    <p>In practice the two are often <strong>stacked</strong>: top_k (say 40) chops the vast long tail and bounds cost, then top_p (say 0.95) closes adaptively among the rest. One governs "how many at most", the other "how many by quality"; together they are both fast and steady.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why a "chain" rather than one big function? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because of <strong>composability + configurability + state isolation</strong>. Each sampler is an independent small part with its own state (penalties keeps history, mirostat keeps feedback, dist keeps the RNG), with adjustable order and free add/remove. A user writes a list of sampler names and parameters in config, and the engine assembles a chain to order - whatever strategy you want, without changing a line of engine code.</p>
+    <p>Compare "one hardcoded big sampling function": there every new sampling means edits to the main function, ever more ifs, tangled parameters. Split into a chain, adding a new sampler is just one more independent implementation, with zero impact on the existing ones. This is the same "small parts compose complex behavior" as L11's operators and L16's graph blocks.</p>
+    <p>One more detail: a sampler like grammar (L23) usually does <strong>not</strong> enter the main chain but is applied before or after per <span class="mono">grammar_first</span>. This shows the "chain" is not rigid either - it leaves room to insert special constraints at the right spot, flexible enough.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Sampling = prune and shape the candidate array <span class="mono">llama_token_data_array</span>, then pick one token.</li>
+    <li>Sampler <span class="mono">llama_sampler_i</span>: <span class="mono">apply</span> (required, edits candidates) + <span class="mono">accept</span> (feed back chosen token) + reset; with state <span class="mono">ctx</span> it forms a <span class="mono">llama_sampler</span>.</li>
+    <li>Sampler chain: <span class="mono">chain_init</span> -&gt; <span class="mono">chain_add</span> several samplers -&gt; <span class="mono">sample</span>, applying each <strong>in order</strong>.</li>
+    <li><span class="mono">greedy</span>=pick the max (deterministic), <span class="mono">dist</span>=random by probability; <span class="mono">top_k</span>/<span class="mono">top_p</span> prune, <span class="mono">temp</span> tunes softness, <span class="mono">penalties</span>/<span class="mono">mirostat</span> have specialties.</li>
+    <li>Old global <span class="mono">llama_sample_*</span> are removed, unified into sampler object + chain; grammar (L23) is a special sampler outside the chain.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Splitting sampling from "one hardcoded big function" into "a string of pluggable small transforms" is the classic <strong>chain-of-responsibility / pipeline</strong> design - the same flavor you saw in ggml's operator chain (L09) and graph blocks (L16): small independent parts composing complex, varied behavior. So "change the generation style" is just swapping a few links and tuning a few numbers, with the model and engine trunk untouched. Understand sampling, and you hold the very knobs that turn a model from "buttoned-up" to "wildly free".
+</div>
+""",
+}
+
+LESSON_22 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+M4a 让模型能算，L20 把文字切成 token，L21 教它怎么选下一个词。可还有个关键问题没解决：你在聊天框里一句一句地说，模型怎么知道"哪句是你说的、哪句是它说的、一轮从哪到哪"？这一课讲<strong>对话模板</strong>——把一串带角色的消息（system/user/assistant），按这个模型认得的格式，拼成一段带特殊标记的提示词字符串。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这步看似不起眼，却极其关键：每个模型在训练时，对话都是按某种固定格式喂进去的（ChatML、Llama-2 各不相同）。推理时你必须用<strong>同一种</strong>格式，模型才认得出"轮次"和"角色"。格式拼错，模型轻则答非所问，重则完全不在状态。对话模板就负责把消息正确装进"这个模型的信封"。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  对话模板像<strong>公文的信封格式</strong>：同样一句话，不同机构有不同的抬头和落款。ChatML 把每条消息裹成 <span class="mono">&lt;|im_start|&gt;角色 ... &lt;|im_end|&gt;</span>，Llama-2 用 <span class="mono">[INST] ... [/INST]</span>。模板做的，就是把你的消息装进这个模型训练时认得的那种信封——装错了信封，收信人就读不懂。
+</div>
+
+<h2>为什么需要模板</h2>
+<div class="flow">
+  <div class="node"><div class="nt">消息列表</div><div class="nd">[{system},{user}]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">apply_template</div><div class="nd">套模板</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">提示词串</div><div class="nd">"&lt;|im_start|&gt;..."</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">tokenize</div><div class="nd">L20</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
+</div>
+<p>先看清这步在整条链路里的位置。你的对话是一串结构化消息：每条有个角色（system/user/assistant）和一段内容。但模型吃的不是这种结构，而是一长串 token（L20）。中间必须有一步把"消息列表"压平成"一段字符串"，这一步就是对话模板。</p>
+<p>拼出来的字符串里，除了各条消息的正文，还插了一堆<strong>特殊标记</strong>：标明每条消息从哪开始、到哪结束、是谁说的。这些标记对应词表里的特殊 token（L20），模型正是靠它们识别"现在轮到 assistant 说话了""这一轮用户说完了"。</p>
+<p>顺序是：消息列表 -&gt; 套模板拼成字符串 -&gt; 交给词表 tokenize -&gt; 进模型。模板负责"结构到文本"，tokenize 负责"文本到 token"，两步接力、缺一不可。这也是为什么这一课紧跟在词表（L20）后面——它的产物正是 tokenize 的输入。</p>
+<p>要强调一点：模板拼出来的是<strong>纯文本</strong>，模型并不知道什么"角色""轮次"的高级概念，它只是学会了"看到 <span class="mono">&lt;|im_start|&gt;</span> 这种标记，就该切换说话人"。所谓对话能力，本质上是模型在训练时见过海量这种格式、学会了照着接话。模板只是忠实地复刻那个格式。</p>
+<p>反过来想，如果不套模板、直接把用户的话 tokenize 进去会怎样？模型会以为这是一段普通文本的续写，而不是"一轮对话求回应"。它可能继续替用户往下编，而不是作为助手来回答——因为少了那些界定角色和轮次的标记，它根本不知道"该自己说话了"。模板的有无，直接决定模型是"补全"还是"对话"。</p>
+<p>再往深里想一层：模型本身并不"理解"对话，它只是个超级强大的文本续写器。是对话模板和训练数据一起，把"续写"这件事<strong>伪装</strong>成了"对话"。你看到的一问一答，在模型眼里始终是"给定前文、预测下一个 token"。这个认识很重要——它能帮你理解后面很多看似神奇的行为，其实都只是续写规律的体现。</p>
+<p>正因为对话被编码成了纯文本，很多有趣的事才成为可能：你可以把"系统提示"写进 system 消息里，给模型定个人设；可以把前几轮对话原样拼进去，让它"记住"上下文（其实是每次都把历史重新喂一遍）；甚至可以伪造一段助手的话塞进去，引导它往某个方向接。这些灵活玩法，全建立在"对话不过是一段精心格式化的文本"这个事实上。</p>
+<p>还有个容易忽略的点：模板里的特殊标记，必须是这个模型词表（L20）里真实存在的 token，模型才认得。所以模板和词表是<strong>配套</strong>的——ChatML 的 <span class="mono">&lt;|im_start|&gt;</span> 之所以好使，是因为对应模型的词表里就有这么一个专门的 token。换个不认识这标记的模型硬套 ChatML，反而会把标记拆成一堆碎字节，适得其反。</p>
+
+<h2>内建模板表</h2>
+<pre class="code"><span class="cm">// 简化自 src/llama-chat.h</span>
+<span class="kw">enum</span> <span class="fn">llm_chat_template</span> {
+    LLM_CHAT_TEMPLATE_CHATML,
+    LLM_CHAT_TEMPLATE_LLAMA_2,
+    LLM_CHAT_TEMPLATE_LLAMA_3,
+    LLM_CHAT_TEMPLATE_GEMMA,
+    <span class="cm">/* ... 五十多种 ... */</span>
+    LLM_CHAT_TEMPLATE_UNKNOWN,
+};</pre>
+<p>llama.cpp 内置了一大批常见模型的模板，全列在枚举 <span class="mono">llm_chat_template</span> 里——CHATML、LLAMA_2（还有若干变体）、LLAMA_3、GEMMA、MISTRAL、PHI 等等，加起来五十多种。每一种对应一套具体的"标记 + 拼法"。</p>
+<p>为什么要硬编码这么多？因为不同模型家族的对话格式是它们训练时定死的，五花八门。把常见的都内置进来，用户拿到一个主流模型，引擎多半能<strong>自动认出</strong>它该用哪套格式，开箱即用，不用手动指定。</p>
+<table class="t">
+  <tr><th>模板</th><th>消息标记</th></tr>
+  <tr><td>ChatML</td><td>&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</td></tr>
+  <tr><td>Llama-2</td><td>[INST] ... [/INST]</td></tr>
+  <tr><td>Llama-3</td><td>&lt;|start_header_id|&gt;role&lt;|end_header_id|&gt;</td></tr>
+  <tr><td>Gemma</td><td>&lt;start_of_turn&gt;role ... &lt;end_of_turn&gt;</td></tr>
+</table>
+<p>看几个代表就懂了：ChatML（很多模型用）拿 <span class="mono">&lt;|im_start|&gt;</span>/<span class="mono">&lt;|im_end|&gt;</span> 包消息；Llama-2 用 <span class="mono">[INST]</span>/<span class="mono">[/INST]</span> 框用户指令；Gemma 用 <span class="mono">&lt;start_of_turn&gt;</span>；Llama-3 用 <span class="mono">&lt;|start_header_id|&gt;</span> 标角色。标记不同，但意图一样：界定角色和轮次边界。</p>
+<p>这套"把每个模型的格式收进一张枚举表"的做法，你应该眼熟——和 L15 把架构收进 <span class="mono">LLM_ARCH</span> 表、L20 把分词器类型收进 <span class="mono">vocab_type</span> 是同一种思路：把"会变的差异"集中成数据，让通用代码照表办事。</p>
+<p>你可能会问：模型自己不知道该用哪套格式吗，还要引擎来猜？还真不一定知道。GGUF 文件里<strong>可能</strong>带一个模板字段（很多新模型会写），但也有不少模型没写、或写得不规范。于是 llama.cpp 一边支持读取模型自带的模板，一边内置这几十种常见格式兜底——两手准备，尽量让用户不必手动操心。</p>
+<p>这几十种模板看着多，其实大同小异，无非是"用什么符号标角色、用什么符号断轮次、system 消息放哪"几个维度的排列组合。把它们一一编码进枚举，是一种"用工程量换通用性"的取舍：写的时候累一点，换来的是"一个引擎通吃主流模型"的便利。这种"宁可自己多写、也要让用户省心"的态度，贯穿了 llama.cpp 的很多设计。</p>
+<p>顺便说，枚举里那个 <span class="mono">LLM_CHAT_TEMPLATE_UNKNOWN</span> 哨兵也有讲究：当检测既匹配不上名字、又认不出特征时，就落到它。这时引擎会提示"没认出模板"，提醒用户手动指定一个，而不是默默用错格式蒙混过去。给"认不出"留一个明确的出口，是健壮设计的常见手法。</p>
+<p>一个常被忽略的细节是 system 消息的处理。不同模板对"系统提示"放哪、怎么标记，分歧最大：有的像 ChatML 一样单列一条 system 消息，有的（如某些 Llama-2 变体）要把它揉进第一条 user 消息里，还有的根本不支持独立的 system。所以同一段系统提示，套不同模板出来的位置可能差很远——这也是为什么换模型时，光改提示词内容还不够，得让模板替你摆对位置。</p>
+
+<h2>检测与应用</h2>
+<pre class="code"><span class="cm"># 伪代码: 套用对话模板</span>
+tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span class="cm"># 先按名, 再按内容特征猜</span>
+dest = <span class="st">""</span>
+<span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
+<span class="cm"># add_ass: 末尾追加 assistant 起始标记, 让模型接着写回答</span></pre>
+<p>有了这张表，剩下两件事：一是<strong>认出</strong>该用哪套模板，二是<strong>套用</strong>它把消息拼出来。</p>
+<p>认出靠 <span class="mono">llm_chat_detect_template</span>：它先按名字精确匹配（模型 GGUF 里常自带一个模板名/模板串），认不出就退而看模板内容里有没有 <span class="mono">&lt;|im_start|&gt;</span>、<span class="mono">[INST]</span> 这类特征子串，按特征猜。套用靠 <span class="mono">llm_chat_apply_template</span>：给它模板枚举、消息列表、一个输出字符串，它就按这套格式拼好。</p>
+<p>这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。</p>
+<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。</p>
+<p>检测这一步其实暗藏玄机。最理想的情况是模型 GGUF 里写明了模板名，一查便知；但现实里常常只给出一段模板<strong>内容</strong>（Jinja 文本），没有名字。这时只能靠"内容里有没有某些特征标记"来反推——看到 <span class="mono">[INST]</span> 就猜 Llama-2、看到 <span class="mono">&lt;|im_start|&gt;</span> 就猜 ChatML。这种基于特征的启发式不是百分百可靠，但覆盖了绝大多数情况。</p>
+<p>套用这一步也比看上去讲究。同一套格式，system 消息有的拼在最前、有的并进第一条 user 消息、有的干脆不支持；多轮对话里，历史消息要不要重复加标记、最后一轮怎么收尾，每种模板都有自己的规矩。<span class="mono">apply_template</span> 把这些细节按模板类型一一处理妥当，你只管递进去一个消息列表，它还你一段格式严丝合缝的提示词。</p>
+<p>一个实际的小建议：调试对话效果时，不妨把 <span class="mono">apply_template</span> 拼出来的那段字符串<strong>原样打印</strong>出来看看。很多"模型不好好回答"的问题，根子就在拼出来的提示词格式不对——少了个标记、system 放错了位置、add_ass 忘了开。先看清喂进去的到底长什么样，往往比反复调参数更快定位问题。</p>
+
+<h2>两条路：内建 vs Jinja</h2>
+<div class="cols">
+  <div class="col"><h4>内建（llama-chat.cpp）</h4><p>固定枚举、纯字符串拼接、零依赖、快；只认预定义的几十种。C API <span class="mono">llama_chat_apply_template</span> 走这条。</p></div>
+  <div class="col"><h4>Jinja（common/jinja）</h4><p>渲染<strong>任意</strong>模板：模型自带的 Jinja chat_template 原样执行，最忠实。<span class="mono">common/chat.cpp</span> 封装，还支持工具调用。</p></div>
+</div>
+<p>内建模板只覆盖"已知的那些模型"。要是来了个全新模型、带着自己独特的模板呢？这就引出第二条路：<strong>Jinja</strong>。</p>
+<p>内建这条路（<span class="mono">src/llama-chat.cpp</span>）是纯 C++ 字符串拼接，固定枚举、零依赖、快，但只认预定义的那几十种。C API <span class="mono">llama_chat_apply_template</span> 走的就是这条——注意它<strong>只收模板字符串、不带模型参数</strong>（旧版带 model 的重载已移除），注释也明说"不用 jinja，只支持预定义列表"。</p>
+<p>Jinja 这条路（vendored 在 <span class="mono">common/jinja/</span>）能渲染<strong>任意</strong>模板：模型在 GGUF 里自带的 chat_template（往往是一段 Jinja 文本）可以被原样执行，最忠实。上层 <span class="mono">common/chat.cpp</span> 的 <span class="mono">common_chat_templates</span> 封装了它，还顺带支持工具调用、输出解析等高级花样。</p>
+<p>两条路分工很清楚：内建管"已知模型、要快要稳"，Jinja 管"任意模型、要忠实"。衔接上，无论哪条路，拼好的提示词都要再经 L20 的 tokenize、进 L17 的 decode——对话模板只是把"消息"变成"字符串"的那一棒。</p>
+<p>为什么不干脆<strong>全</strong>用 Jinja，省得维护几十种内建模板？因为 Jinja 是一套完整的模板语言，要带一个解释器、要解析执行任意逻辑，开销和复杂度都不小。对那些格式早已固定的常见模型，用几行 C++ 直接拼，又快又稳、还没有解析任意模板带来的安全顾虑。所以内建这条"快路"有它不可替代的价值。</p>
+<p>反过来，为什么又非要有 Jinja 不可？因为模型层出不穷，总有内建表里没有的新格式、或带着复杂条件逻辑的模板（比如"有 system 就这样拼、没有就那样拼""带工具定义时再加一段"）。这些用固定枚举根本表达不了，只能靠一个真正的模板引擎去执行。两条路各补各的短，合起来才既覆盖广、又跑得快。</p>
+<p>把视角拉高一点：对话模板这一层，本质上是在弥合"人类的对话观"和"模型的文本观"之间的鸿沟。人觉得对话是你一言我一语的结构，模型只认一条连续的 token 流。模板就是这两种世界观之间的翻译协议——而它居然能用"一张枚举表 + 一个可选的 Jinja 引擎"就基本搞定，足见把复杂性收进数据是多么有力的一招。</p>
+<p>还值得一提的是工具调用（function calling）这类高级用法。当你想让模型调用外部工具时，工具的定义、调用的格式、返回的拼接，都要按特定约定塞进提示词——这远超内建模板"拼几条消息"的能力，正是 common 层结合 Jinja 与语法约束（L23）来做的。所以对话模板不只是"聊天"，它还是更复杂的"结构化交互"的地基。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> add_ass（add assistant）这个开关到底干嘛？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>它决定要不要在拼好的提示词<strong>末尾</strong>，补上 assistant 角色的起始标记（如 ChatML 的 <span class="mono">&lt;|im_start|&gt;assistant</span>），但不含任何内容。等于在纸上写好"助手："然后把笔递过去——模型自然会从这个位置接着往下写回答。</p>
+    <p>为真是<strong>聊天</strong>的常态：你想要模型作为助手回应，就得把"该它说话"的起点标出来。为假则用于<strong>补全</strong>：你只想让模型接着某段已有文本往下写，不需要切换到 assistant 身份。一个开关，区分了"对话"和"续写"两种用法。</p>
+    <p>这也解释了一个常见现象：如果忘了开 add_ass，模型有时会"自言自语"地替用户多说几句，而不是直接回答——因为提示词停在了用户那一轮，没给它"轮到你了"的信号。理解这个开关，能省掉不少"模型怎么不好好回答"的困惑。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么 C API 的 apply_template 不再带 model 参数？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为套模板这件事，需要的只是"<strong>模板字符串 + 消息列表</strong>"，跟整个模型没关系。模板串本身可以来自 GGUF 元数据、也可以由用户直接指定；把 model 从参数里拿掉，函数职责更单一、更好测试、也更灵活。</p>
+    <p>这是个典型的<strong>解耦</strong>动作，和 L20 把 <span class="mono">llama_token_bos</span> 等改成 <span class="mono">llama_vocab_*</span> 一个道理：让每个 API 只依赖它真正需要的东西。旧版带 <span class="mono">llama_model *</span> 的重载已经移除，看老代码时别再按那个签名调用。</p>
+    <p>注释里还点明：这个 C API <strong>不走 jinja</strong>，只支持内建的预定义模板列表。换句话说，它是"快而专"的那条路；要 jinja 的全部灵活性，得上 <span class="mono">common/chat.cpp</span> 那层。API 的边界划得很清楚。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 内建模板 vs Jinja，何时用哪个？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>原则上：模型在 GGUF 里<strong>自带了 chat_template</strong>（一段 Jinja 文本）、或你需要工具调用这类高级特性时，走 Jinja（<span class="mono">common/chat.cpp</span> 的 <span class="mono">common_chat_templates</span>，开 <span class="mono">use_jinja</span>），最忠实于模型作者的意图。</p>
+    <p>反过来，模型是<strong>已知的主流款</strong>、或你想要零依赖、要快要稳时，用内建枚举即可——几十种常见格式都覆盖了，纯 C++ 拼接没有额外开销。命令行小工具、嵌入式场景，往往选这条。</p>
+    <p>两者不是对立，而是<strong>分层覆盖</strong>："已知模型"由内建快速搞定，"任意模型"由 Jinja 兜底。这种"常见走快路、罕见走通路"的设计，和 L20 词表的"高频片段直接收、罕见字符靠字节回退"是同一种务实智慧。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>对话模板把带角色的消息列表 -&gt; 该模型约定格式的提示词字符串，再交给 L20 tokenize。</li>
+    <li>内建模板枚举 <span class="mono">llm_chat_template</span>（五十多种）；<span class="mono">llm_chat_detect_template</span>（先按名、再按特征子串）+ <span class="mono">llm_chat_apply_template</span>（渲染，<span class="mono">add_ass</span> 控制是否递话筒）。</li>
+    <li><span class="mono">llama_chat_message</span> 只有 <span class="mono">role</span> + <span class="mono">content</span> 两个字段。</li>
+    <li>C API <span class="mono">llama_chat_apply_template</span> <strong>只收模板字符串、无 model 参数</strong>，且只走内建、不用 jinja。</li>
+    <li>两条路：内建（<span class="mono">llama-chat.cpp</span>，快/已知模型）vs Jinja（<span class="mono">common/jinja</span> + <span class="mono">common/chat.cpp</span>，任意模型/工具调用）。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  对话模板把"<strong>模型的对话方言</strong>"收进一张表——同样的消息，换个模型就换个信封，引擎主干不必关心。它和 L15 的"表驱动架构"、L20 的"表驱动分词"是同一种智慧：把"每个模型各不相同的部分"沉淀成数据/模板，让通用代码照着办。而内建与 Jinja 两条路，又是"常见走快路、罕见走通路"的经典分层。读懂它，你就明白为什么同一个 llama.cpp 能流利地说几十种模型的"话"。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+M4a let the model compute, L20 cut text into tokens, L21 taught it to pick the next word. But one key question remains: you speak sentence by sentence in a chat box, so how does the model know "which line is yours, which is its own, where one turn starts and ends"? This lesson covers <strong>chat templates</strong> - assembling a list of role-tagged messages (system/user/assistant), in the format this model recognizes, into a prompt string with special markers.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This step looks minor but is crucial: every model was trained with conversations fed in some fixed format (ChatML, Llama-2 differ). At inference you must use the <strong>same</strong> format for the model to recognize "turns" and "roles". Get the format wrong and the model is, at best, off-topic; at worst, completely out of character. The chat template is what packs messages correctly into "this model's envelope".</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A chat template is like an <strong>official envelope format</strong>: the same words get different headers and sign-offs at different institutions. ChatML wraps each message as <span class="mono">&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</span>, Llama-2 uses <span class="mono">[INST] ... [/INST]</span>. What the template does is pack your message into the envelope this model learned to recognize at training - wrong envelope, and the recipient cannot read it.
+</div>
+
+<h2>Why a template is needed</h2>
+<div class="flow">
+  <div class="node"><div class="nt">message list</div><div class="nd">[{system},{user}]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">apply_template</div><div class="nd">apply template</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">prompt string</div><div class="nd">"&lt;|im_start|&gt;..."</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">tokenize</div><div class="nd">L20</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
+</div>
+<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure, but rather a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
+<p>The assembled string, besides each message's body, inserts a pile of <strong>special markers</strong>: marking where each message starts, ends, and who spoke. These markers correspond to special tokens in the vocab (L20), and the model relies on them to recognize "it is the assistant's turn now", "the user is done with this turn".</p>
+<p>The order is: message list -&gt; apply the template into a string -&gt; hand to the vocab to tokenize -&gt; into the model. The template handles "structure to text", tokenize handles "text to tokens" - two relays, neither dispensable. This is also why this lesson follows the vocab (L20) closely - its product is exactly tokenize's input.</p>
+<p>One point to stress: what the template assembles is <strong>plain text</strong>; the model has no high-level notion of "role" or "turn", it merely learned that "seeing a marker like <span class="mono">&lt;|im_start|&gt;</span> means switch speakers". So-called chat ability is essentially the model having seen vast amounts of this format at training and learned to continue along it. The template just faithfully reproduces that format.</p>
+<p>Conversely, what if you skip the template and tokenize the user's words directly? The model would think it is the continuation of some ordinary text, not "a turn of dialogue asking for a reply". It might keep writing on the user's behalf rather than answer as the assistant - because without the markers delimiting role and turn, it has no idea "it is its turn to speak". The presence or absence of a template directly decides whether the model "completes" or "converses".</p>
+<p>Go one layer deeper: the model itself does not "understand" conversation; it is just an extremely powerful text continuer. It is the chat template together with the training data that <strong>disguises</strong> "continuation" as "conversation". The question-and-answer you see is, to the model, always "given the prefix, predict the next token". This realization matters - it helps you understand why many seemingly magical behaviors later are just continuation patterns at work.</p>
+<p>Precisely because conversation is encoded as plain text, many interesting things become possible: you can write a "system prompt" into the system message to give the model a persona; you can splice prior turns verbatim so it "remembers" context (really, the history is re-fed each time); you can even insert a fabricated assistant line to steer where it continues. These flexible tricks all rest on the fact that "a conversation is just carefully formatted text".</p>
+<p>One easily missed point: the template's special markers must be tokens that truly exist in this model's vocab (L20) for the model to recognize them. So template and vocab are a <strong>matched set</strong> - ChatML's <span class="mono">&lt;|im_start|&gt;</span> works because that model's vocab has a dedicated token for it. Force ChatML onto a model that does not know the marker and it gets split into a pile of byte fragments, backfiring.</p>
+
+<h2>The built-in template table</h2>
+<pre class="code"><span class="cm">// simplified from src/llama-chat.h</span>
+<span class="kw">enum</span> <span class="fn">llm_chat_template</span> {
+    LLM_CHAT_TEMPLATE_CHATML,
+    LLM_CHAT_TEMPLATE_LLAMA_2,
+    LLM_CHAT_TEMPLATE_LLAMA_3,
+    LLM_CHAT_TEMPLATE_GEMMA,
+    <span class="cm">/* ... fifty-odd of them ... */</span>
+    LLM_CHAT_TEMPLATE_UNKNOWN,
+};</pre>
+<p>llama.cpp ships a big batch of common models' templates, all listed in the enum <span class="mono">llm_chat_template</span> - CHATML, LLAMA_2 (plus several variants), LLAMA_3, GEMMA, MISTRAL, PHI, and so on, fifty-odd in total. Each corresponds to a concrete "markers + assembly rule".</p>
+<p>Why hardcode so many? Because each model family's chat format is fixed at its training time, and they vary widely. Building the common ones in means that, given a mainstream model, the engine can mostly <strong>auto-detect</strong> which format to use, working out of the box without manual specification.</p>
+<table class="t">
+  <tr><th>Template</th><th>Message markers</th></tr>
+  <tr><td>ChatML</td><td>&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</td></tr>
+  <tr><td>Llama-2</td><td>[INST] ... [/INST]</td></tr>
+  <tr><td>Llama-3</td><td>&lt;|start_header_id|&gt;role&lt;|end_header_id|&gt;</td></tr>
+  <tr><td>Gemma</td><td>&lt;start_of_turn&gt;role ... &lt;end_of_turn&gt;</td></tr>
+</table>
+<p>A few representatives make it clear: ChatML (used by many models) wraps messages with <span class="mono">&lt;|im_start|&gt;</span>/<span class="mono">&lt;|im_end|&gt;</span>; Llama-2 frames user instructions with <span class="mono">[INST]</span>/<span class="mono">[/INST]</span>; Gemma uses <span class="mono">&lt;start_of_turn&gt;</span>; Llama-3 marks roles with <span class="mono">&lt;|start_header_id|&gt;</span>. Different markers, same intent: delimit role and turn boundaries.</p>
+<p>This "gather every model's format into one enum table" should look familiar - the same idea as L15 gathering architectures into the <span class="mono">LLM_ARCH</span> table and L20 gathering tokenizer types into <span class="mono">vocab_type</span>: concentrate "the differences that vary" into data, and let generic code act by the table.</p>
+<p>You might ask: does the model not know which format to use, needing the engine to guess? Not necessarily. The GGUF file <strong>may</strong> carry a template field (many new models write one), but plenty of models omit it or write it loosely. So llama.cpp both supports reading the model's own template and builds in these dozens of common formats as a backstop - a two-pronged setup to spare the user manual fuss.</p>
+<p>These dozens of templates look many but are largely alike, just permutations of a few dimensions: "which symbol marks the role, which breaks the turn, where the system message goes". Encoding them one by one into an enum is an "engineering effort for generality" trade-off: a bit more work to write, in exchange for "one engine handling mainstream models". This "rather write more ourselves than burden the user" attitude runs through much of llama.cpp's design.</p>
+<p>By the way, the enum's <span class="mono">LLM_CHAT_TEMPLATE_UNKNOWN</span> sentinel has a purpose too: when detection matches neither a name nor a feature, it lands here. The engine then signals "template not recognized", prompting the user to specify one manually rather than silently using a wrong format. Leaving a clear exit for "cannot recognize" is a common robust-design technique.</p>
+<p>An often-overlooked detail is how the system message is handled. Templates diverge most on where the "system prompt" goes and how it is marked: some, like ChatML, list a separate system message; some (like certain Llama-2 variants) fold it into the first user message; some support no standalone system at all. So the same system prompt can land in very different places under different templates - which is also why, switching models, changing the prompt text alone is not enough; the template must place it correctly for you.</p>
+
+<h2>Detection and application</h2>
+<pre class="code"><span class="cm"># pseudocode: apply a chat template</span>
+tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span class="cm"># by name first, then guess by content</span>
+dest = <span class="st">""</span>
+<span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
+<span class="cm"># add_ass: append the assistant start marker so the model writes the reply</span></pre>
+<p>With this table, two things remain: <strong>recognize</strong> which template to use, and <strong>apply</strong> it to assemble the messages.</p>
+<p>Recognizing uses <span class="mono">llm_chat_detect_template</span>: it first matches by name exactly (the model's GGUF often carries a template name/string), and failing that, looks for feature substrings like <span class="mono">&lt;|im_start|&gt;</span> or <span class="mono">[INST]</span> in the template body and guesses by feature. Applying uses <span class="mono">llm_chat_apply_template</span>: give it the template enum, the message list, and an output string, and it assembles per that format.</p>
+<p>One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.</p>
+<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt.</p>
+<p>Detection actually hides subtlety. Ideally the GGUF states the template name and a lookup settles it; but in reality it often gives only a template <strong>body</strong> (Jinja text) with no name. Then one can only infer from "whether certain feature markers appear in the body" - see <span class="mono">[INST]</span> and guess Llama-2, see <span class="mono">&lt;|im_start|&gt;</span> and guess ChatML. This feature-based heuristic is not 100% reliable but covers the vast majority.</p>
+<p>Application is also fussier than it looks. For the same format, the system message may go at the very front, be merged into the first user message, or not be supported at all; in multi-turn dialogue, whether history repeats the markers and how the last turn closes - each template has its own rules. <span class="mono">apply_template</span> handles these details per template type, so you just hand in a message list and it returns a precisely formatted prompt.</p>
+<p>A practical tip: when debugging chat behavior, print the string <span class="mono">apply_template</span> produces <strong>verbatim</strong> and look at it. Many "the model won't answer properly" issues are rooted in a wrong assembled prompt - a missing marker, the system placed wrong, add_ass forgotten. Seeing exactly what is fed in often locates the problem faster than repeatedly tuning parameters.</p>
+
+<h2>Two paths: built-in vs Jinja</h2>
+<div class="cols">
+  <div class="col"><h4>Built-in (llama-chat.cpp)</h4><p>fixed enum, pure string assembly, zero deps, fast; recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path.</p></div>
+  <div class="col"><h4>Jinja (common/jinja)</h4><p>renders <strong>any</strong> template: the model's own Jinja chat_template runs as-is, most faithful. <span class="mono">common/chat.cpp</span> wraps it and even supports tool calls.</p></div>
+</div>
+<p>The built-in templates cover only "the known models". What about a brand-new model bringing its own unique template? That leads to the second path: <strong>Jinja</strong>.</p>
+<p>The built-in path (<span class="mono">src/llama-chat.cpp</span>) is pure C++ string assembly - fixed enum, zero deps, fast, but recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path - note it <strong>only takes a template string, no model parameter</strong> (the old model-taking overload is removed), and its comment plainly says "no jinja, only the predefined list".</p>
+<p>The Jinja path (vendored in <span class="mono">common/jinja/</span>) can render <strong>any</strong> template: the chat_template a model carries in GGUF (often a piece of Jinja text) runs as-is, most faithful. The upper layer <span class="mono">common/chat.cpp</span>'s <span class="mono">common_chat_templates</span> wraps it and also supports tool calls, output parsing, and other advanced tricks.</p>
+<p>The two paths divide cleanly: built-in for "known models, fast and steady", Jinja for "any model, faithful". For the hand-off, whichever path, the assembled prompt still goes through L20's tokenize and into L17's decode - the chat template is merely the leg that turns "messages" into "a string".</p>
+<p>Why not just use Jinja for <strong>everything</strong> and skip maintaining dozens of built-in templates? Because Jinja is a full template language, requiring an interpreter and executing arbitrary logic, with non-trivial cost and complexity. For common models whose format is long fixed, a few lines of C++ assembling directly is faster, steadier, and free of the security concerns of running arbitrary templates. So the built-in "fast path" has irreplaceable value.</p>
+<p>Conversely, why is Jinja indispensable? Because models keep appearing, and there are always new formats absent from the built-in table, or templates with complex conditional logic ("assemble this way if there is a system message, that way if not", "add a section when tool definitions are present"). A fixed enum simply cannot express these; only a real template engine can execute them. Each path covers the other's weakness; together they are both broad and fast.</p>
+<p>Zoom out: the chat-template layer essentially bridges the gap between "the human view of conversation" and "the model's view of text". People see dialogue as a back-and-forth structure; the model knows only one continuous token stream. The template is the translation protocol between these worldviews - and that it largely manages with "one enum table + an optional Jinja engine" shows how powerful settling complexity into data really is.</p>
+<p>Also worth mentioning is the advanced use of tool calling (function calling). When you want the model to call an external tool, the tool definitions, the call format, and the splicing of returns must all be packed into the prompt per a specific convention - far beyond the built-in template's "stitch a few messages", and exactly what the common layer does by combining Jinja with grammar constraints (L23). So chat templates are not only "chat"; they are the foundation of more complex "structured interaction" too.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What does the add_ass (add assistant) switch actually do? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>It decides whether to append, at the <strong>end</strong> of the assembled prompt, the assistant role's start marker (like ChatML's <span class="mono">&lt;|im_start|&gt;assistant</span>) with no content. It is like writing "Assistant:" on the page and handing over the pen - the model naturally continues writing the reply from that spot.</p>
+    <p>True is the norm for <strong>chat</strong>: if you want the model to respond as the assistant, you must mark the start of "its turn to speak". False is for <strong>completion</strong>: when you only want the model to continue some existing text, with no switch to the assistant identity. One switch separates "converse" from "continue".</p>
+    <p>This also explains a common phenomenon: forget add_ass and the model sometimes "talks to itself", adding a few more lines on the user's behalf instead of answering directly - because the prompt stopped at the user's turn, with no "your turn" signal. Understanding this switch saves much "why won't the model answer properly" confusion.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why does the C API apply_template no longer take a model parameter? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because applying a template needs only "<strong>a template string + a message list</strong>", nothing to do with the whole model. The template string can come from GGUF metadata or be given by the user directly; dropping model from the parameters makes the function's job more single-purpose, easier to test, and more flexible.</p>
+    <p>This is a classic <strong>decoupling</strong> move, the same idea as L20 renaming <span class="mono">llama_token_bos</span> etc. to <span class="mono">llama_vocab_*</span>: let each API depend only on what it truly needs. The old overload taking <span class="mono">llama_model *</span> is removed, so do not call it by that signature when reading old code.</p>
+    <p>The comment also makes plain: this C API <strong>does not use jinja</strong>, only the built-in predefined template list. In other words, it is the "fast and specialized" path; for jinja's full flexibility you go to the <span class="mono">common/chat.cpp</span> layer. The API draws its boundary clearly.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Built-in vs Jinja, when to use which? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>In principle: when the model <strong>carries its own chat_template</strong> in GGUF (a piece of Jinja text), or you need advanced features like tool calls, go Jinja (<span class="mono">common/chat.cpp</span>'s <span class="mono">common_chat_templates</span> with <span class="mono">use_jinja</span>), most faithful to the model author's intent.</p>
+    <p>Conversely, when the model is a <strong>known mainstream one</strong>, or you want zero deps, fast and steady, the built-in enum suffices - it covers dozens of common formats, with no extra cost of pure C++ assembly. Command-line tools and embedded scenarios often pick this path.</p>
+    <p>The two are not opposed but a <strong>layered coverage</strong>: "known models" handled fast by built-in, "any model" backstopped by Jinja. This "common takes the fast path, rare takes the full path" is the same pragmatic wisdom as L20's vocab "keep high-frequency pieces directly, rare chars via byte fallback".</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>A chat template turns a role-tagged message list -&gt; a prompt string in the model's agreed format, then handed to L20 tokenize.</li>
+    <li>Built-in template enum <span class="mono">llm_chat_template</span> (fifty-odd); <span class="mono">llm_chat_detect_template</span> (by name, then feature substring) + <span class="mono">llm_chat_apply_template</span> (render, <span class="mono">add_ass</span> controls whether to hand over the mic).</li>
+    <li><span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> + <span class="mono">content</span>.</li>
+    <li>The C API <span class="mono">llama_chat_apply_template</span> <strong>takes only a template string, no model parameter</strong>, and goes built-in only, not jinja.</li>
+    <li>Two paths: built-in (<span class="mono">llama-chat.cpp</span>, fast / known models) vs Jinja (<span class="mono">common/jinja</span> + <span class="mono">common/chat.cpp</span>, any model / tool calls).</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The chat template gathers "<strong>a model's conversational dialect</strong>" into a table - the same messages, a different model, a different envelope, with the engine trunk none the wiser. It is the same wisdom as L15's "table-driven architecture" and L20's "table-driven tokenization": settle "the part each model differs in" into data/templates and let generic code act by it. And the built-in vs Jinja two paths are the classic "common takes the fast path, rare takes the full path" layering. Understand it, and you see why one llama.cpp can fluently speak the "tongue" of dozens of models.
+</div>
+""",
+}
+
+LESSON_23 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+到这里，模型已经能聊天了（L20-L22）。但很多真实场景要的不只是"聊得通"，而是<strong>格式严格正确</strong>：调一个 API 要合法的 JSON、填一张表要规定的字段、抽取信息要固定的结构。模型靠概率生成，难免偶尔跑偏——这一课讲的 <strong>GBNF 语法约束</strong>，就是给生成套上一副"护栏"，让它<strong>不可能</strong>产出格式非法的东西。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">它的思路很巧：不是生成完再检查、不合格就重来（那样既慢又不保险），而是在<strong>每一步采样时</strong>就把"此刻语法不允许的 token"统统划掉，模型只能在合法的路上往前走。于是无论模型多想跑偏，它都迈不出语法的边界——结果<strong>永远合法</strong>，一次成型。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  语法约束像<strong>表单上的下拉框</strong>：你不能随便填，只能从给定选项里挑。grammar 在每一步采样前，把"此刻不该出现的 token"全部置灰（设成负无穷），模型只能从剩下的合法选项里选一个。一步一个下拉框，连起来就保证整段输出严格符合你定义的格式。
+</div>
+
+<h2>为什么需要语法</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">所有候选</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">grammar.apply</div><div class="nd">非法 -&gt; -inf</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">采样 L21</div><div class="nd">只从合法里选</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">合法 token</div><div class="nd">绝不越界</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">grammar.accept</div><div class="nd">推进语法</div></div>
+</div>
+<p>先看清它在采样管线里的位置。L21 讲过，采样是在一排 logits 上裁剪塑形、最后选一个 token。grammar 就是往这条管线里插一个<strong>掩码</strong>环节：在选之前，先把所有"此刻语法不允许"的候选的 logit 砸成负无穷，于是它们的概率变成 0，绝无可能被选中。</p>
+<p>选定一个合法 token 之后，还有一步：<strong>推进</strong>语法状态。语法就像一台状态机，刚才放行的那个 token 让它往前走了一格，下一步该允许哪些 token 也随之更新。一掩一进，逐 token 地把整段输出牢牢锁在语法的轨道上。</p>
+<p>为什么非得在 token 级别做、不能事后检查？设想生成一段 JSON，写到一半冒出个非法字符——事后检查只能整段作废重来，又慢又可能反复失败。token 级掩码则保证<strong>每一步都合法</strong>，根本不给"写错"的机会，一次就成。这是"约束前置"对"事后补救"的彻底胜利。</p>
+<p>还有个微妙的好处：因为非法 token 被设成负无穷、概率归零，剩下的合法 token 会重新归一化概率。也就是说，约束不仅"禁止非法"，还让模型在<strong>合法范围内</strong>按它原本的偏好挑——既守了规矩，又尽量保留了模型的判断。强约束和模型智能，在这里并不冲突。</p>
+<p>这一步发生在词表的 token 空间里（L20）：grammar 要判断的是"这个 token 接上去，整段文本还合不合语法"。所以它和词表、采样器是紧密咬合的——语法用词表的 token 说话，用采样器的接口干活。理解了这层关系，你就明白为什么这一课紧跟在采样（L21）后面。</p>
+<p>换个角度感受它的价值。没有语法约束时，让模型输出 JSON，你只能在 prompt 里恳求"请只返回合法 JSON、不要多余文字"，然后祈祷它听话——大模型多数时候听，但偶尔会画蛇添足加段解释、漏个引号、把数字写成中文。这种"绝大多数对、偶尔翻车"在生产环境里恰恰最致命，因为你得为那 1% 的翻车写一堆容错。</p>
+<p>语法约束把这件事从"祈祷"变成"保证"。一旦套上 JSON 文法，模型<strong>物理上</strong>就吐不出非法的东西——该是引号的位置只能是引号，该是数字的地方只能是数字。那 1% 的翻车被从根上消灭了，下游代码可以放心地直接解析，不必再写一层防御。这种确定性，正是把大模型接进严肃系统的前提。</p>
+<p>你可能担心：约束这么死，会不会把模型"框傻"了？不会。语法只规定<strong>结构</strong>（哪儿能放什么），不规定<strong>内容</strong>（具体放什么值）。在合法的位置上，模型依然按自己的理解去填——该填用户名就填用户名、该填年龄就填合理的数。结构由你定死，内容仍由模型的智能决定，两者各司其职。</p>
+
+<h2>GBNF 是什么</h2>
+<pre class="code"><span class="cm"># 简化自 grammars/json.gbnf</span>
+root   ::= object
+object ::= <span class="st">"{"</span> ws ( string <span class="st">":"</span> ws value )? <span class="st">"}"</span>
+value  ::= object | string | number | <span class="st">"true"</span> | <span class="st">"false"</span>
+string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span class="st">"\""</span></pre>
+<p>那"语法"本身怎么写？用 <strong>GBNF</strong>（GGML BNF），一种类 BNF 的文法描述。它的核心是一条条<strong>规则</strong>：用 <span class="mono">::=</span> 定义"某个名字可以展开成什么"，用 <span class="mono">|</span> 表示"多选一"，用 <span class="mono">[...]</span> 描述一类字符，再配上重复、分组等记号。</p>
+<p>上面这段（简化自仓库里的 <span class="mono">grammars/json.gbnf</span>）描述了一个极简 JSON：入口是 <span class="mono">root</span>，它展开成一个 <span class="mono">object</span>；object 是花括号里包着键值对；value 可以是 object、字符串、数字或字面量。规则可以<strong>递归</strong>（object 里又能套 value、value 又能是 object），于是有限的几条规则就能描述无限层嵌套的结构。</p>
+<table class="t">
+  <tr><th>语法</th><th>含义</th></tr>
+  <tr><td>::=</td><td>定义一条规则</td></tr>
+  <tr><td>|</td><td>多选一（备选）</td></tr>
+  <tr><td>[...]</td><td>字符类（如 [a-z]）</td></tr>
+  <tr><td>[^...]</td><td>取反字符类</td></tr>
+  <tr><td>* + ?</td><td>重复 0+ / 1+ / 可选</td></tr>
+  <tr><td>( )</td><td>分组</td></tr>
+  <tr><td>root</td><td>入口规则</td></tr>
+</table>
+<p>这张表列了 GBNF 最常用的记号。它们组合起来，几乎能描述任何"结构化"的输出格式：JSON、特定语法的代码、固定模板的回答……仓库的 <span class="mono">grammars/</span> 目录里就放着 JSON、国际象棋着法等现成例子，可以直接拿来用或改。</p>
+<p>入口规则约定叫 <span class="mono">root</span>——文法从这里开始展开，就像程序从 main 开始。读一份 GBNF，最好的办法就是从 root 出发，顺着 <span class="mono">::=</span> 一层层往下看每个名字能变成什么，很快就能在脑子里把它"跑"一遍。</p>
+<p>BNF 这套记法其实历史悠久，是描述编程语言文法的经典工具；GBNF 是它的一个轻量方言，专为"约束生成"裁剪定制。如果你见过编程语言的文法定义，会对这套 <span class="mono">::=</span> 规则一见如故；没见过也不要紧，把它当成"一套描述合法字符串长什么样的积木"就行。</p>
+<p>写 GBNF 有个实用心法：<strong>从大到小、逐层拆解</strong>。先想清最外层的结构（比如"一个对象"），写成 root；再把它依赖的部分（键、值、空白）各写一条规则；遇到"可以是好几种之一"的就用 <span class="mono">|</span>，遇到"重复若干次"的就用 <span class="mono">*</span>/<span class="mono">+</span>。一层层拆到最底层的字符类，一份文法就成了。仓库里的现成例子是最好的模板。</p>
+
+<h2>语法怎么约束采样</h2>
+<pre class="code"><span class="cm"># 伪代码: 掩码 + 推进</span>
+<span class="cm"># 采样前: 掩掉非法候选 (llama_grammar_apply_impl)</span>
+<span class="kw">for</span> cand <span class="kw">in</span> cur_p:
+    <span class="kw">if</span> <span class="kw">not</span> grammar_allows(stacks, cand.id):
+        cand.logit = -INFINITY        <span class="cm"># 非法 -&gt; 永不会被选中</span>
+<span class="cm"># 选定 token 后: 推进语法状态 (llama_grammar_accept_impl)</span>
+grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># 沿规则栈往前走一步</span></pre>
+<p>把 GBNF 文法变成"采样时的掩码"，靠两个内部函数：<span class="mono">llama_grammar_apply_impl</span>（掩码）和 <span class="mono">llama_grammar_accept_impl</span>（推进）。</p>
+<p><span class="mono">apply</span> 这一步：它拿着语法当前的状态（一组<strong>规则栈</strong> <span class="mono">stacks</span>，记着"现在展开到哪、接下来合法的是什么"），逐个检查候选 token——能接上的留着，接不上的把 logit 设成负无穷。EOG（结束符）在语法还没走完时也会被掩掉，免得模型半途而废。</p>
+<p><span class="mono">accept</span> 这一步：采样真正选定一个 token 后，把它喂回语法，让规则栈<strong>往前推进</strong>到新状态。下一轮 apply 就基于这个新状态再算一遍合法集。两步交替，像沿着文法的轨道一步步走，每一步都只踩在合法的枕木上。</p>
+<p>内部还细致处理了 <strong>UTF-8</strong>：一个字符可能跨多个字节 token（L20 的字节回退），语法用一个 <span class="mono">partial_utf8</span> 缓冲来拼接半个字符，等拼完整再判断合不合规。这些细节你不用记，但知道"它考虑到了多字节字符"就够了——正是这种周到，让约束在真实多语言文本上也站得住。</p>
+<p>这里值得停下来体会"<strong>状态机</strong>"这个比喻。一份文法被加载后，运行时维护的不是"整段文本"，而是"当前走到文法的哪个位置、接下来允许哪些字符"。每接受一个 token，这个位置就往前挪；它就像一个在文法图上移动的光标，光标所在处决定了下一步的合法集。</p>
+<p>正因为状态是逐步推进的，<strong>同一个 token 在不同位置合不合法是不同的</strong>。比如在 JSON 里，刚写完 <span class="mono">{</span> 时只允许引号（开始一个键）或 <span class="mono">}</span>（空对象），而写完一个完整键值对后又只允许逗号或 <span class="mono">}</span>。grammar 每一步都根据当前状态算出这个"此刻合法集"，再据此掩码。约束不是一成不变的，而是<strong>随上下文动态变化</strong>的。</p>
+<p>有人会问：每步都遍历几万个候选去判断合不合法，不会很慢吗？实现上做了不少优化——把文法预编译成高效结构、对候选按规则栈快速筛、缓存中间结果等等。多数情况下这点开销相对模型的一次前向（L17）几乎可忽略。所以你尽管放心用语法约束，它换来的可靠性，远大于那一点点代价。</p>
+<p>举个落地的例子：很多"让大模型当后端"的应用，都靠语法约束保证它返回能被程序直接吃下的 JSON。你定义好返回结构的文法、挂上 grammar 采样器，模型这一头就成了一个"永远输出合法结构"的可靠组件。没有它，你得在模型和程序之间塞一层解析、纠错、重试的胶水；有了它，那层胶水基本可以省掉。这就是约束带来的实打实的工程价值。</p>
+
+<h2>元素类型与作为采样器</h2>
+<div class="cellgroup">
+  <div class="cg-cap"><b>llama_gretype</b>：GBNF 规则被编译成的底层元素类型</div>
+  <div class="cells"><span class="lab">类型</span><span class="cell">CHAR 字面</span><span class="cell">CHAR_RNG_UPPER 范围</span><span class="cell">CHAR_NOT 取反</span><span class="cell">RULE_REF 引用</span><span class="cell">ALT 备选</span><span class="cell">END 收尾</span></div>
+</div>
+<p>文法在加载时会被<strong>编译</strong>成一串底层元素，类型由 <span class="mono">enum llama_gretype</span> 定义。你写的每条 <span class="mono">::=</span> 规则，最终都被翻译成这样一串元素，供运行时高效匹配。</p>
+<p>这些类型就是 GBNF 记号的"机器码"：<span class="mono">CHAR</span> 是一个字面字符，<span class="mono">CHAR_RNG_UPPER</span> 配合表示一个范围（如 a-z），<span class="mono">CHAR_NOT</span> 是取反类，<span class="mono">RULE_REF</span> 是"引用另一条规则"，<span class="mono">ALT</span> 是备选分隔，<span class="mono">END</span> 收尾。把人写的文法降到这一层，是为了让运行时能快速判断"下一个字符合不合法"。</p>
+<p>那 grammar 怎么接进采样？通过一个<strong>采样器</strong>：<span class="mono">llama_sampler_init_grammar(vocab, 文法串, root)</span> 返回的就是 L21 那套 <span class="mono">llama_sampler</span>——它的 <span class="mono">apply</span> 调掩码、<span class="mono">accept</span> 调推进。换句话说，grammar 本质上就是<strong>一个特殊的采样器</strong>，完美复用了 L21 的接口。</p>
+<p>不过它通常<strong>不混进主采样链</strong>，而是作为独立对象，按一个 <span class="mono">grammar_first</span> 标志决定在链前还是链后单独施加。这是因为约束和"调温度/裁候选"那些塑形操作性质不同，需要灵活安排先后。还要留意：惰性变体 <span class="mono">llama_sampler_init_grammar_lazy</span> 已弃用，改用 <span class="mono">llama_sampler_init_grammar_lazy_patterns</span>。</p>
+<p>为什么要先把人写的文法<strong>编译</strong>成这串底层元素，而不是直接拿原文匹配？因为运行时每生成一个 token 都要判一次合法性，必须快。把文法预先拆成 <span class="mono">CHAR</span>/<span class="mono">RULE_REF</span> 这些规整的元素，运行时就能用简单高效的方式推进和匹配，而不必反复解析原始的文法文本。这是"编译期多花点、运行期省大头"的经典权衡。</p>
+<p>再品一下 grammar"就是个采样器"的妙处。L21 把采样设计成一串可插拔的小变换，当时你可能没料到，"语法约束"这种听起来完全不同的东西，居然能<strong>原封不动</strong>地套进同一个 <span class="mono">apply</span>/<span class="mono">accept</span> 接口。这就是好接口的价值：它预留的扩展点，能容纳设计时根本没想到的新玩法。</p>
+<p>最后把这一课放回整张图：从 L20 的词表、L21 的采样、L22 的对话模板，到这一课的语法约束，你已经集齐了"控制模型输出"的整套工具——控制<strong>怎么分词</strong>、<strong>怎么选词</strong>、<strong>怎么组织对话</strong>、<strong>怎么约束结构</strong>。下一课 L24 再讲 LoRA，就连"<strong>怎么微调模型行为</strong>"也补上了。第四部分的拼图，只差最后一块。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> grammar 和采样器（L21）到底是什么关系？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>grammar 本质上<strong>就是一个采样器</strong>。<span class="mono">llama_sampler_init_grammar</span> 返回的是 L21 那个 <span class="mono">llama_sampler</span> 结构：它的 <span class="mono">apply</span> 实现成"掩掉非法 token"，<span class="mono">accept</span> 实现成"推进语法状态"。所以它完美套进了 L21 那套统一接口，引擎按一样的方式调度它。</p>
+    <p>区别在于它<strong>有状态、且约束力强</strong>。普通采样器（top-k/温度）只是塑形概率，grammar 却能把整批 token 直接判死刑。也因为它有自己的语法状态要维护（走到哪一步了），不像无状态的 top-k 那么随意——这也是它常被单独管理、而非混进主链的原因。</p>
+    <p>这种"用同一个接口容纳天差地别的实现"，正是 L21 责任链设计的威力：温度、惩罚、语法约束长相一致，却能做截然不同的事。读懂了这点，你就明白为什么往采样里加一种全新的约束，几乎不用动引擎主干。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 惰性 / 触发语法（lazy）是干嘛的？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>有时你<strong>不想一上来就约束</strong>，而是等某个信号出现后才开始。最典型的是工具调用：让模型先自由地说话，一旦它说出某个触发词（比如表示"我要调用工具了"的标记），再切到严格的 JSON 约束，逼它把参数写成合法格式。</p>
+    <p>这就是<strong>惰性语法</strong>：<span class="mono">llama_grammar</span> 里的 <span class="mono">lazy</span>/<span class="mono">awaiting_trigger</span>/<span class="mono">trigger_patterns</span> 字段实现这点——约束先"待命"，把输出缓冲着，直到匹配上触发条件才真正生效、开始掩码。对应的采样器是 <span class="mono">llama_sampler_init_grammar_lazy_patterns</span>。</p>
+    <p>为什么有用？因为现实任务常是"<strong>先自由、后严格</strong>"：模型先用自然语言思考/回应，需要结构化输出时才上约束。惰性语法让你不必从第一个 token 就锁死格式，既保留了模型的灵活，又在关键处保证了结构。这是把"约束"和"自由"按需切换的巧妙设计。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么 token 级掩码胜过"事后校验"？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>事后校验是"生成完整段、再用正则/解析器检查合不合格，不合格就重来"。问题很明显：一是<strong>慢</strong>，一次不合格就得整段重生成，可能反复失败；二是<strong>不保证收敛</strong>，模型可能怎么试都凑不出合法的，陷入死循环。</p>
+    <p>token 级掩码把关口前移到<strong>每一步</strong>：每选一个 token 都保证此刻合法，于是生成出来的<strong>必然</strong>是合法的，一次成型，无需重试。它用"每步一点点约束"换来了"整体永远正确"，既快又稳。</p>
+    <p>这背后是个通用的工程智慧：<strong>把错误挡在产生之前，远胜于产生之后再补救</strong>。你在 L14 见过加载期的一致性检查（早查早安心）、在编译型语言里见过类型检查，都是同一个道理。grammar 把这套思路用在了生成上。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>GBNF 语法约束 = 在每步采样时把<strong>不合语法的 token 掩成负无穷</strong>，模型只能选合法的，输出<strong>必然合法</strong>。</li>
+    <li>GBNF 规则：<span class="mono">::=</span> 定义、<span class="mono">|</span> 备选、<span class="mono">[...]</span> 字符类、<span class="mono">* + ?</span> 重复、<span class="mono">root</span> 入口；可递归。</li>
+    <li>两个动作：<span class="mono">apply</span>（掩码非法候选）+ <span class="mono">accept</span>（推进规则栈）；文法编译成 <span class="mono">enum llama_gretype</span> 元素。</li>
+    <li>接入采样：<span class="mono">llama_sampler_init_grammar</span>（grammar 就是个特殊采样器），通常按 <span class="mono">grammar_first</span> 在主链外施加；惰性用 <span class="mono">..._grammar_lazy_patterns</span>（旧 <span class="mono">_grammar_lazy</span> 弃用）。</li>
+    <li>token 级掩码 &gt; 事后校验：每步都合法、一次成型，不会生成到一半才发现非法。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  语法约束把"<strong>结构正确</strong>"从"事后祈祷"变成"<strong>生成时保证</strong>"——在 token 级别就堵死所有非法路径。它把"约束"漂亮地装进了 L21 的采样器接口：grammar 不过是又一个 <span class="mono">apply</span>/<span class="mono">accept</span> 的实现，却让"自由生成"和"严格格式"在同一套机制里和谐共处。这正是 llama.cpp 让大模型<strong>可靠输出结构化数据</strong>的钥匙——也是把它接进真实软件系统的关键一步。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+By now the model can chat (L20-L22). But many real scenarios want more than "talks fine" - they want <strong>strictly correct format</strong>: calling an API needs valid JSON, filling a form needs the required fields, extracting info needs a fixed structure. A model generates by probability and inevitably wanders off sometimes - this lesson's <strong>GBNF grammar constraint</strong> puts a "guardrail" on generation, making it <strong>impossible</strong> to produce format-invalid output.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Its idea is clever: not generate-then-check-and-retry-if-bad (slow and unreliable), but at <strong>each sampling step</strong> strike out every "token the grammar disallows right now", so the model can only move forward on the legal path. So however much the model wants to wander, it cannot step past the grammar's boundary - the result is <strong>always valid</strong>, right the first time.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A grammar constraint is like a <strong>dropdown on a form</strong>: you cannot type freely, only pick from the given options. Before each sampling step, the grammar greys out (sets to negative infinity) "the tokens that should not appear right now", so the model can only pick one of the remaining legal options. One dropdown per step, strung together, guarantees the whole output strictly matches the format you defined.
+</div>
+
+<h2>Why a grammar is needed</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">all candidates</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">grammar.apply</div><div class="nd">illegal -&gt; -inf</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">sampling L21</div><div class="nd">pick from legal only</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">legal token</div><div class="nd">never out of bounds</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">grammar.accept</div><div class="nd">advance grammar</div></div>
+</div>
+<p>First see where it sits in the sampling pipeline. L21 covered that sampling prunes and shapes a row of logits and finally picks one token. The grammar inserts a <strong>mask</strong> stage into this pipeline: before picking, slam to negative infinity the logit of every candidate "the grammar disallows right now", so their probability becomes 0, impossible to be chosen.</p>
+<p>After a legal token is picked, one more step: <strong>advance</strong> the grammar state. The grammar is like a state machine; the token just allowed moved it one notch forward, and which tokens are legal next updates accordingly. Mask then advance, token by token, locks the whole output firmly onto the grammar's track.</p>
+<p>Why must it be done at the token level, not checked afterward? Imagine generating a JSON and an illegal character pops up halfway - an after-the-fact check can only scrap the whole thing and retry, slow and possibly failing repeatedly. Token-level masking guarantees <strong>every step is legal</strong>, never giving "write it wrong" a chance, done in one go. This is the decisive win of "constrain up front" over "patch afterward".</p>
+<p>There is a subtle bonus too: because illegal tokens are set to negative infinity with probability zeroed, the remaining legal tokens re-normalize their probabilities. That is, the constraint not only "forbids the illegal" but lets the model pick <strong>within the legal range</strong> by its own preference - keeping the rules while preserving the model's judgment as much as possible. Strong constraint and model intelligence do not conflict here.</p>
+<p>This step happens in the vocab's token space (L20): the grammar must judge "with this token appended, is the whole text still legal". So it meshes tightly with the vocab and the sampler - the grammar speaks in the vocab's tokens and works through the sampler's interface. Understand this relationship and you see why this lesson follows sampling (L21) closely.</p>
+<p>Feel its value from another angle. Without a grammar constraint, to get JSON out of the model you can only beg in the prompt "please return only valid JSON, no extra text" and pray it obeys - a large model mostly does, but occasionally gilds the lily with an explanation, drops a quote, or writes a number as words. This "mostly right, occasionally derailed" is precisely the most lethal in production, because you must write a pile of error-handling for that 1% derailment.</p>
+<p>A grammar constraint turns this from "praying" into "guaranteeing". Once a JSON grammar is on, the model <strong>physically</strong> cannot emit anything illegal - where a quote belongs only a quote can go, where a number belongs only a number can. That 1% derailment is eliminated at the root, and downstream code can parse directly without a defensive layer. This certainty is the prerequisite for wiring a large model into serious systems.</p>
+<p>You might worry: with such a rigid constraint, does it "frame the model into stupidity"? No. A grammar dictates only <strong>structure</strong> (what can go where), not <strong>content</strong> (the actual values). At a legal position, the model still fills by its own understanding - a username where a username goes, a sensible number where an age goes. You fix the structure, the model's intelligence still decides the content, each to its job.</p>
+
+<h2>What GBNF is</h2>
+<pre class="code"><span class="cm"># simplified from grammars/json.gbnf</span>
+root   ::= object
+object ::= <span class="st">"{"</span> ws ( string <span class="st">":"</span> ws value )? <span class="st">"}"</span>
+value  ::= object | string | number | <span class="st">"true"</span> | <span class="st">"false"</span>
+string ::= <span class="st">"\""</span> [^<span class="st">"</span>]* <span class="st">"\""</span></pre>
+<p>So how is "the grammar" itself written? In <strong>GBNF</strong> (GGML BNF), a BNF-like grammar description. Its core is <strong>rules</strong>: <span class="mono">::=</span> defines "what a name can expand into", <span class="mono">|</span> means "one of several", <span class="mono">[...]</span> describes a class of characters, plus repetition, grouping and other notations.</p>
+<p>The snippet above (simplified from the repo's <span class="mono">grammars/json.gbnf</span>) describes a minimal JSON: the entry is <span class="mono">root</span>, expanding into an <span class="mono">object</span>; an object is key-value pairs inside braces; a value can be an object, string, number or literal. Rules can be <strong>recursive</strong> (an object can nest a value, a value can be an object), so a handful of rules describe infinitely nested structures.</p>
+<table class="t">
+  <tr><th>Syntax</th><th>Meaning</th></tr>
+  <tr><td>::=</td><td>define a rule</td></tr>
+  <tr><td>|</td><td>one of several (alternation)</td></tr>
+  <tr><td>[...]</td><td>character class (e.g. [a-z])</td></tr>
+  <tr><td>[^...]</td><td>negated character class</td></tr>
+  <tr><td>* + ?</td><td>repeat 0+ / 1+ / optional</td></tr>
+  <tr><td>( )</td><td>grouping</td></tr>
+  <tr><td>root</td><td>entry rule</td></tr>
+</table>
+<p>This table lists GBNF's most common notations. Combined, they can describe almost any "structured" output format: JSON, code in a particular syntax, fixed-template answers... The repo's <span class="mono">grammars/</span> directory ships ready examples like JSON and chess moves, to use directly or adapt.</p>
+<p>The entry rule is conventionally called <span class="mono">root</span> - the grammar starts expanding here, like a program starts at main. The best way to read a GBNF is to start from root and follow <span class="mono">::=</span> down level by level, seeing what each name becomes; you can quickly "run" it in your head.</p>
+<p>BNF as a notation is in fact long-standing, a classic tool for describing programming-language grammars; GBNF is a lightweight dialect of it, trimmed and tailored for "constraining generation". If you have seen a programming language's grammar definition, you will take to these <span class="mono">::=</span> rules at first sight; if not, no matter - just treat it as "a set of blocks describing what a legal string looks like".</p>
+<p>There is a practical knack to writing GBNF: <strong>top-down, decompose layer by layer</strong>. First think out the outermost structure (say "an object"), written as root; then write a rule for each part it depends on (key, value, whitespace); use <span class="mono">|</span> for "one of several", <span class="mono">*</span>/<span class="mono">+</span> for "repeat some times". Decompose down to the bottom character classes and a grammar is done. The ready examples in the repo are the best templates.</p>
+
+<h2>How the grammar constrains sampling</h2>
+<pre class="code"><span class="cm"># pseudocode: mask + advance</span>
+<span class="cm"># before sampling: mask out illegal candidates (llama_grammar_apply_impl)</span>
+<span class="kw">for</span> cand <span class="kw">in</span> cur_p:
+    <span class="kw">if</span> <span class="kw">not</span> grammar_allows(stacks, cand.id):
+        cand.logit = -INFINITY        <span class="cm"># illegal -&gt; can never be chosen</span>
+<span class="cm"># after a token is chosen: advance the grammar state (llama_grammar_accept_impl)</span>
+grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm"># step forward along the rule stacks</span></pre>
+<p>Turning a GBNF grammar into "a mask at sampling time" relies on two internal functions: <span class="mono">llama_grammar_apply_impl</span> (mask) and <span class="mono">llama_grammar_accept_impl</span> (advance).</p>
+<p>The <span class="mono">apply</span> step: holding the grammar's current state (a set of <strong>rule stacks</strong>, the <span class="mono">stacks</span> field, recording "where the expansion is now, what is legal next"), it checks each candidate token - keep those that fit, set those that do not to negative infinity. EOG (the terminator) is also masked while the grammar is not yet complete, lest the model quit halfway.</p>
+<p>The <span class="mono">accept</span> step: once sampling actually picks a token, feed it back to the grammar so the rule stacks <strong>advance</strong> to a new state. The next apply then recomputes the legal set from this new state. The two alternate, like walking along the grammar's track, each step stepping only on a legal sleeper.</p>
+<p>Internally it also carefully handles <strong>UTF-8</strong>: one character may span several byte tokens (L20's byte fallback), so the grammar uses a <span class="mono">partial_utf8</span> buffer to stitch a half character and judges legality once it is whole. You need not memorize these details, but knowing "it accounts for multi-byte characters" is enough - this thoroughness is what lets the constraint hold up on real multilingual text.</p>
+<p>It is worth pausing here to savor the "<strong>state machine</strong>" metaphor. Once a grammar is loaded, what the runtime maintains is not "the whole text" but "where in the grammar it is now, which characters are allowed next". Each accepted token nudges this position forward; it is like a cursor moving over the grammar graph, and where the cursor sits decides the legal set for the next step.</p>
+<p>Because the state advances step by step, <strong>the same token can be legal or not at different positions</strong>. In JSON, for instance, right after <span class="mono">{</span> only a quote (starting a key) or <span class="mono">}</span> (empty object) is allowed, while after a complete key-value pair only a comma or <span class="mono">}</span> is. The grammar computes this "legal set right now" from the current state each step and masks accordingly. The constraint is not fixed but <strong>changes dynamically with context</strong>.</p>
+<p>One might ask: scanning tens of thousands of candidates each step to judge legality, is that not slow? The implementation does plenty of optimization - precompiling the grammar into efficient structures, quickly filtering candidates by the rule stacks, caching intermediate results, and so on. In most cases this cost is nearly negligible against the model's one forward pass (L17). So use grammar constraints freely; the reliability they buy far outweighs the small price.</p>
+<p>A concrete grounded example: many "let the large model be a backend" applications rely on grammar constraints to guarantee it returns JSON a program can consume directly. Define the grammar for the return structure, attach the grammar sampler, and the model end becomes a reliable component that "always outputs a legal structure". Without it, you must stuff a layer of parse, correct, and retry glue between the model and the program; with it, that glue layer can largely be dropped. This is the concrete engineering value a constraint brings.</p>
+
+<h2>Element types and being a sampler</h2>
+<div class="cellgroup">
+  <div class="cg-cap"><b>llama_gretype</b>: the low-level element types a GBNF rule compiles into</div>
+  <div class="cells"><span class="lab">type</span><span class="cell">CHAR literal</span><span class="cell">CHAR_RNG_UPPER range</span><span class="cell">CHAR_NOT negate</span><span class="cell">RULE_REF ref</span><span class="cell">ALT alternate</span><span class="cell">END close</span></div>
+</div>
+<p>A grammar is <strong>compiled</strong> at load time into a string of low-level elements, whose types are defined by <span class="mono">enum llama_gretype</span>. Every <span class="mono">::=</span> rule you write is ultimately translated into such a string of elements for the runtime to match efficiently.</p>
+<p>These types are GBNF notation's "machine code": <span class="mono">CHAR</span> is a literal character, <span class="mono">CHAR_RNG_UPPER</span> pairs up to express a range (like a-z), <span class="mono">CHAR_NOT</span> is a negated class, <span class="mono">RULE_REF</span> is "reference another rule", <span class="mono">ALT</span> is an alternation separator, <span class="mono">END</span> closes. Lowering the human-written grammar to this level lets the runtime quickly decide "is the next character legal".</p>
+<p>So how does the grammar plug into sampling? Through a <strong>sampler</strong>: <span class="mono">llama_sampler_init_grammar(vocab, grammar_str, root)</span> returns exactly L21's <span class="mono">llama_sampler</span> - its <span class="mono">apply</span> calls the mask, its <span class="mono">accept</span> calls the advance. In other words, the grammar is essentially <strong>a special sampler</strong>, perfectly reusing L21's interface.</p>
+<p>But it usually does <strong>not</strong> mix into the main sampler chain; it is a separate object applied before or after the chain per a <span class="mono">grammar_first</span> flag. This is because constraint differs in nature from shaping ops like "tune temperature / prune candidates", needing flexible ordering. Note also: the lazy variant <span class="mono">llama_sampler_init_grammar_lazy</span> is deprecated, use <span class="mono">llama_sampler_init_grammar_lazy_patterns</span>.</p>
+<p>Why compile the human-written grammar into this string of low-level elements first, rather than matching the raw text directly? Because the runtime judges legality once per generated token and must be fast. Pre-splitting the grammar into tidy elements like <span class="mono">CHAR</span>/<span class="mono">RULE_REF</span> lets the runtime advance and match in a simple, efficient way, without re-parsing the raw grammar text. This is the classic "spend a bit at compile time, save the bulk at run time" trade-off.</p>
+<p>Savor again the elegance of the grammar "being a sampler". L21 designed sampling as a string of pluggable small transforms; at the time you may not have foreseen that "grammar constraint", something that sounds utterly different, could slot <strong>unchanged</strong> into the same <span class="mono">apply</span>/<span class="mono">accept</span> interface. That is the value of a good interface: the extension point it reserves can hold new tricks never imagined at design time.</p>
+<p>Finally, put this lesson back into the whole picture: from L20's vocab, L21's sampling, L22's chat templates, to this lesson's grammar constraint, you have now gathered the full toolkit for "controlling the model's output" - controlling <strong>how to tokenize</strong>, <strong>how to pick words</strong>, <strong>how to organize the conversation</strong>, <strong>how to constrain the structure</strong>. Next lesson L24 covers LoRA, adding even "<strong>how to fine-tune the model's behavior</strong>". Only the last piece of Part 4's puzzle remains.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What is the relationship between grammar and the sampler (L21)? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>A grammar essentially <strong>is a sampler</strong>. <span class="mono">llama_sampler_init_grammar</span> returns that L21 <span class="mono">llama_sampler</span> struct: its <span class="mono">apply</span> is implemented as "mask out illegal tokens", its <span class="mono">accept</span> as "advance the grammar state". So it slots perfectly into L21's unified interface, and the engine schedules it the same way.</p>
+    <p>The difference is it is <strong>stateful and forceful</strong>. An ordinary sampler (top-k/temperature) only shapes probabilities; the grammar can sentence whole batches of tokens to death. And because it has its own grammar state to maintain (which step it is at), it is not as casual as stateless top-k - which is also why it is often managed separately rather than mixed into the main chain.</p>
+    <p>This "one interface holding wildly different implementations" is exactly the power of L21's chain-of-responsibility design: temperature, penalties, grammar constraint look alike yet do utterly different things. Grasp this and you see why adding a brand-new constraint to sampling barely touches the engine trunk.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What are lazy / triggered grammars for? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Sometimes you <strong>do not want to constrain from the start</strong>, but only begin after some signal appears. The classic case is tool calling: let the model speak freely first, and once it emits a trigger word (say a marker meaning "I am about to call a tool"), switch to a strict JSON constraint, forcing it to write the arguments in valid format.</p>
+    <p>That is the <strong>lazy grammar</strong>: the <span class="mono">lazy</span>/<span class="mono">awaiting_trigger</span>/<span class="mono">trigger_patterns</span> fields in <span class="mono">llama_grammar</span> implement it - the constraint first "stands by", buffering output, until the trigger condition matches, then truly takes effect and starts masking. The matching sampler is <span class="mono">llama_sampler_init_grammar_lazy_patterns</span>.</p>
+    <p>Why useful? Because real tasks are often "<strong>free first, strict later</strong>": the model thinks/responds in natural language first, and only constrains when structured output is needed. A lazy grammar lets you not lock the format from the first token, keeping the model's flexibility while guaranteeing structure where it counts. It is a clever design for switching "constraint" and "freedom" on demand.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why does token-level masking beat "after-the-fact checking"? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>After-the-fact checking is "generate the whole thing, then check legality with a regex/parser, and retry if bad". The problems are obvious: one, it is <strong>slow</strong> - one failure means regenerating the whole thing, possibly failing repeatedly; two, it does <strong>not guarantee convergence</strong> - the model may never stumble onto a legal one, stuck in a loop.</p>
+    <p>Token-level masking moves the gate forward to <strong>every step</strong>: every chosen token is guaranteed legal at that moment, so what is generated is <strong>necessarily</strong> legal, done in one go, no retry needed. It trades "a little constraint each step" for "always correct overall" - both fast and steady.</p>
+    <p>Behind this is a general engineering wisdom: <strong>blocking an error before it arises far beats patching it afterward</strong>. You saw load-time consistency checks in L14 (check early, rest easy), and type checks in compiled languages - all the same idea. The grammar applies this to generation.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>GBNF grammar constraint = at each sampling step, <strong>mask illegal tokens to negative infinity</strong>, so the model can only pick legal ones and the output is <strong>necessarily valid</strong>.</li>
+    <li>GBNF rules: <span class="mono">::=</span> define, <span class="mono">|</span> alternation, <span class="mono">[...]</span> char class, <span class="mono">* + ?</span> repetition, <span class="mono">root</span> entry; can recurse.</li>
+    <li>Two actions: <span class="mono">apply</span> (mask illegal candidates) + <span class="mono">accept</span> (advance the rule stacks); a grammar compiles into <span class="mono">enum llama_gretype</span> elements.</li>
+    <li>Into sampling: <span class="mono">llama_sampler_init_grammar</span> (the grammar is a special sampler), usually applied outside the main chain per <span class="mono">grammar_first</span>; lazy uses <span class="mono">..._grammar_lazy_patterns</span> (old <span class="mono">_grammar_lazy</span> deprecated).</li>
+    <li>Token-level masking &gt; after-the-fact checking: every step legal, done in one go, never finding illegality halfway.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  A grammar constraint turns "<strong>structural correctness</strong>" from "praying afterward" into "<strong>guaranteed at generation</strong>" - blocking every illegal path right at the token level. It packs "constraint" beautifully into L21's sampler interface: a grammar is just another <span class="mono">apply</span>/<span class="mono">accept</span> implementation, yet it lets "free generation" and "strict format" coexist harmoniously in one mechanism. This is exactly llama.cpp's key to making a large model <strong>reliably output structured data</strong> - and a crucial step to wiring it into real software systems.
+</div>
+""",
+}
+
+LESSON_24 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+第四部分一路走来，你已经能让模型加载、推理、分词、采样、套对话格式、约束输出（L14-L23）。最后一块拼图：如果想让模型<strong>学会新风格、新任务</strong>呢？全量微调要重训并存下整套几十 GB 的权重，又贵又笨。这一课讲 <strong>LoRA</strong>——一种轻量得多的办法，用两个小矩阵给权重打个"补丁"，几 MB 就能改变模型行为。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">LoRA 的精髓是<strong>低秩</strong>：它不动原权重，只学一个<strong>低秩增量</strong>（两个小矩阵 A、B 相乘），加到原权重的输出上。因为秩很低，这两个矩阵小得可怜（适配器常只有几 MB），却能逼近全量微调的效果。更妙的是，它即插即用——想要某种风格就挂上对应适配器，不想要随时卸下，还能几个叠着用。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  LoRA 像给镜头套<strong>滤镜</strong>：原镜头（基础权重）一点不动，套上一片轻巧的滤镜（A、B 组成的低秩增量），成像风格就变了；不喜欢随时摘下，也能叠加几片。而<strong>控制向量</strong>则像一个调色旋钮，沿某个固定方向整体平移画面色调。两者都不动底片，只在出片时做手脚。
+</div>
+
+<h2>为什么需要 LoRA</h2>
+<div class="cols">
+  <div class="col"><h4>全量微调</h4><p>更新<strong>所有</strong>权重，存一整套（几十 GB），每个任务一份。又贵又笨。</p></div>
+  <div class="col"><h4>LoRA</h4><p>冻结原权重 W，只学两个<strong>小</strong>矩阵 A、B。适配器往往几 MB，可叠加、可卸下。</p></div>
+</div>
+<p>先想清楚全量微调的痛点。一个几十亿参数的模型，要让它适配一个新任务，传统做法是继续训练、更新它的<strong>所有</strong>权重，然后把这一整套新权重存下来。问题是：每个任务都得存一份几十 GB 的模型，训练也要很大显存——又贵、又占地方、又难分享。</p>
+<p>LoRA 换了个思路：<strong>冻结</strong>原权重一个字节都不改，只在旁边学两个小矩阵 A、B。要用的时候，把 A、B 算出的增量临时加到原权重上即可。于是你存的、传的、加载的"适配器"，就只有 A、B 这两个小矩阵，常常只有几 MB——和几十 GB 的全量微调一比，省了好几个数量级。</p>
+<p>这背后的关键假设是：微调给权重带来的改变，往往集中在一个<strong>低维子空间</strong>里。换句话说，"让模型学会某个新任务"所需的调整，没那么多自由度，用一个低秩矩阵就能很好地近似。正是这个洞察，让"只学两个小矩阵"成为可能，且效果出奇地好。</p>
+<p>实际收益是实打实的：一个基础模型 + 一堆几 MB 的 LoRA，就能变出无数"专精版本"——写代码的、扮角色的、特定领域的，随用随挂。基础模型只读、只存一份，差异全在那些小适配器里。这种"一份底座、多个补丁"的格局，正是 LoRA 流行的根本原因。</p>
+<p>打个更接地气的比方。全量微调像是为了改一句话，把整本书重新印一遍；LoRA 则像在原书上贴几张便签——书没动，便签却足以表达你的修改。要换一种修改，撕掉便签换一批即可，原书永远是那一本。这种"原件不动、改动外挂"的思路，是 LoRA 一切便利的源头。</p>
+<p>它带来的协作红利也很大。社区里，大家共享的不再是几十 GB 的整模型，而是几 MB 的适配器——下载快、存储省、还能像插件一样自由组合。一个流行的基础模型周围，往往围着成百上千个各显神通的 LoRA，这种繁荣正是"轻量、可分享"换来的。</p>
+<p>当然 LoRA 不是万能的。它擅长"在已有能力上做风格化、领域化的调整"，但要让模型学会一项它<strong>完全没有</strong>的全新本领，低秩增量的表达力可能就不够，那时还得靠更重的训练。明白它的边界，才能用在刀刃上——多数"调性、格式、领域"层面的需求，LoRA 都能漂亮地接住。</p>
+
+<h2>LoRA 数学</h2>
+<div class="flow">
+  <div class="node"><div class="nt">x</div><div class="nd">输入</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">A</div><div class="nd">降到秩 r</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">B</div><div class="nd">升回原维</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">x scale</div><div class="nd">缩放强度</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">+ W·x</div><div class="nd">加到基础输出</div></div>
+</div>
+<p>具体怎么算？设原权重是 W、输入是 x。基础输出就是 W·x（一次普通的矩阵乘）。LoRA 在它旁边加一条<strong>低秩支路</strong>：先用 A 把 x 降到一个很低的维度（秩 r），再用 B 升回原来的维度，得到 B·(A·x)；乘上一个缩放系数 scale，加到 W·x 上。最终输出 = W·x + scale·B·A·x。</p>
+<pre class="code"><span class="cm">// 简化自 src/llama-graph.cpp build_lora_mm</span>
+res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// 基础权重输出 W·x</span>
+<span class="kw">for</span> (lora : active_adapters) {
+    ab = <span class="fn">ggml_mul_mat</span>(b, <span class="fn">ggml_mul_mat</span>(a, cur)); <span class="cm">// 低秩两步 B·(A·x)</span>
+    ab  = <span class="fn">ggml_scale</span>(ab, scale);             <span class="cm">// scale = alpha/rank * 用户比例</span>
+    res = <span class="fn">ggml_add</span>(res, ab);                 <span class="cm">// 叠加增量</span>
+}</pre>
+<p>上面这段（简化自 <span class="mono">src/llama-graph.cpp</span> 的 <span class="mono">build_lora_mm</span>）就是它在建图（L16）时干的事：先算基础的 <span class="mono">mul_mat(w, cur)</span>，再对每个生效的适配器，算 <span class="mono">B·(A·cur)</span>、乘 scale、加回去。注意这一切发生在<strong>计算图</strong>里——增量是临时算出来叠加的，并没有真去改 W 那几个 GB 的权重。</p>
+<p>那个 scale 也有讲究：它由适配器的 <span class="mono">alpha</span> 和秩 r 算出（大致是 <span class="mono">alpha/rank</span>，再乘上用户给的比例）。这个比例就是你挂载时能调的"<strong>强度</strong>"旋钮——调大，适配器的影响更强；调小，更接近原模型。把强度做成可调，让你能在"原汁原味"和"完全变身"之间平滑过渡。</p>
+<p>为什么是 A 降维、B 升维这<strong>两步</strong>，而不是直接学一个同样大小的增量矩阵？因为直接学一个 d×d 的满秩矩阵，参数量和原权重一样大，就失去意义了。拆成 d×r 和 r×d 两个瘦长矩阵（r 远小于 d），参数量从 d×d 降到 2dr——这正是"低秩"省参数的数学本质。</p>
+<p>再把"秩"这个词说透一点。一个矩阵的秩，粗略地说就是它"真正独立的方向"有多少。满秩意味着各个方向都用上了，信息量最大但也最占参数；低秩则是说"其实只用了少数几个方向就够描述这次改动"。LoRA 赌的就是：适配一个任务所需的改动，本质上是低秩的，于是用 r 个方向（A、B 的中间维度就是 r）足以近似。</p>
+<p>还有个常被忽略的细节：A、B 的初始化是不对称的。通常 B 初始化为全零、A 随机初始化，于是训练刚开始时增量 B·A 为零——也就是说，挂上一个<strong>没训练过</strong>的 LoRA，对模型毫无影响，和不挂一样。训练过程才慢慢让这个增量长出有用的方向。这个"从零开始、平滑加入"的设计，让 LoRA 训练既稳定又安全。</p>
+
+<h2>加载与应用</h2>
+<pre class="code"><span class="cm"># 伪代码: 加载并挂载 LoRA</span>
+adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st">"style.gguf"</span>)   <span class="cm"># 读 A/B 张量</span>
+<span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># 批量挂载, 各带 scale</span>
+<span class="cm"># ... decode 若干步, 输出带上这个风格 ...</span>
+<span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; 清空, 卸下全部</span></pre>
+<p>用起来很简单：<span class="mono">llama_adapter_lora_init</span> 从一个 <span class="mono">.gguf</span> 适配器文件读出 A、B 张量，得到一个适配器对象；再用 <span class="mono">llama_set_adapters_lora</span> 把它挂到 context（L17）上、并给一个 scale。之后的每次 decode，建图时就会自动把这个适配器的增量折进去。</p>
+<p>这里有个 API 要特别注意：挂载用的是<strong>复数、批量</strong>的 <span class="mono">llama_set_adapters_lora</span>（一次可以挂多个适配器、各带一个 scale）。早期那套<strong>单数</strong>的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> 已经不存在了——清空适配器就是调批量版、传 <span class="mono">n=0</span>。看老代码时别再找单数那几个。</p>
+<p>"能同时挂多个、各带 scale"不是摆设，而是<strong>能力叠加</strong>的基础：你可以把"中文风格"和"法律领域"两个 LoRA 同时挂上、各给一个权重，让模型同时具备两种特长。批量接口天然支持这种组合——这也是为什么它被设计成一组 <span class="mono">{适配器, scale}</span>，而不是一次只能挂一个。</p>
+<p>还要强调那个"<strong>不复制权重</strong>"：挂载只是在 context 上记下"现在生效哪些适配器、各什么 scale"，真正的叠加发生在每次 decode 建图时（<span class="mono">build_lora_mm</span>）。所以挂上、卸下 LoRA 几乎是零成本的——不涉及那几十 GB 权重的任何拷贝或修改，切换风格快得像换个滤镜。</p>
+<p>适配器为什么也用 <span class="mono">.gguf</span> 格式（L13）？因为 LoRA 本质上也是"一堆带名字的张量"（A、B 矩阵，按它们要修改的目标权重命名），和模型权重是同一类东西。复用 GGUF 这套自描述格式，意味着加载器（L14）几乎能照搬——读元数据、按名字建张量清单，连工具链都是现成的。一种格式通吃，省了重复造轮子。</p>
+<p>挂载时按目标张量名对号入座，也呼应了 L15 的命名约定。每个 LoRA 张量的名字，记着它要修改的是哪一层的哪个权重（比如某层的 attn_q）。建图时 <span class="mono">build_lora_mm</span> 算到那个权重，就去适配器里按名字找有没有对应的 A、B，有就把增量加上。名字再一次成了把"权重"和"补丁"对上的关键。</p>
+<p>这种设计还带来一个好处：同一个 LoRA 文件，能套到任何<strong>结构兼容</strong>的基础模型上——因为它修改的目标是按名字指定的，不绑死某个具体模型实例。于是社区里一个针对某架构训练的 LoRA，常常能直接用在该架构的不同微调版本上。名字驱动的松耦合，让适配器的复用范围大大扩展。</p>
+<p>顺带提一个实践中的常见组合：很多人用一个量化过的基础模型（L12）+ 一个 LoRA 适配器来跑，既享受量化省下的显存、又靠适配器获得任务特长。llama.cpp 对这种"量化底座 + LoRA"是支持的——适配器的增量在建图时按需叠加，和底座怎么量化基本正交。省显存和可定制，两个好处可以同时要。</p>
+
+<h2>控制向量与衔接</h2>
+<table class="t">
+  <tr><th></th><th>改什么</th><th>怎么生效</th></tr>
+  <tr><td>LoRA</td><td>权重（低秩增量 scale·B·A）</td><td>折进 matmul（build_lora_mm）</td></tr>
+  <tr><td>控制向量</td><td>激活（沿固定方向平移）</td><td>加进残差流（set_adapter_cvec）</td></tr>
+</table>
+<p>除了 LoRA，还有一种更轻的"调味"手段：<strong>控制向量</strong>（control vector，cvec）。它不动权重，而是直接在某些层的<strong>激活</strong>（残差流）上，加一个固定方向的向量——好比给模型的"思路"轻轻推一把，让它整体偏向某种语气或倾向（更正式、更乐观之类）。</p>
+<p>两者的区别值得记牢：LoRA 改的是<strong>权重</strong>（给 matmul 加低秩增量，影响那一层的全部计算），表达力强、能学复杂适配；控制向量改的是<strong>激活</strong>（沿一个方向平移残差流），更轻、更像"调味"，擅长沿某个语义方向微调风格。C API 上，cvec 用 <span class="mono">llama_set_adapter_cvec</span>（旧的 <span class="mono">llama_apply_adapter_cvec</span> 已移除）。</p>
+<p>把这一课接回第四部分的主线：适配器挂在 <span class="mono">llama_context</span>（L17）上，每次 <span class="mono">llama_decode</span> 建图（L16）时，<span class="mono">build_lora_mm</span> 把增量折进相关的 matmul。所以 LoRA/cvec 不是另起炉灶的新系统，而是<strong>嵌在已有推理回路里</strong>的一层薄薄的"行为调节"——复用了你前面学的建图、上下文这些机制。</p>
+<p>至此，第四部分（llama 推理内部）就完整了：从一个 .gguf 被<strong>加载</strong>成模型（L14-15），<strong>搭成计算图</strong>（L16），装进<strong>上下文</strong>按批用 KV 高效<strong>推理</strong>（L17-19），再到<strong>分词</strong>、<strong>采样</strong>、<strong>对话模板</strong>、<strong>语法约束</strong>、以及这一课的<strong>轻量微调</strong>（L20-24）。你已经把"一个大模型如何被驱动、控制、改造"从头到尾走了一遍。</p>
+<p>控制向量是怎么"算"出来的，值得一提。它往往不需要训练，而是用<strong>对比</strong>的办法：拿一批"正面例子"（比如语气正式的文本）和一批"负面例子"（随意的文本），分别跑过模型、取某层的激活，两组激活的<strong>差</strong>的方向，就大致是"正式"这个概念在模型内部的方向。把这个方向向量加进残差流，就能把输出往"更正式"推。简单、直接、还不用训练。</p>
+<p>退一步看 LoRA 和控制向量的共同点：它们都践行了同一条原则——<strong>基础模型只读，改动外挂且可叠加</strong>。这跟 L17 把"只读权重"和"会话状态"分开、L21 把采样策略做成可插拔的链，是一脉相承的设计哲学。整个第四部分，其实都在反复演奏这一个主题：把不变的沉淀下来，把可变的拆出去，于是系统既稳固又灵活。</p>
+<p>第四部分到此收尾。再往后（第五部分）我们会跳出 llama 内部，去看这些能力是怎么通过公共 API 和命令行工具暴露给你用的——你已经懂了引擎盖下的机理，接下来就是学会怎么开这辆车。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么"低秩"就够用？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>经验和理论都指向同一个观察：微调给权重带来的变化，往往落在一个<strong>低维子空间</strong>里。也就是说，"适配某个任务"所需的方向并不多，用一个秩很低（比如 r=8 或 16）的矩阵就能很好地张成。于是花极小的参数，就能逼近全量微调的效果。</p>
+    <p>直觉上也说得通：基础模型已经学到了海量通用能力，适配新任务更像是在它之上做"小幅修正"，而不是推倒重来。小幅修正的自由度本就不高，低秩矩阵正好够用。这也是为什么 r 通常取得很小，再大收益也递减。</p>
+    <p>这是个非常划算的取舍：参数量从 d×d 降到 2×d×r（r 远小于 d），可能小几百倍，效果却所失无几。用一点点近似换来巨大的成本下降——LoRA 之所以能在消费级硬件上微调大模型，根子就在这。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么挂载 API 是批量复数 llama_set_adapters_lora？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为现实里你常想<strong>同时挂多个</strong> LoRA：一个管语言风格、一个管领域知识，各给一个 scale 叠加使用。接口若一次只能挂一个，就表达不了这种组合。于是它天然被设计成一组 <span class="mono">{适配器, scale}</span> 的批量形式。</p>
+    <p>这也简化了语义：挂载、替换、清空，全用同一个批量 setter 表达——传新的一组就是替换，传空（<span class="mono">n=0</span>）就是清空。不需要单独的 add/remove/clear 三件套，一个函数搞定所有情况，干净利落。</p>
+    <p>所以旧教程里那套单数的 <span class="mono">llama_set_adapter_lora</span>/<span class="mono">llama_rm_adapter_lora</span>/<span class="mono">llama_clear_adapter_lora</span> 已经被这一个批量函数取代、不复存在了。看到老代码按单数签名调用，要知道那是过时的写法。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> LoRA 和控制向量，到底差在哪？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>层面不同。LoRA 动的是<strong>权重</strong>：在某些 matmul 上加一个低秩增量，于是那一层的<strong>整个</strong>线性变换都被改写了，表达力强，能学相对复杂的适配（新风格、新格式、新领域）。代价是它要训练、要存 A/B 矩阵。</p>
+    <p>控制向量动的是<strong>激活</strong>：直接在残差流上加一个固定方向的向量，相当于沿某个语义轴（"正式 vs 随意""乐观 vs 悲观"）把模型的状态推一推。它更轻、更直接，往往不需要训练（可以从对比样本里算出方向），但表达力也更有限——擅长"调味"，不擅长"教新本事"。</p>
+    <p>一句话：LoRA 是"<strong>低秩权重补丁</strong>"，控制向量是"<strong>激活方向偏置</strong>"。一个改算子怎么算，一个改数据往哪偏。它们都不碰基础权重、都即插即用，是同一类"轻量行为调节"的两种风味，按需要的表达力和成本来选。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>LoRA = 冻结原权重 W，只学小矩阵 A、B，输出 = W·x + <strong>scale·B·A·x</strong>（低秩增量）；适配器常仅几 MB。</li>
+    <li>数学在建图时实现（<span class="mono">build_lora_mm</span>，<span class="mono">src/llama-graph.cpp</span>）：<span class="mono">res = W·x</span>，再 <span class="mono">+ scale·B·(A·x)</span>；scale 来自 <span class="mono">alpha/rank</span> × 用户比例。</li>
+    <li>加载 <span class="mono">llama_adapter_lora_init</span>；挂载用<strong>批量</strong> <span class="mono">llama_set_adapters_lora</span>（单数 set/rm/clear 已移除，<span class="mono">n=0</span> 清空）。</li>
+    <li>控制向量 <span class="mono">llama_set_adapter_cvec</span>：沿固定方向平移<strong>激活</strong>；LoRA 改<strong>权重</strong>。两者都不复制权重、即插即用。</li>
+    <li>适配器挂在 context（L17）、decode 建图（L16）时折进 matmul，<strong>不改</strong>基础权重。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  LoRA 把"<strong>改变模型行为</strong>"从"重训整套权重"降到"加一片几 MB 的低秩滤镜"——基础模型只读、增量即插即用。它和第四部分反复出现的主题一脉相承：把<strong>只读的知识</strong>（权重）和<strong>可变的部分</strong>（适配器、上下文、采样策略）分开，于是一份大模型能被千变万化地复用。学到这里，你已走完第四部分——从一个 .gguf 文件被加载，到它如何被驱动、约束、并轻量改造成你想要的样子。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+All through Part 4, you can now load, infer, tokenize, sample, apply chat formats, and constrain output (L14-L23). The last piece of the puzzle: what if you want the model to <strong>learn a new style or task</strong>? Full fine-tuning means retraining and storing a whole set of tens-of-GB weights - expensive and clumsy. This lesson covers <strong>LoRA</strong> - a far lighter approach that patches the weights with two small matrices, changing model behavior in mere megabytes.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">LoRA's essence is <strong>low rank</strong>: it leaves the original weights untouched and learns only a <strong>low-rank delta</strong> (the product of two small matrices A and B), added to the original weights' output. Because the rank is low, these two matrices are tiny (an adapter is often just a few MB), yet they approximate full fine-tuning's effect. Better still, it is plug-and-play - attach the adapter for a style you want, drop it anytime, and even stack several.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  LoRA is like putting a <strong>filter</strong> on a lens: the original lens (base weights) does not move at all, you put on a light filter (the low-rank delta of A and B) and the look changes; do not like it, take it off anytime, and you can stack a few. A <strong>control vector</strong>, by contrast, is like a color-grading knob, shifting the whole picture's tone along one fixed direction. Neither touches the negative, just tweaks at print time.
+</div>
+
+<h2>Why LoRA is needed</h2>
+<div class="cols">
+  <div class="col"><h4>Full fine-tuning</h4><p>Update <strong>all</strong> weights, store a whole set (tens of GB), one per task. Expensive and clumsy.</p></div>
+  <div class="col"><h4>LoRA</h4><p>Freeze the original weights W, learn only two <strong>small</strong> matrices A, B. An adapter is often a few MB, stackable, removable.</p></div>
+</div>
+<p>First, see full fine-tuning's pain point clearly. To adapt a billions-of-parameters model to a new task, the traditional way is to keep training and update <strong>all</strong> its weights, then store this whole new weight set. The problem: each task needs its own tens-of-GB model, training takes lots of VRAM - expensive, space-hungry, and hard to share.</p>
+<p>LoRA takes a different tack: <strong>freeze</strong> the original weights, not a byte changed, and learn just two small matrices A, B alongside. To use it, temporarily add the delta computed from A and B onto the original weights. So the "adapter" you store, share, and load is just those two small matrices A and B, often only a few MB - compared to tens of GB of full fine-tuning, several orders of magnitude smaller.</p>
+<p>The key assumption behind this is: the change fine-tuning brings to the weights often concentrates in a <strong>low-dimensional subspace</strong>. In other words, the adjustment needed to "make the model learn a task" has not that many degrees of freedom, and a low-rank matrix approximates it well. It is exactly this insight that makes "learn just two small matrices" possible, and surprisingly effective.</p>
+<p>The real payoff is concrete: one base model + a pile of few-MB LoRAs conjures countless "specialized versions" - a coder, a role-player, a domain expert, attached on demand. The base model is read-only, stored once, and all the difference lives in those small adapters. This "one base, many patches" pattern is the fundamental reason LoRA caught on.</p>
+<p>A more down-to-earth analogy. Full fine-tuning is like reprinting a whole book to change one sentence; LoRA is like sticking a few notes onto the original book - the book is untouched, yet the notes suffice to express your edits. To change an edit, peel the notes and swap a new batch; the original book is forever that one book. This "original untouched, edits attached" thinking is the source of all of LoRA's convenience.</p>
+<p>The collaboration dividend is large too. In the community, what people share is no longer the tens-of-GB whole model but few-MB adapters - fast to download, cheap to store, and freely combinable like plugins. A popular base model is often surrounded by hundreds or thousands of LoRAs each with its own trick, a flourishing bought precisely by "lightweight and shareable".</p>
+<p>Of course LoRA is not omnipotent. It excels at "stylistic, domain-specific adjustments on top of existing ability", but to make the model learn a brand-new skill it <strong>utterly lacks</strong>, the low-rank delta's expressiveness may fall short, and heavier training is then needed. Knowing its boundary lets you use it where it counts - most needs at the "tone, format, domain" level, LoRA catches beautifully.</p>
+
+<h2>The LoRA math</h2>
+<div class="flow">
+  <div class="node"><div class="nt">x</div><div class="nd">input</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">A</div><div class="nd">down to rank r</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">B</div><div class="nd">back up to dim</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">x scale</div><div class="nd">scale strength</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">+ W*x</div><div class="nd">add to base output</div></div>
+</div>
+<p>How exactly is it computed? Let the original weight be W and the input x. The base output is W*x (an ordinary matmul). LoRA adds a <strong>low-rank branch</strong> alongside it: first A drops x to a very low dimension (rank r), then B lifts it back to the original dimension, giving B*(A*x); multiply by a scale factor and add onto W*x. The final output = W*x + scale*B*A*x.</p>
+<pre class="code"><span class="cm">// simplified from src/llama-graph.cpp build_lora_mm</span>
+res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// base weight output W*x</span>
+<span class="kw">for</span> (lora : active_adapters) {
+    ab = <span class="fn">ggml_mul_mat</span>(b, <span class="fn">ggml_mul_mat</span>(a, cur)); <span class="cm">// low-rank two steps B*(A*x)</span>
+    ab  = <span class="fn">ggml_scale</span>(ab, scale);             <span class="cm">// scale = alpha/rank * user ratio</span>
+    res = <span class="fn">ggml_add</span>(res, ab);                 <span class="cm">// add the delta</span>
+}</pre>
+<p>The snippet above (simplified from <span class="mono">src/llama-graph.cpp</span>'s <span class="mono">build_lora_mm</span>) is what it does at graph-build time (L16): first compute the base <span class="mono">mul_mat(w, cur)</span>, then for each active adapter compute <span class="mono">B*(A*cur)</span>, multiply by scale, and add back. Note all this happens in the <strong>compute graph</strong> - the delta is computed and added on the fly, never actually modifying those GB of W weights.</p>
+<p>That scale matters too: it is computed from the adapter's <span class="mono">alpha</span> and the rank r (roughly <span class="mono">alpha/rank</span>, times a user-given ratio). This ratio is the "<strong>strength</strong>" knob you can tune at attach time - turn it up for a stronger adapter influence, down to stay closer to the original model. Making strength adjustable lets you glide smoothly between "as-is" and "fully transformed".</p>
+<p>Why the <strong>two steps</strong> of A down, B up, rather than learning one delta matrix of the same size directly? Because learning a full-rank d x d matrix directly has as many parameters as the original weight, defeating the point. Splitting into two slim matrices d x r and r x d (r far smaller than d) drops the parameters from d squared to 2dr - this is the mathematical essence of "low rank" saving parameters.</p>
+<p>Let me spell out the word "rank" a bit more. A matrix's rank is, roughly, how many "truly independent directions" it has. Full rank means all directions are used, maximal information but also maximal parameters; low rank says "actually only a few directions suffice to describe this change". LoRA's bet is exactly that the change needed to adapt a task is essentially low-rank, so r directions (the inner dimension of A and B is r) approximate it well enough.</p>
+<p>One often-missed detail: the initialization of A and B is asymmetric. Usually B is initialized to all zeros and A randomly, so at the start of training the delta B*A is zero - that is, attaching an <strong>untrained</strong> LoRA has no effect on the model, the same as attaching none. Only training gradually grows useful directions in this delta. This "start from zero, join smoothly" design makes LoRA training both stable and safe.</p>
+
+<h2>Loading and applying</h2>
+<pre class="code"><span class="cm"># pseudocode: load and attach a LoRA</span>
+adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st">"style.gguf"</span>)   <span class="cm"># read A/B tensors</span>
+<span class="fn">llama_set_adapters_lora</span>(ctx, [adapter], n=1, scales=[0.8])  <span class="cm"># batch attach, each with scale</span>
+<span class="cm"># ... decode a few steps, output carries this style ...</span>
+<span class="fn">llama_set_adapters_lora</span>(ctx, [], n=0, NULL)              <span class="cm"># n=0 =&gt; clear, detach all</span></pre>
+<p>It is simple to use: <span class="mono">llama_adapter_lora_init</span> reads the A, B tensors from a <span class="mono">.gguf</span> adapter file, giving an adapter object; then <span class="mono">llama_set_adapters_lora</span> attaches it to the context (L17) with a scale. Every subsequent decode automatically folds this adapter's delta in at graph-build time.</p>
+<p>One API deserves special attention here: attaching uses the <strong>plural, batched</strong> <span class="mono">llama_set_adapters_lora</span> (you can attach several adapters at once, each with a scale). The early <strong>singular</strong> <span class="mono">llama_set_adapter_lora</span>/<span class="mono">rm</span>/<span class="mono">clear</span> no longer exist - clearing adapters is calling the batched version with <span class="mono">n=0</span>. Do not go looking for those singular ones in old code.</p>
+<p>"Attach several at once, each with a scale" is no ornament but the basis of <strong>stacking abilities</strong>: you can attach a "Chinese style" and a "legal domain" LoRA at once, each with a weight, giving the model both specialties. The batched interface naturally supports this combination - which is why it is designed as a set of <span class="mono">{adapter, scale}</span>, not one-at-a-time.</p>
+<p>Stress that "<strong>no weight copy</strong>" again: attaching merely records on the context "which adapters are active now, each at what scale"; the real addition happens at each decode's graph build (<span class="mono">build_lora_mm</span>). So attaching and detaching a LoRA is nearly free - involving no copy or modification of those GB of weights, switching styles as fast as swapping a filter.</p>
+<p>Why is an adapter also in <span class="mono">.gguf</span> format (L13)? Because a LoRA is essentially also "a bunch of named tensors" (the A, B matrices, named after the target weights they modify), the same kind of thing as model weights. Reusing GGUF's self-describing format means the loader (L14) can be reused almost verbatim - read metadata, build the tensor list by name, even the toolchain is ready-made. One format fits all, sparing reinvented wheels.</p>
+<p>Matching by target tensor name at attach time also echoes L15's naming convention. Each LoRA tensor's name records which layer's which weight it modifies (say a layer's attn_q). At graph build, when <span class="mono">build_lora_mm</span> reaches that weight, it looks up the adapter by name for a matching A, B, and adds the delta if found. Names once again become the key that pairs "weight" with "patch".</p>
+<p>This design brings another benefit: the same LoRA file can apply to any <strong>structurally compatible</strong> base model - because its modification targets are specified by name, not bound to a specific model instance. So a community LoRA trained for one architecture can often be used directly on different fine-tuned versions of that architecture. Name-driven loose coupling vastly expands an adapter's reuse range.</p>
+<p>A common combination in practice worth mentioning: many people run a quantized base model (L12) + a LoRA adapter, enjoying the VRAM saved by quantization while gaining task specialty from the adapter. llama.cpp supports this "quantized base + LoRA" - the adapter's delta is added on demand at graph build, largely orthogonal to how the base is quantized. Saving VRAM and staying customizable, you can have both.</p>
+
+<h2>Control vectors and the hand-off</h2>
+<table class="t">
+  <tr><th></th><th>What it changes</th><th>How it takes effect</th></tr>
+  <tr><td>LoRA</td><td>weights (low-rank delta scale*B*A)</td><td>folded into matmul (build_lora_mm)</td></tr>
+  <tr><td>Control vector</td><td>activations (shift along a fixed direction)</td><td>added to the residual stream (set_adapter_cvec)</td></tr>
+</table>
+<p>Besides LoRA, there is an even lighter "seasoning" means: the <strong>control vector</strong> (cvec). It touches no weights but adds a fixed-direction vector directly onto the <strong>activations</strong> (the residual stream) of certain layers - like nudging the model's "train of thought", tilting it overall toward some tone or tendency (more formal, more optimistic, and so on).</p>
+<p>The difference is worth remembering: LoRA changes <strong>weights</strong> (adding a low-rank delta to matmul, affecting that layer's entire computation), expressive, able to learn complex adaptations; the control vector changes <strong>activations</strong> (shifting the residual stream along one direction), lighter, more like "seasoning", good at fine-tuning style along a semantic direction. In the C API, cvec uses <span class="mono">llama_set_adapter_cvec</span> (the old <span class="mono">llama_apply_adapter_cvec</span> is removed).</p>
+<p>Connecting this lesson back to Part 4's main line: the adapter is attached to <span class="mono">llama_context</span> (L17), and at each <span class="mono">llama_decode</span> graph build (L16), <span class="mono">build_lora_mm</span> folds the delta into the relevant matmul. So LoRA/cvec is not a new system started from scratch but a thin layer of "behavior tuning" <strong>embedded in the existing inference loop</strong> - reusing the graph-build and context mechanisms you learned earlier.</p>
+<p>With that, Part 4 (inside llama inference) is complete: from a .gguf being <strong>loaded</strong> into a model (L14-15), <strong>assembled into a compute graph</strong> (L16), packed into a <strong>context</strong> and inferred efficiently in batches with the KV cache (L17-19), to <strong>tokenization</strong>, <strong>sampling</strong>, <strong>chat templates</strong>, <strong>grammar constraints</strong>, and this lesson's <strong>lightweight fine-tuning</strong> (L20-24). You have now walked end to end through "how a large model is driven, controlled, and reshaped".</p>
+<p>How a control vector is "computed" is worth a mention. It often needs no training but uses a <strong>contrastive</strong> method: take a batch of "positive examples" (say formal-toned text) and a batch of "negative examples" (casual text), run each through the model and take a layer's activations; the direction of the <strong>difference</strong> between the two activation sets is roughly the direction of the concept "formal" inside the model. Add this direction vector to the residual stream and you push the output toward "more formal". Simple, direct, and training-free.</p>
+<p>Step back to the common ground of LoRA and control vectors: both practice the same principle - <strong>the base model is read-only, the changes are attached and stackable</strong>. This is of one piece with L17 separating "read-only weights" from "session state" and L21 making the sampling strategy a pluggable chain. All of Part 4, really, plays this one theme over and over: settle the invariant, split out the mutable, so the system is both solid and flexible.</p>
+<p>Part 4 ends here. Beyond it (Part 5) we step out of llama's internals to see how these abilities are exposed to you through the public API and command-line tools - having understood the machinery under the hood, next is learning to drive the car.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why is "low rank" enough? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Experience and theory point to the same observation: the change fine-tuning brings to the weights often lands in a <strong>low-dimensional subspace</strong>. That is, "adapting to a task" needs few directions, well spanned by a very low-rank matrix (say r=8 or 16). So with tiny parameters you approximate full fine-tuning's effect.</p>
+    <p>It makes intuitive sense too: the base model already learned vast general ability, and adapting to a new task is more like a "small correction" on top of it than a rebuild from scratch. A small correction has inherently few degrees of freedom, and a low-rank matrix is just enough. This is also why r is usually small - bigger brings diminishing returns.</p>
+    <p>It is a very cost-effective trade: parameters drop from d x d to 2 x d x r (r far smaller than d), possibly hundreds of times smaller, with the effect barely diminished. Trading a little approximation for a huge cost cut - this is the root of why LoRA can fine-tune large models on consumer hardware.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is the attach API the batched plural llama_set_adapters_lora? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because in reality you often want to <strong>attach several</strong> LoRAs at once: one for language style, one for domain knowledge, each with a scale, used together. An interface that attaches only one at a time cannot express this combination. So it is naturally designed as a batched set of <span class="mono">{adapter, scale}</span>.</p>
+    <p>It also simplifies the semantics: attach, replace, clear are all expressed by the same batched setter - pass a new set to replace, pass empty (<span class="mono">n=0</span>) to clear. No need for a separate add/remove/clear trio; one function handles every case, clean and tidy.</p>
+    <p>So the singular <span class="mono">llama_set_adapter_lora</span>/<span class="mono">llama_rm_adapter_lora</span>/<span class="mono">llama_clear_adapter_lora</span> from old tutorials are replaced by this one batched function and no longer exist. Seeing old code call them by the singular signature, know that is an outdated form.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> LoRA vs control vectors, what exactly differs? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Different levels. LoRA acts on <strong>weights</strong>: adding a low-rank delta to certain matmuls, so that layer's <strong>entire</strong> linear transform is rewritten - expressive, able to learn relatively complex adaptations (new style, new format, new domain). The cost is it needs training and storing the A/B matrices.</p>
+    <p>The control vector acts on <strong>activations</strong>: adding a fixed-direction vector directly to the residual stream, like nudging the model's state along a semantic axis ("formal vs casual", "optimistic vs pessimistic"). It is lighter and more direct, often needing no training (the direction can be computed from contrasting samples), but also more limited in expressiveness - good at "seasoning", not at "teaching new skills".</p>
+    <p>In a sentence: LoRA is a "<strong>low-rank weight patch</strong>", the control vector is an "<strong>activation-direction bias</strong>". One changes how an operator computes, the other where the data leans. Both leave the base weights untouched and are plug-and-play, two flavors of the same "lightweight behavior tuning" - choose by the expressiveness and cost you need.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>LoRA = freeze the original weights W, learn only small matrices A, B; output = W*x + <strong>scale*B*A*x</strong> (a low-rank delta); adapters are often just a few MB.</li>
+    <li>The math is implemented at graph build (<span class="mono">build_lora_mm</span>, <span class="mono">src/llama-graph.cpp</span>): <span class="mono">res = W*x</span>, then <span class="mono">+ scale*B*(A*x)</span>; scale comes from <span class="mono">alpha/rank</span> x a user ratio.</li>
+    <li>Load with <span class="mono">llama_adapter_lora_init</span>; attach with the <strong>batched</strong> <span class="mono">llama_set_adapters_lora</span> (singular set/rm/clear removed, <span class="mono">n=0</span> clears).</li>
+    <li>Control vector <span class="mono">llama_set_adapter_cvec</span>: shifts <strong>activations</strong> along a fixed direction; LoRA changes <strong>weights</strong>. Both copy no weights and are plug-and-play.</li>
+    <li>The adapter is attached to the context (L17) and folded into matmul at decode graph build (L16), <strong>not changing</strong> the base weights.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  LoRA brings "<strong>changing model behavior</strong>" down from "retraining a whole weight set" to "adding a few-MB low-rank filter" - the base model read-only, the delta plug-and-play. It is of one piece with Part 4's recurring theme: separate the <strong>read-only knowledge</strong> (weights) from the <strong>mutable parts</strong> (adapters, context, sampling strategy), so one large model can be reused in endless variations. Reaching here, you have finished Part 4 - from a .gguf file being loaded, to how it is driven, constrained, and lightly reshaped into what you want.
+</div>
+""",
+}
+

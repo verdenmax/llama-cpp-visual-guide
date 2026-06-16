@@ -1321,6 +1321,311 @@ QUIZZES = {
             },
         ],
     },
+    "20-vocabulary.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "tokenize 做什么？",
+                    "en": "What does tokenize do?",
+                },
+                "opts": [
+                    {"zh": "把文本字符串切成一串 token id（喂给模型）", "en": "cuts a text string into a list of token ids (to feed the model)"},
+                    {"zh": "把 token 还原成文本", "en": "turns tokens back into text"},
+                    {"zh": "训练一张新词表", "en": "trains a new vocabulary"},
+                    {"zh": "给每个 token 打分", "en": "scores each token"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "tokenize 是编码方向：文本 -> token id 序列，喂进模型。反方向（id -> 文本）是 token_to_piece/detokenize 干的。",
+                    "en": "tokenize is the encoding direction: text -> a list of token ids, fed into the model. The reverse (id -> text) is done by token_to_piece/detokenize.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "字节回退（byte fallback）的作用是什么？",
+                    "en": "What is byte fallback for?",
+                },
+                "opts": [
+                    {"zh": "让任何 UTF-8 字符都能被编码（拆成字节 token），避免未登录词 OOV", "en": "lets any UTF-8 char be encoded (split into byte tokens), avoiding out-of-vocabulary OOV"},
+                    {"zh": "压缩词表大小", "en": "compresses the vocab size"},
+                    {"zh": "加速推理", "en": "speeds up inference"},
+                    {"zh": "删除特殊 token", "en": "removes special tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "词表里没有的字符按 UTF-8 拆成字节、每字节一个 &lt;0xXX&gt; token（256 个必覆盖），于是再罕见的字符也能无损编码，消灭 OOV；代价是生僻字占多个 token。",
+                    "en": "A char absent from the vocab is split into UTF-8 bytes, one &lt;0xXX&gt; token per byte (256 of them, guaranteed to cover), so even rare chars encode losslessly, abolishing OOV; the cost is rare chars take several tokens.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "取词表大小，当前应该用哪个 API？",
+                    "en": "Which API should you use today to get the vocab size?",
+                },
+                "opts": [
+                    {"zh": "llama_vocab_n_tokens（旧 llama_n_vocab 已弃用）", "en": "llama_vocab_n_tokens (old llama_n_vocab is deprecated)"},
+                    {"zh": "llama_n_ctx", "en": "llama_n_ctx"},
+                    {"zh": "strlen", "en": "strlen"},
+                    {"zh": "llama_n_embd", "en": "llama_n_embd"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "词表大小是词表的属性，权威 API 是 llama_vocab_n_tokens；旧名 llama_n_vocab 已标 DEPRECATED。n_ctx/n_embd 是别的量。",
+                    "en": "Vocab size is a vocab property; the authoritative API is llama_vocab_n_tokens; the old llama_n_vocab is marked DEPRECATED. n_ctx/n_embd are different quantities.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L21，描述一次对话生成里 tokenize 和 token_to_piece 各在什么时候被调用、各处理哪个方向。",
+                "en": "Drawing on L21, describe when tokenize and token_to_piece are each called in one chat generation, and which direction each handles.",
+            },
+        ],
+    },
+    "21-sampling.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "greedy 采样选哪个 token？",
+                    "en": "Which token does greedy sampling pick?",
+                },
+                "opts": [
+                    {"zh": "logit 最大的那个（argmax，确定性）", "en": "the one with the max logit (argmax, deterministic)"},
+                    {"zh": "随机一个", "en": "a random one"},
+                    {"zh": "最后一个", "en": "the last one"},
+                    {"zh": "logit 最小的那个", "en": "the one with the min logit"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "greedy 永远取 logit 最大的候选（argmax），同样输入永远同样输出；dist 才是按概率随机抽。要复现/严谨用 greedy，要多样性用 dist。",
+                    "en": "greedy always takes the max-logit candidate (argmax); same input always same output. dist is the one that draws randomly by probability. Use greedy for reproducibility/rigor, dist for diversity.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "top_p（核采样）保留哪些候选？",
+                    "en": "Which candidates does top_p (nucleus) keep?",
+                },
+                "opts": [
+                    {"zh": "按概率从高到低累加、达到阈值 p 的最小候选集合", "en": "the smallest set whose cumulative probability (high to low) reaches threshold p"},
+                    {"zh": "固定的前 50 个", "en": "a fixed top 50"},
+                    {"zh": "概率大于 p 的全部", "en": "all with probability greater than p"},
+                    {"zh": "全部候选", "en": "all candidates"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "top_p 按概率累加到达 p 为止，候选数随分布自适应（尖时少、平时多）；top_k 才是固定个数。两者常配合：先 top_k 砍长尾，再 top_p 收口。",
+                    "en": "top_p accumulates probability until reaching p, so the candidate count adapts to the distribution (few when peaked, many when flat); top_k is the fixed-count one. They often pair: top_k chops the tail, top_p closes adaptively.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把采样做成\"链\"（chain）的主要好处是什么？",
+                    "en": "What is the main benefit of making sampling a 'chain'?",
+                },
+                "opts": [
+                    {"zh": "可组合——按顺序施加多个独立、可配置的采样器", "en": "composability - apply several independent, configurable samplers in order"},
+                    {"zh": "跑得更快", "en": "it runs faster"},
+                    {"zh": "省内存", "en": "it saves memory"},
+                    {"zh": "只能用一个采样器", "en": "it allows only one sampler"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "链把采样策略变成数据：每个采样器是独立小部件、自带状态，顺序可调、增删自由，用户调参就能拼出任意策略，引擎主干不动。快/省内存不是它的设计目的。",
+                    "en": "The chain turns the strategy into data: each sampler is an independent part with its own state, order is adjustable, add/remove is free; users tune parameters to assemble any strategy without touching the engine. Speed/memory are not its design goal.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L20 和 L23，说说采样器为什么是在\"词表的 token 空间\"里工作，以及 grammar 如何作为一种\"掩码\"来约束这一步。",
+                "en": "Drawing on L20 and L23, explain why a sampler works in 'the vocabulary's token space', and how grammar acts as a 'mask' to constrain this step.",
+            },
+        ],
+    },
+    "22-chat-templates.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "对话模板（chat template）做什么？",
+                    "en": "What does a chat template do?",
+                },
+                "opts": [
+                    {"zh": "把带角色的消息列表拼成该模型约定格式的提示词字符串", "en": "assemble a role-tagged message list into a prompt string in the model's agreed format"},
+                    {"zh": "把文本切成 token", "en": "cut text into tokens"},
+                    {"zh": "给回答打分", "en": "score the reply"},
+                    {"zh": "压缩对话历史", "en": "compress the conversation history"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "模板负责把 system/user/assistant 的消息列表，按这个模型训练时的格式（插入特殊标记）拼成一段字符串，再交给词表 tokenize。切 token 是 L20、打分是 L21 的事。",
+                    "en": "The template assembles the system/user/assistant message list into a string per the model's training format (inserting special markers), then hands it to the vocab to tokenize. Cutting tokens is L20, scoring is L21.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ChatML 模板用哪对标记包裹每条消息？",
+                    "en": "Which pair of markers does ChatML use to wrap each message?",
+                },
+                "opts": [
+                    {"zh": "&lt;|im_start|&gt; 和 &lt;|im_end|&gt;", "en": "&lt;|im_start|&gt; and &lt;|im_end|&gt;"},
+                    {"zh": "[INST] 和 [/INST]", "en": "[INST] and [/INST]"},
+                    {"zh": "&lt;s&gt; 和 &lt;/s&gt;", "en": "&lt;s&gt; and &lt;/s&gt;"},
+                    {"zh": "{{ 和 }}", "en": "{{ and }}"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ChatML 用 &lt;|im_start|&gt;role ... &lt;|im_end|&gt; 包每条消息；[INST]/[/INST] 是 Llama-2 的；&lt;s&gt;/&lt;/s&gt; 是序列起止符；{{ }} 是 Jinja 语法。",
+                    "en": "ChatML wraps each message as &lt;|im_start|&gt;role ... &lt;|im_end|&gt;; [INST]/[/INST] is Llama-2's; &lt;s&gt;/&lt;/s&gt; are sequence delimiters; {{ }} is Jinja syntax.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "add_ass（add assistant）为真时会做什么？",
+                    "en": "What does add_ass (add assistant) do when true?",
+                },
+                "opts": [
+                    {"zh": "在末尾追加 assistant 起始标记，让模型接着生成回答", "en": "append the assistant start marker at the end so the model continues generating the reply"},
+                    {"zh": "删除 system 消息", "en": "remove the system message"},
+                    {"zh": "把回答翻译成英文", "en": "translate the reply into English"},
+                    {"zh": "关闭采样", "en": "turn off sampling"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "add_ass 在拼好的提示词末尾补上 assistant 的起始标记（不含内容），相当于把话筒递给模型，让它从\"该助手说话\"处续写。聊天时开、纯补全时关。",
+                    "en": "add_ass appends the assistant's start marker (no content) at the end of the assembled prompt, like handing over the mic so the model continues from 'the assistant's turn'. On for chat, off for plain completion.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L20，说说为什么要\"先套对话模板、再 tokenize\"，如果把顺序反过来会出什么问题。",
+                "en": "Drawing on L20, explain why you 'apply the chat template first, then tokenize', and what goes wrong if you reverse the order.",
+            },
+        ],
+    },
+    "23-grammar.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "GBNF 语法约束怎么起作用？",
+                    "en": "How does a GBNF grammar constraint work?",
+                },
+                "opts": [
+                    {"zh": "采样时把不符合语法的 token 的 logit 设成负无穷（掩码），模型只能选合法 token", "en": "at sampling time it sets the logit of grammar-illegal tokens to negative infinity (a mask), so the model can only pick legal tokens"},
+                    {"zh": "生成完用正则校验", "en": "validate with a regex after generation"},
+                    {"zh": "微调模型", "en": "fine-tune the model"},
+                    {"zh": "改 prompt 提示", "en": "change the prompt"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "grammar 在采样前掩掉非法候选（logit 设负无穷、概率归零），选定后推进语法状态。这样每步都合法、输出必然合法，不靠事后校验，也不用微调或改 prompt。",
+                    "en": "The grammar masks illegal candidates before sampling (logit to negative infinity, probability zeroed), then advances the grammar state after a pick. So every step is legal and the output is necessarily valid - no after-the-fact check, no fine-tuning or prompt change.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "GBNF 文法的入口（起始）规则叫什么？",
+                    "en": "What is the entry (start) rule of a GBNF grammar called?",
+                },
+                "opts": [
+                    {"zh": "root", "en": "root"},
+                    {"zh": "main", "en": "main"},
+                    {"zh": "start", "en": "start"},
+                    {"zh": "entry", "en": "entry"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GBNF 约定入口规则叫 root，文法从它开始展开（就像程序从 main 开始）。读 GBNF 从 root 出发顺着 ::= 往下看最省力。",
+                    "en": "GBNF conventionally names the entry rule root, where the grammar starts expanding (like a program at main). The easiest way to read a GBNF is to start from root and follow ::= downward.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "相比'生成完再校验'，token 级语法掩码的好处是？",
+                    "en": "Compared to 'check after generation', what is the benefit of token-level grammar masking?",
+                },
+                "opts": [
+                    {"zh": "每一步都保证合法，不会生成到一半才发现非法而重来", "en": "every step is guaranteed legal, never finding illegality halfway and having to retry"},
+                    {"zh": "占内存更少", "en": "it uses less memory"},
+                    {"zh": "不需要词表", "en": "it needs no vocabulary"},
+                    {"zh": "让模型更有创意", "en": "it makes the model more creative"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "事后校验慢且可能反复失败、不保证收敛；token 级掩码把关口前移到每一步，生成出来必然合法、一次成型。它仍要用词表的 token 空间工作。",
+                    "en": "After-the-fact checking is slow, may fail repeatedly, and is not guaranteed to converge; token-level masking moves the gate to every step, so output is necessarily valid in one go. It still works in the vocab's token space.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L21，说说 grammar 作为一种'掩码采样器'为什么常被放在采样链之外、按 grammar_first 单独施加。",
+                "en": "Drawing on L21, explain why grammar, as a 'mask sampler', is often placed outside the sampler chain and applied separately per grammar_first.",
+            },
+        ],
+    },
+    "24-lora-adapters.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "LoRA 怎么改变模型行为？",
+                    "en": "How does LoRA change model behavior?",
+                },
+                "opts": [
+                    {"zh": "冻结原权重，用两个小矩阵 A、B 给权重加一个低秩增量 scale·B·A", "en": "freeze the original weights and add a low-rank delta scale*B*A via two small matrices A, B"},
+                    {"zh": "重训全部权重", "en": "retrain all the weights"},
+                    {"zh": "换一个词表", "en": "swap the vocabulary"},
+                    {"zh": "改采样温度", "en": "change the sampling temperature"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LoRA 冻结原权重 W，只学小矩阵 A、B，输出 = W·x + scale·B·A·x。适配器只有几 MB，远比重训全部权重轻；它和换词表、调温度是完全不同的事。",
+                    "en": "LoRA freezes the original W and learns only small matrices A, B; output = W*x + scale*B*A*x. The adapter is just a few MB, far lighter than retraining all weights; it is wholly different from swapping the vocab or tuning temperature.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "当前 llama.cpp 给上下文挂载 LoRA 用哪个 API？",
+                    "en": "Which API attaches a LoRA to the context in current llama.cpp?",
+                },
+                "opts": [
+                    {"zh": "批量的 llama_set_adapters_lora（单数 set/rm/clear 已移除，n=0 清空）", "en": "the batched llama_set_adapters_lora (singular set/rm/clear removed, n=0 clears)"},
+                    {"zh": "单数的 llama_set_adapter_lora", "en": "the singular llama_set_adapter_lora"},
+                    {"zh": "llama_lora_apply", "en": "llama_lora_apply"},
+                    {"zh": "重新加载模型", "en": "reload the model"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "当前 API 是复数批量的 llama_set_adapters_lora（一次可挂多个、各带 scale，n=0 清空）；早期单数的 set/rm/clear 三件套已被它取代、不复存在。",
+                    "en": "The current API is the plural, batched llama_set_adapters_lora (attach several at once, each with a scale; n=0 clears); the early singular set/rm/clear trio is replaced by it and no longer exists.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "LoRA 和控制向量（control vector）的主要区别？",
+                    "en": "The main difference between LoRA and a control vector?",
+                },
+                "opts": [
+                    {"zh": "LoRA 给权重加低秩增量（改 matmul），控制向量沿固定方向平移激活（加进残差流）", "en": "LoRA adds a low-rank delta to weights (changing matmul); a control vector shifts activations along a fixed direction (added to the residual stream)"},
+                    {"zh": "两者完全一样", "en": "they are exactly the same"},
+                    {"zh": "LoRA 改词表、cvec 改采样", "en": "LoRA changes the vocab, cvec changes sampling"},
+                    {"zh": "都要重训模型", "en": "both require retraining the model"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "LoRA 动权重（低秩增量折进 matmul，build_lora_mm），控制向量动激活（沿方向平移残差流，set_adapter_cvec）。两者都不碰基础权重、即插即用，但层面不同。",
+                    "en": "LoRA acts on weights (a low-rank delta folded into matmul, build_lora_mm); a control vector acts on activations (shifting the residual stream along a direction, set_adapter_cvec). Both leave base weights untouched and are plug-and-play, but at different levels.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L16，说说为什么挂上 LoRA 能'不复制权重'就生效——build_lora_mm 在建图的哪一步把增量加进来。",
+                "en": "Drawing on L16, explain why attaching a LoRA takes effect 'without copying weights' - at which graph-build step build_lora_mm adds the delta.",
+            },
+        ],
+    },
 }
 
 

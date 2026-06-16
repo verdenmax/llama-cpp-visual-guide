@@ -84,6 +84,16 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("19-kv-cache.html", "KV cache", "The KV cache",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("20-vocabulary.html", "词表", "Vocabulary",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("21-sampling.html", "采样", "Sampling",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("22-chat-templates.html", "对话模板", "Chat templates",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("23-grammar.html", "语法约束", "Grammar (GBNF)",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("24-lora-adapters.html", "LoRA 适配器", "LoRA adapters",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -535,6 +545,16 @@ SUBTITLES = {
                          "llama_batch; pos/seq_id/logits flags; llama_batch_allocr -> ubatch"),
     "19-kv-cache.html": ("llama_kv_cache · cell(pos/seq_id) · 上下文移位 · 多序列 · 变体",
                          "llama_kv_cache; cell(pos/seq_id); context shift; multi-seq; variants"),
+    "20-vocabulary.html": ("llama_vocab · tokenize/detokenize · SPM/BPE/WPM · 字节回退",
+                           "llama_vocab; tokenize/detokenize; SPM/BPE/WPM; byte fallback"),
+    "21-sampling.html": ("llama_sampler · 采样链 · top-k/top-p/温度 · greedy vs dist",
+                         "llama_sampler; sampler chain; top-k/top-p/temp; greedy vs dist"),
+    "22-chat-templates.html": ("llm_chat_template · 内建 vs Jinja · ChatML/Llama/Gemma",
+                               "llm_chat_template; built-in vs Jinja; ChatML/Llama/Gemma"),
+    "23-grammar.html": ("GBNF · llama_grammar · 掩码采样(-inf) · root 规则",
+                        "GBNF; llama_grammar; mask sampling(-inf); root rule"),
+    "24-lora-adapters.html": ("LoRA 低秩增量 scale·B·A · llama_set_adapters_lora · 控制向量",
+                              "LoRA low-rank delta scale*B*A; llama_set_adapters_lora; control vectors"),
 }
 
 

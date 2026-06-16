@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>20 · 词表 / Vocabulary - llama.cpp 图解教程</title>
+<meta name="description" content="第四部分 · llama 推理内部｜词表 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="20 · 词表 / Vocabulary - llama.cpp 图解教程">
+<meta property="og:description" content="第四部分 · llama 推理内部｜词表 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="20 · 词表 / Vocabulary - llama.cpp 图解教程">
+<meta name="twitter:description" content="第四部分 · llama 推理内部｜词表 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></span>
+    <span class="pill">20 / 24</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:83%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></div>
+    <h1><span class="lang-zh">词表</span><span class="lang-en">Vocabulary</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+到这里，M4a 的模型已经能"算"了——加载（L14）、定架构（L15）、建图（L16）、装进上下文（L17）、按批处理（L18）、用 KV cache 高效自回归（L19），最后吐出一排 logits。可有个根本问题一直被绕过去：模型从头到尾只认<strong>数字</strong>（token id），它根本不认识"你好"这两个字。文本怎么变成数字、数字又怎么变回文本？这一课的主角 <span class="mono">llama_vocab</span>（词表），就是文本世界和 token 世界之间唯一的翻译官。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">它干两件互逆的事：<span class="mono">tokenize</span> 把字符串切成一串 token id 喂进模型；<span class="mono">detokenize</span>/<span class="mono">token_to_piece</span> 把模型吐出的 token id 还原成文字片段、拼回人能读的句子。一次完整的对话生成，进口要过它（把你的话变成 id），出口也要过它（把模型选出的 id 变成字）。没有这层翻译，"模型只会算数字"和"人类只说文字"这两个世界就永远接不上。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  词表像一本<strong>双向密码本</strong>：编码时，把人话按一套固定规则切成一串号码（token id）；解码时，再按号码查回对应的文字片段。不同模型用的"切法"不一样（SentencePiece、BPE、WordPiece……），但本质都是同一本"号码 &lt;-&gt; 文本片段"的对照表——查得过去，也查得回来。
+</div>
+
+<h2>为什么需要词表</h2>
+<div class="flow">
+  <div class="node"><div class="nt">文本</div><div class="nd">"你好"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">tokenize</div><div class="nd">编码</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">token id</div><div class="nd">[9707, ...]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token_to_piece</div><div class="nd">解码</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">文本</div><div class="nd">"好"</div></div>
+</div>
+<p>模型内部全是数字。它的输入是一串 token id、输出也是一个 token id 的概率分布；从头到尾，它<strong>碰不到、也不需要</strong>字符串。词表就横在文本世界和 token 世界的边界上，进出两头都得过它这一关——这是它必须存在的根本原因。</p>
+<p>为什么不直接按"字"或"字母"喂模型？因为太细则序列太长（一个汉字若干字节、一句话上千步）、太粗则词表爆炸（穷举所有词不现实）。<strong>子词（subword）</strong>切分是个折中：常见词整块给一个 id，生僻词拆成几个常见片段。于是词表大小可控（几万），序列长度也合理。</p>
+<p>这也解释了为什么"同一句话，不同模型切出的 token 数不一样"。切分规则是模型训练时就定死的、随权重一起存在 GGUF 里（L13 的自描述）；用的时候必须用<strong>同一套</strong>词表，错一套，切出来的 id 就对不上模型学过的东西，输出立刻变成乱码。</p>
+<p>所以词表不是可有可无的配件，而是和权重<strong>绑定</strong>的一部分。加载模型（L14）时，词表也一并从 GGUF 里读出来；它定义了这个模型的"token 空间"——后面采样（L21）选下一个词，选的也正是这张词表里的某个 id。</p>
+<p>换个角度看，词表其实是模型和人之间"约定俗成"的接口。模型在训练时反复见过的每一个片段，都对应词表里的一个 id；它学到的所有规律，都建立在"这些片段"之上。所以词表一旦定下，就等于划定了模型"认得的世界"——它能流利处理的，永远是这张词表切得出来的片段的组合。</p>
+<p>也正因如此，词表的好坏会直接影响表现。一套切得好的词表，能让常用表达只占很少的 token，让模型把注意力花在"意思"而不是"拼写"上；切得糙则会把简单的词拆得七零八落，既浪费序列长度、又抬高学习难度。可以说，分词是模型训练和推理共同的起跑线。</p>
+<p>不妨用一个数字建立直觉：一个英文单词平均约切成 1.3 个 token，一个汉字常占 1 到 2 个 token，而一段几百字的提示词，往往对应上千个 token。模型的"上下文长度"（L17 的 n_ctx）数的就是 token、不是字符；你能塞进多少对话，最终由分词后的 token 数决定。想明白这点，才能理解为什么"同样几屏文字，有时就超了上下文"。</p>
+
+<h2>llama_vocab 是什么</h2>
+<pre class="code"><span class="cm">// 简化自 src/llama-vocab.h</span>
+<span class="kw">struct</span> <span class="fn">llama_vocab</span> {
+    uint32_t <span class="fn">n_tokens</span>() <span class="kw">const</span>;                          <span class="cm">// 词表大小(L15 的 n_vocab 来源)</span>
+    int32_t  <span class="fn">tokenize</span>(<span class="kw">const char</span> * text, ...) <span class="kw">const</span>;       <span class="cm">// 文本 -&gt; token id</span>
+    int32_t  <span class="fn">token_to_piece</span>(llama_token id, <span class="kw">char</span> * buf, ...) <span class="kw">const</span>; <span class="cm">// id -&gt; 文本片段</span>
+<span class="kw">private</span>:
+    <span class="kw">struct</span> impl;                              <span class="cm">// pimpl: 藏起分词器实现</span>
+    std::unique_ptr&lt;impl&gt; pimpl;
+};</pre>
+<p><span class="mono">llama_vocab</span> 对外是一套统一接口：<span class="mono">n_tokens()</span> 给词表大小、<span class="mono">tokenize</span> 编码、<span class="mono">token_to_piece</span> 解码，还有一堆查询单个 token 属性的方法。但它把"具体用哪种分词算法"的实现细节，全藏在一个私有的 <span class="mono">impl</span> 结构里——这就是 <strong>pimpl</strong>（pointer to implementation）手法。</p>
+<p>为什么要 pimpl？因为分词算法五花八门（下一节细讲），每种的内部数据结构、合并规则都不同。把它们统统塞进 <span class="mono">impl</span>，对外只露 <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> 这层薄薄的接口，于是<strong>用的人完全无感</strong>：不管底下是 SPM 还是 BPE，调用方式一模一样。换算法、改实现，都不会惊动上层代码。</p>
+<p>这和你前面见过的解耦是一个味道：L14 的 loader 把"解析格式"和"使用模型"分开，L17 的 context 把"只读知识"和"会话状态"分开。这里则是把"分词的脏活"和"统一的接口"分开。一道清晰的边界，让复杂性被关在盒子里。</p>
+<p>还有一组以 <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span> 为代表的标志位，记录"这个模型 tokenize 时该不该自动前置 BOS、后置 EOS"。这些也是随模型定的（写在 GGUF 里），词表忠实地照做——又一次体现 L13 的自描述精神。</p>
+<p>再具体看这套接口的分工。编码这头，<span class="mono">tokenize</span> 要处理的细节其实不少：要不要加空格前缀、要不要规范化、遇到连续空白怎么合并——这些都是不同分词器各自的"脾气"，但全被收进了 <span class="mono">impl</span>。上层只管把字符串递进去、把 id 取出来，完全不必关心底下在折腾什么。</p>
+<p>解码那头同样有讲究。<span class="mono">token_to_piece</span> 不是简单"查表取字符串"，它还要处理特殊 token 该不该显示、字节 token 怎么按 UTF-8 拼、首词要不要补空格这些琐碎规则。把它们也一并封进词表，是为了让"还原文本"在任何模型上都一致正确——你只管循环调用、拼接结果。</p>
+
+<h2>几种分词算法</h2>
+<table class="t">
+  <tr><th>类型</th><th>算法</th><th>代表模型</th></tr>
+  <tr><td>SPM</td><td>SentencePiece（字节级 BPE + 字节回退）</td><td>LLaMA</td></tr>
+  <tr><td>BPE</td><td>字节级 byte-pair 合并</td><td>GPT-2 / Qwen</td></tr>
+  <tr><td>WPM</td><td>WordPiece</td><td>BERT</td></tr>
+  <tr><td>UGM</td><td>Unigram</td><td>T5</td></tr>
+  <tr><td>RWKV</td><td>贪心匹配</td><td>RWKV</td></tr>
+  <tr><td>PLAMO2</td><td>Aho-Corasick + 动态规划</td><td>PLaMo-2</td></tr>
+</table>
+<p>主流分词算法就那么几种，<span class="mono">enum llama_vocab_type</span> 把它们一一列出。它们的差别在"怎么把词拆成子词、怎么合并"，但对上层都是同一个 <span class="mono">tokenize</span>。GGUF 的 tokenizer 元数据（L13）决定这个模型用哪种。</p>
+<p><strong>SPM</strong>（SentencePiece）是 LLaMA 系的传统，基于字节级 BPE 且自带字节回退；<strong>BPE</strong>（byte-pair encoding）是 GPT-2 系的字节级合并；<strong>WPM</strong>（WordPiece）是 BERT 系；<strong>UGM</strong>（Unigram）是 T5 系；<strong>RWKV</strong> 用贪心匹配；还有较新的 <strong>PLAMO2</strong>（Aho-Corasick + 动态规划）。这些缩写背后，是不同的历史生态和语言/效率取舍。</p>
+<p>为什么有这么多？因为不同模型家族沿用各自生态的工具链，而每种算法在多语言、代码、压缩率上各有长短。llama.cpp 不强求统一，而是用一套接口（pimpl）把它们都兼容进来——这正是它能跑几十种模型的工程基础之一。</p>
+<p>你不需要记住每种的细节，只要建立一个直觉：<strong>同一句话，换种算法就换种切法</strong>，token 数和边界都可能不同；但只要"编码用的词表"和"模型训练用的词表"是同一套，往返就严丝合缝。</p>
+<p>举个直观的例子体会差异。"unhappiness"这个词，BPE 可能切成"un"+"happiness"或"un"+"happy"+"ness"，靠的是训练时统计出来的高频合并；Unigram 则从一个大候选集里、按概率挑出最可能的一种切分。两条路线殊途同归，都想用尽量少的片段覆盖尽量多的文本，只是挑片段的"哲学"不同。</p>
+<p>对中文这种没有天然空格的语言，分词更见功夫。字节级方案会先把汉字降到 UTF-8 字节再合并，于是不依赖"词的边界"也能工作——这也是为什么一个主要用英文训练的模型，往往也能磕磕绊绊地处理中文：因为最底层它认的是字节，而不是某种语言的"词"。</p>
+<p>还有一个常被问到的点：词表该做多大？太小则每个词都得拆成很多片段、序列变长、推理变慢；太大则嵌入表和输出层都跟着膨胀、显存吃紧。所以词表大小是个折中，主流模型大多落在几万到十几万这个区间。它一旦定下，就深深影响着模型的体量与速度——又一次印证"词表和模型是绑在一起的"。</p>
+
+<h2>特殊 token 与字节回退</h2>
+<p>词表里除了普通的"文字片段 token"，还有一类<strong>特殊 token</strong>：<span class="mono">BOS</span>（序列开始）、<span class="mono">EOS</span>（序列结束）、<span class="mono">EOT</span>（一轮结束）、<span class="mono">PAD</span>/<span class="mono">SEP</span>/<span class="mono">UNK</span> 等。它们不对应具体文字，而是<strong>控制标记</strong>，由访问器 <span class="mono">token_bos()</span>/<span class="mono">token_eos()</span>/<span class="mono">token_eot()</span> 取出。比如模型生成出 EOS，就意味着"我说完了"，上层据此停止。</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>字节回退</b>：词表里没有的字符 -&gt; 按 UTF-8 拆成字节 -&gt; 每字节一个 &lt;0xXX&gt; token</div>
+  <div class="cells"><span class="lab">生僻字/emoji</span><span class="cell hl">词表外</span><span class="lab">-&gt;</span><span class="cell">&lt;0xF0&gt;</span><span class="cell">&lt;0x9F&gt;</span><span class="cell">&lt;0x8E&gt;</span><span class="cell">&lt;0x89&gt;</span></div>
+</div>
+<p>那遇到词表里压根没有的字符怎么办（生僻字、emoji）？靠<strong>字节回退</strong>（byte fallback）：把这个字符按 UTF-8 拆成若干字节，每个字节映射到一个形如 <span class="mono">&lt;0xF0&gt;</span> 的字节 token（带 <span class="mono">LLAMA_TOKEN_ATTR_BYTE</span> 属性）。于是<strong>任何</strong> UTF-8 文本最差也能逐字节编码，永远不会"无法编码"。这一手解决的是经典的 <strong>OOV</strong>（未登录词）难题。一次往返大致如下：</p>
+<pre class="code"><span class="cm"># 伪代码: tokenize 往返</span>
+ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, add_special=<span class="kw">True</span>)   <span class="cm"># 可自动前置 BOS</span>
+<span class="cm"># ids = [&lt;bos&gt;, 9906, ...]</span>
+text = <span class="st">""</span>
+<span class="kw">for</span> id <span class="kw">in</span> ids:
+    text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># 逐 token 还原拼接</span></pre>
+<p><span class="mono">tokenize</span> 时可以让它自动前置 BOS（由前面那个 <span class="mono">get_add_bos()</span> 标志控制）；解码时则逐个 token 调 <span class="mono">token_to_piece</span> 把片段拼回去。注意字节 token 还原时要按 UTF-8 把几个字节<strong>拼起来</strong>才是一个完整字符——这也是为什么解码要逐步累积、而不是"一个 token 一个字"。</p>
+<p>特殊 token 之所以重要，是因为它们承载着"文字之外"的结构信息。一段对话里，谁说的、一轮在哪结束、要不要停下，都靠这些标记界定（后面 L22 的对话模板，正是在大量使用它们）。可以把普通 token 看成"内容"、特殊 token 看成"标点和段落标记"——少了后者，模型就分不清对话的骨架。</p>
+<p>字节回退还有个容易被忽略的好处：它让词表可以做得相对"小"而不担心覆盖不全。既然有 256 个字节 token 兜底，词表就不必为塞下每个生僻字而无限膨胀，只收高频片段即可，罕见的交给字节去拼。这是"常见的走捷径、罕见的走通路"的务实设计，和很多系统里"快路径 + 慢路径"异曲同工。</p>
+<p>这里还要点出一个细节：判断"该不该停"靠的不是单一的 EOS，而是一组"生成结束"（EOG）标记。不同模型用的结束标记不一样，有的用 EOS、有的用 EOT、有的两者皆可；词表里用一个专门的判断（是否属于 EOG 集合）来统一处理。上层只要问一句"这个 token 是不是结束符"，就能正确收尾，而不必记住每个模型的具体约定。</p>
+
+<h2>C API 与衔接</h2>
+<p>从 C API 用词表，路径很直白：先 <span class="mono">llama_model_get_vocab(model)</span> 从模型拿到词表，再 <span class="mono">llama_vocab_n_tokens(vocab)</span> 问大小、<span class="mono">llama_tokenize</span> 编码、<span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> 解码。这些函数都收一个 <span class="mono">const llama_vocab *</span>。</p>
+<p>这里有个大坑：2023 年老教程里那一批名字<strong>大多已经弃用</strong>。取词表大小的 <span class="mono">llama_n_vocab</span> 被标了 DEPRECATED，改用 <span class="mono">llama_vocab_n_tokens</span>；取特殊 token 的 <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> 等，统统改名成了 <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>。看老代码时要留个心眼。</p>
+<p>为什么要这么大动干戈地改名？因为这些操作本质上是<strong>词表的</strong>方法，而不是模型的——把它们从 <span class="mono">llama_*</span> 统一收进 <span class="mono">llama_vocab_*</span>，名实相符，也呼应了内部 <span class="mono">llama_vocab</span> 已经独立成型这件事。改名虽然烦，但让 API 更清晰。</p>
+<p>把这一课接回主线：你输入的文字，先经 L22 的对话模板拼好格式，再经词表 <span class="mono">tokenize</span> 成 id，进模型算出 logits（L17），由采样器（L21）在<strong>这张词表的 token 空间</strong>里选出下一个 id，最后再经 <span class="mono">token_to_piece</span> 变回文字显示给你。词表正是这条回路一进一出的两道门。</p>
+<p>顺带澄清一个常见疑惑：tokenize 的结果是不是唯一的？对确定的词表和同一套规则，答案是肯定的——同样的输入永远切出同样的 id 序列，这正是编码/解码能可靠往返的前提。采样（L21）带来的随机性，发生在"选下一个 token"那一步，和分词无关；分词本身是完全确定的。</p>
+<p>最后留一个串起全局的视角：词表是这套推理系统里少数"人能直接看懂"的部分。权重是一堆浮点、计算图是一串算子，唯独词表，你能把 id 一个个查回文字、亲眼看到模型"读到了什么、想说什么"。调试模型行为时，先把 token 打印出来看看，常常是最快的入手点。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么有这么多分词算法（SPM/BPE/WPM…）？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>直接原因是<strong>历史与生态</strong>：LLaMA 系沿用 SentencePiece，GPT 系用字节级 BPE，BERT 系用 WordPiece，T5 系用 Unigram。每个模型家族训练时用什么，推理时就得用什么——词表和权重是配套的，换不得。</p>
+    <p>更深一层是<strong>取舍</strong>：不同算法在多语言覆盖、对代码/数字的友好度、压缩率（同样文本切成多少 token）上各有高下。比如字节级 BPE 对任何语言都鲁棒（先降到字节），WordPiece 对英文形态友好。没有银弹，所以百花齐放。</p>
+    <p>llama.cpp 的态度是<strong>全都支持</strong>：用 pimpl 把各算法的实现差异藏起来，对上层暴露同一个 <span class="mono">tokenize</span>。于是它不挑模型——这正是一个"通用推理引擎"该有的样子，和 L15 表驱动支持多架构是同一种胸怀。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 字节回退到底解决什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>解决 <strong>OOV</strong>（out-of-vocabulary，未登录词）。任何固定词表都不可能穷尽世界上所有字符（新 emoji、生僻字、各种符号层出不穷）。没有兜底机制的话，遇到没见过的字符就只能丢一个 <span class="mono">&lt;UNK&gt;</span>，信息彻底丢失。</p>
+    <p>字节回退的兜底很优雅：UTF-8 本身就是字节序列，把任意字符拆成 1-4 个字节，每个字节对应一个 <span class="mono">&lt;0xXX&gt;</span> token（共 256 个，必然覆盖）。于是"词表外"这个概念被消灭了——再罕见的字符也能被无损编码，只是占的 token 多一点。</p>
+    <p>代价值得一提：一个生僻字可能占 3-4 个字节 token，比常见字"贵"几倍。所以模型处理大量生僻字/某些语言时，token 消耗会明显偏高——这也是有些语言"显得更费 token"的底层原因之一。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么 n_vocab 在词表里、不在 hparams（L15）？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为词表大小是<strong>词表的属性</strong>，由 tokenizer 决定，而不是网络结构的属性。L15 的 <span class="mono">llama_hparams</span> 描述"网络多少层、多宽、几个头"；词表描述"token 空间多大、怎么切分"。两者职责不同，理应分家。</p>
+    <p>实践中确实有这个坑：L15 特意强调过 <span class="mono">n_vocab</span> 不在 <span class="mono">hparams</span> 里，权威来源是 <span class="mono">llama_vocab::n_tokens()</span>。虽然嵌入层和输出层的形状要用到词表大小（它们的一个维度就是 <span class="mono">n_vocab</span>），但这个数的"主人"是词表。</p>
+    <p>这种"谁的属性归谁管"的划分，让代码各司其职：改词表不动 hparams、改网络结构不动词表。边界清晰，是这套代码能长期维护的隐形功臣——你在 L14（loader vs 模型）、L17（model vs context）已经反复见到同一种纪律。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama_vocab</span> 是文本 &lt;-&gt; token 的双向翻译官：<span class="mono">tokenize</span> 编码、<span class="mono">token_to_piece</span>/<span class="mono">detokenize</span> 解码。</li>
+    <li>它是 <strong>pimpl</strong>：把具体分词算法藏进 <span class="mono">impl</span>，对外只露统一接口。</li>
+    <li>类型 <span class="mono">enum llama_vocab_type</span>：SPM/BPE/WPM/UGM/RWKV/PLAMO2，差在"怎么切"，由 GGUF 元数据选定。</li>
+    <li>特殊 token（<span class="mono">token_bos/eos/eot</span>）是控制标记；<strong>字节回退</strong> <span class="mono">&lt;0xXX&gt;</span> 让任何 UTF-8 都能编码、消灭 OOV。</li>
+    <li>C API：<span class="mono">llama_model_get_vocab</span> -&gt; <span class="mono">llama_vocab_n_tokens</span>/<span class="mono">llama_tokenize</span>/<span class="mono">llama_token_to_piece</span>；旧名 <span class="mono">llama_n_vocab</span>/<span class="mono">llama_token_bos</span> 已弃用、改 <span class="mono">llama_vocab_*</span>。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  词表把"<strong>文本世界</strong>"和"<strong>token 世界</strong>"干净地隔开——模型只在 token 空间里活，永远不碰字符串；几种截然不同的切分算法，被 pimpl 一藏，在上层眼里就是同一个 <span class="mono">tokenize</span>。这层薄薄的翻译官，是"模型只会算数字"和"人类只说文字"之间唯一的桥。读懂了它，你就明白每次对话一进一出，文字是怎么悄悄变成数字、又变回文字的。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. tokenize 做什么？</div>
+  <ol class="opts">
+    <li>给每个 token 打分</li>
+    <li>把 token 还原成文本</li>
+    <li>训练一张新词表</li>
+    <li>把文本字符串切成一串 token id（喂给模型）</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。tokenize 是编码方向：文本 -> token id 序列，喂进模型。反方向（id -> 文本）是 token_to_piece/detokenize 干的。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 字节回退（byte fallback）的作用是什么？</div>
+  <ol class="opts">
+    <li>删除特殊 token</li>
+    <li>压缩词表大小</li>
+    <li>加速推理</li>
+    <li>让任何 UTF-8 字符都能被编码（拆成字节 token），避免未登录词 OOV</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。词表里没有的字符按 UTF-8 拆成字节、每字节一个 &lt;0xXX&gt; token（256 个必覆盖），于是再罕见的字符也能无损编码，消灭 OOV；代价是生僻字占多个 token。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 取词表大小，当前应该用哪个 API？</div>
+  <ol class="opts">
+    <li>strlen</li>
+    <li>llama_n_embd</li>
+    <li>llama_n_ctx</li>
+    <li>llama_vocab_n_tokens（旧 llama_n_vocab 已弃用）</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。词表大小是词表的属性，权威 API 是 llama_vocab_n_tokens；旧名 llama_n_vocab 已标 DEPRECATED。n_ctx/n_embd 是别的量。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>结合 L21，描述一次对话生成里 tokenize 和 token_to_piece 各在什么时候被调用、各处理哪个方向。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+By now M4a's model can "compute" - loading (L14), architecture (L15), graph-building (L16), context (L17), batching (L18), efficient autoregression via the KV cache (L19), finally emitting a row of logits. But one basic question kept getting skipped: from start to finish the model only knows <strong>numbers</strong> (token ids); it has no idea what the characters "hi" are. How does text turn into numbers, and numbers back into text? This lesson's star, <span class="mono">llama_vocab</span> (the vocabulary), is the sole translator between the text world and the token world.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">It does two inverse jobs: <span class="mono">tokenize</span> cuts a string into a list of token ids to feed the model; <span class="mono">detokenize</span>/<span class="mono">token_to_piece</span> turns the token ids the model emits back into text pieces, reassembled into a human-readable sentence. A full chat generation passes through it on the way in (your words become ids) and on the way out (the chosen ids become characters). Without this translation, "the model only does numbers" and "humans only speak text" never connect.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A vocabulary is like a <strong>two-way codebook</strong>: encoding cuts human speech by a fixed set of rules into a string of numbers (token ids); decoding looks each number back up to its text piece. Different models use different "cuts" (SentencePiece, BPE, WordPiece...), but at heart it is the same "number &lt;-&gt; text-piece" table - it maps forward, and it maps back.
+</div>
+
+<h2>Why a vocabulary is needed</h2>
+<div class="flow">
+  <div class="node"><div class="nt">text</div><div class="nd">"hi"</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">tokenize</div><div class="nd">encode</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">token id</div><div class="nd">[9707, ...]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token_to_piece</div><div class="nd">decode</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">text</div><div class="nd">"hi"</div></div>
+</div>
+<p>Inside, the model is all numbers. Its input is a list of token ids and its output is a probability distribution over a token id; from end to end it <strong>never touches, and never needs</strong>, strings. The vocabulary sits exactly on the border between the text world and the token world, and both directions must pass through it - that is why it must exist.</p>
+<p>Why not feed the model by "character" or "letter" directly? Too fine and the sequence is too long (one CJK glyph is several bytes, one sentence thousands of steps); too coarse and the vocab explodes (enumerating all words is hopeless). <strong>Subword</strong> splitting is the compromise: common words get one id whole, rare words split into a few common pieces. So the vocab size stays manageable (tens of thousands) and the sequence length stays reasonable.</p>
+<p>This also explains why "the same sentence, split by different models, yields a different token count". The splitting rules are fixed at training time and stored with the weights in GGUF (L13's self-description); at use time you must use the <strong>same</strong> vocab - the wrong one and the ids no longer match what the model learned, and the output instantly turns to garbage.</p>
+<p>So the vocabulary is not an optional accessory but a part <strong>bound</strong> to the weights. When the model loads (L14), the vocab is read out of GGUF along with it; it defines this model's "token space" - and when sampling (L21) later picks the next word, it is picking some id from exactly this vocabulary.</p>
+<p>From another angle, the vocabulary is really an agreed-upon interface between the model and people. Every piece the model saw repeatedly during training maps to one id in the vocab; all the patterns it learned are built on "those pieces". So once the vocab is fixed, it delimits the model's "known world" - what it handles fluently is always combinations of pieces this vocab can produce.</p>
+<p>For that reason the vocab's quality directly affects performance. A well-cut vocab lets common expressions take very few tokens, letting the model spend attention on "meaning" rather than "spelling"; a crude one shatters simple words into fragments, wasting sequence length and raising the learning difficulty. Tokenization is, in a sense, the shared starting line of both training and inference.</p>
+<p>Build intuition with a number: an English word averages about 1.3 tokens, a CJK glyph often takes 1 to 2 tokens, and a prompt of a few hundred characters often maps to over a thousand tokens. The model's "context length" (L17's n_ctx) counts tokens, not characters; how much conversation you can fit is ultimately decided by the post-tokenization token count. Grasp this and you see why "the same few screens of text sometimes overflows the context".</p>
+
+<h2>What llama_vocab is</h2>
+<pre class="code"><span class="cm">// simplified from src/llama-vocab.h</span>
+<span class="kw">struct</span> <span class="fn">llama_vocab</span> {
+    uint32_t <span class="fn">n_tokens</span>() <span class="kw">const</span>;                          <span class="cm">// vocab size (source of L15's n_vocab)</span>
+    int32_t  <span class="fn">tokenize</span>(<span class="kw">const char</span> * text, ...) <span class="kw">const</span>;       <span class="cm">// text -&gt; token id</span>
+    int32_t  <span class="fn">token_to_piece</span>(llama_token id, <span class="kw">char</span> * buf, ...) <span class="kw">const</span>; <span class="cm">// id -&gt; text piece</span>
+<span class="kw">private</span>:
+    <span class="kw">struct</span> impl;                              <span class="cm">// pimpl: hides the tokenizer internals</span>
+    std::unique_ptr&lt;impl&gt; pimpl;
+};</pre>
+<p>Outwardly <span class="mono">llama_vocab</span> is one unified interface: <span class="mono">n_tokens()</span> gives the vocab size, <span class="mono">tokenize</span> encodes, <span class="mono">token_to_piece</span> decodes, plus a batch of methods to query a single token's attributes. But it hides all the "which tokenizer algorithm exactly" implementation detail inside a private <span class="mono">impl</span> struct - this is the <strong>pimpl</strong> (pointer to implementation) idiom.</p>
+<p>Why pimpl? Because tokenizer algorithms vary wildly (next section), each with different internal data structures and merge rules. Stuffing them all into <span class="mono">impl</span> and exposing only the thin <span class="mono">tokenize</span>/<span class="mono">token_to_piece</span> interface means <strong>the caller feels nothing</strong>: whether SPM or BPE underneath, the call is identical. Swapping algorithms or changing internals never disturbs the upper code.</p>
+<p>This is the same flavor of decoupling you have seen before: L14's loader splits "parse the format" from "use the model", L17's context splits "read-only knowledge" from "session state". Here it splits "the dirty work of tokenizing" from "the unified interface". A clear boundary keeps the complexity locked in a box.</p>
+<p>There is also a set of flags led by <span class="mono">get_add_bos()</span>/<span class="mono">get_add_eos()</span>, recording "should this model auto-prepend BOS, auto-append EOS when tokenizing". These too are set per model (written in GGUF), and the vocab faithfully obeys - once more L13's self-description spirit.</p>
+<p>Look more concretely at this interface's division of labor. On the encoding side, <span class="mono">tokenize</span> handles quite a few details: whether to add a space prefix, whether to normalize, how to merge consecutive whitespace - each tokenizer's own "temperament", all gathered into <span class="mono">impl</span>. The upper layer just hands in a string and takes out ids, never minding what churns below.</p>
+<p>The decoding side is equally subtle. <span class="mono">token_to_piece</span> is not a plain "look up a string"; it also handles whether a special token should show, how byte tokens join by UTF-8, whether the first word needs a leading space. Sealing these into the vocab too keeps "restoring text" consistently correct across any model - you just call in a loop and concatenate.</p>
+
+<h2>A few tokenizer algorithms</h2>
+<table class="t">
+  <tr><th>Type</th><th>Algorithm</th><th>Example model</th></tr>
+  <tr><td>SPM</td><td>SentencePiece (byte-level BPE + byte fallback)</td><td>LLaMA</td></tr>
+  <tr><td>BPE</td><td>byte-level byte-pair merges</td><td>GPT-2 / Qwen</td></tr>
+  <tr><td>WPM</td><td>WordPiece</td><td>BERT</td></tr>
+  <tr><td>UGM</td><td>Unigram</td><td>T5</td></tr>
+  <tr><td>RWKV</td><td>greedy matching</td><td>RWKV</td></tr>
+  <tr><td>PLAMO2</td><td>Aho-Corasick + dynamic programming</td><td>PLaMo-2</td></tr>
+</table>
+<p>There are only a handful of mainstream tokenizer algorithms, and <span class="mono">enum llama_vocab_type</span> lists them out. They differ in "how to split a word into subwords and how to merge", but to the upper layer they are all the same <span class="mono">tokenize</span>. GGUF's tokenizer metadata (L13) decides which one this model uses.</p>
+<p><strong>SPM</strong> (SentencePiece) is the LLaMA-family tradition, based on byte-level BPE with built-in byte fallback; <strong>BPE</strong> (byte-pair encoding) is the GPT-2-family byte-level merging; <strong>WPM</strong> (WordPiece) is the BERT family; <strong>UGM</strong> (Unigram) is the T5 family; <strong>RWKV</strong> uses greedy matching; and the newer <strong>PLAMO2</strong> (Aho-Corasick + dynamic programming). Behind these abbreviations lie different historical ecosystems and language/efficiency trade-offs.</p>
+<p>Why so many? Because different model families inherit their own ecosystem's toolchain, and each algorithm has strengths and weaknesses across multilingual coverage, code, and compression rate. llama.cpp does not force uniformity; it makes them all compatible behind one interface (pimpl) - one of the engineering foundations for running dozens of models.</p>
+<p>You need not memorize each one's details, only build an intuition: <strong>the same sentence, a different algorithm means a different cut</strong>, with possibly different token counts and boundaries; but as long as "the vocab used to encode" and "the vocab the model trained with" are the same, the round-trip fits perfectly.</p>
+<p>A concrete example brings out the difference. The word "unhappiness", BPE might cut into "un"+"happiness" or "un"+"happy"+"ness", relying on high-frequency merges counted at training time; Unigram instead picks, from a large candidate set, the most probable single split by probability. The two routes converge - both want to cover the most text with the fewest pieces - they just differ in the "philosophy" of choosing pieces.</p>
+<p>For a language like Chinese with no natural spaces, tokenization shows its craft. Byte-level schemes first drop a glyph to UTF-8 bytes and then merge, so they work without relying on "word boundaries" - which is also why a model trained mostly on English can often stumble through Chinese: at the bottom it knows bytes, not any language's "words".</p>
+<p>Another frequently asked point: how big should the vocab be? Too small and every word splits into many pieces, lengthening sequences and slowing inference; too large and the embedding table and output layer bloat with it, straining VRAM. So vocab size is a compromise, and mainstream models mostly land between tens of thousands and a hundred-odd thousand. Once fixed, it deeply shapes the model's size and speed - once more proof that "the vocab and the model are bound together".</p>
+
+<h2>Special tokens and byte fallback</h2>
+<p>Beyond ordinary "text-piece tokens", the vocab has a class of <strong>special tokens</strong>: <span class="mono">BOS</span> (begin sequence), <span class="mono">EOS</span> (end sequence), <span class="mono">EOT</span> (end of turn), <span class="mono">PAD</span>/<span class="mono">SEP</span>/<span class="mono">UNK</span>, etc. They map to no specific text but are <strong>control markers</strong>, fetched by accessors <span class="mono">token_bos()</span>/<span class="mono">token_eos()</span>/<span class="mono">token_eot()</span>. For example, when the model emits EOS it means "I am done", and the upper layer stops accordingly.</p>
+<div class="cellgroup">
+  <div class="cg-cap"><b>Byte fallback</b>: a char not in the vocab -&gt; split into UTF-8 bytes -&gt; one &lt;0xXX&gt; token per byte</div>
+  <div class="cells"><span class="lab">rare glyph/emoji</span><span class="cell hl">out of vocab</span><span class="lab">-&gt;</span><span class="cell">&lt;0xF0&gt;</span><span class="cell">&lt;0x9F&gt;</span><span class="cell">&lt;0x8E&gt;</span><span class="cell">&lt;0x89&gt;</span></div>
+</div>
+<p>So what about a character the vocab simply does not have (rare glyphs, emoji)? <strong>Byte fallback</strong>: split the character into its UTF-8 bytes and map each byte to a byte token shaped like <span class="mono">&lt;0xF0&gt;</span> (carrying the <span class="mono">LLAMA_TOKEN_ATTR_BYTE</span> attribute). So <strong>any</strong> UTF-8 text can, worst case, be encoded byte by byte, and is never "unencodable". This solves the classic <strong>OOV</strong> (out-of-vocabulary) problem. A round-trip looks roughly like:</p>
+<pre class="code"><span class="cm"># pseudocode: a tokenize round-trip</span>
+ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, add_special=<span class="kw">True</span>)   <span class="cm"># may auto-prepend BOS</span>
+<span class="cm"># ids = [&lt;bos&gt;, 9906, ...]</span>
+text = <span class="st">""</span>
+<span class="kw">for</span> id <span class="kw">in</span> ids:
+    text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># rebuild piece by piece</span></pre>
+<p><span class="mono">tokenize</span> can auto-prepend BOS (controlled by that <span class="mono">get_add_bos()</span> flag); decoding then calls <span class="mono">token_to_piece</span> per token to stitch pieces back. Note that restoring byte tokens means <strong>joining</strong> several bytes by UTF-8 to form one complete character - which is why decoding accumulates step by step, not "one token, one character".</p>
+<p>Special tokens matter because they carry structural information "beyond the text". In a conversation, who spoke, where a turn ends, whether to stop - all are delimited by these markers (L22's chat template, a later lesson, uses them heavily). Think of ordinary tokens as "content" and special tokens as "punctuation and paragraph marks" - without the latter, the model cannot tell the conversation's skeleton.</p>
+<p>Byte fallback has an easily overlooked benefit too: it lets the vocab stay relatively "small" without fearing incomplete coverage. Since 256 byte tokens are the safety net, the vocab need not bloat endlessly to fit every rare glyph - it keeps only high-frequency pieces and leaves the rare ones to bytes. This "shortcut for the common, full path for the rare" is the same pragmatic spirit as many systems' "fast path + slow path".</p>
+<p>One more detail to call out: deciding "whether to stop" relies not on a single EOS but on a set of "end-of-generation" (EOG) markers. Different models use different end markers - some EOS, some EOT, some either; the vocab handles them uniformly with a dedicated test (whether a token belongs to the EOG set). The upper layer need only ask "is this token a terminator", finishing correctly without memorizing each model's specific convention.</p>
+
+<h2>The C API and the hand-off</h2>
+<p>Using the vocab from the C API is straightforward: first <span class="mono">llama_model_get_vocab(model)</span> to get the vocab from the model, then <span class="mono">llama_vocab_n_tokens(vocab)</span> for the size, <span class="mono">llama_tokenize</span> to encode, <span class="mono">llama_token_to_piece</span>/<span class="mono">llama_detokenize</span> to decode. These all take a <span class="mono">const llama_vocab *</span>.</p>
+<p>There is a big trap here: that batch of names from 2023-era tutorials is <strong>mostly deprecated</strong>. The vocab-size getter <span class="mono">llama_n_vocab</span> is marked DEPRECATED, replaced by <span class="mono">llama_vocab_n_tokens</span>; the special-token getters <span class="mono">llama_token_bos</span>/<span class="mono">llama_token_eos</span> etc. were all renamed to <span class="mono">llama_vocab_bos</span>/<span class="mono">llama_vocab_eos</span>. Watch out when reading old code.</p>
+<p>Why such a sweeping rename? Because these operations are essentially <strong>vocabulary</strong> methods, not model ones - folding them from <span class="mono">llama_*</span> into <span class="mono">llama_vocab_*</span> makes name match substance, echoing how <span class="mono">llama_vocab</span> has internally become its own thing. Renames are annoying but make the API clearer.</p>
+<p>Connecting this lesson back to the main line: your input text is first formatted by L22's chat template, then <span class="mono">tokenize</span>d into ids by the vocab, enters the model to compute logits (L17), the sampler (L21) picks the next id in <strong>this vocabulary's token space</strong>, and finally <span class="mono">token_to_piece</span> turns it back into text shown to you. The vocab is exactly the two gates, in and out, of this loop.</p>
+<p>A common doubt worth clearing: is tokenize's result unique? For a fixed vocab and the same rules, yes - the same input always cuts into the same id sequence, which is exactly the premise that encoding/decoding round-trips reliably. The randomness sampling (L21) brings happens at the "pick the next token" step, unrelated to tokenization; tokenization itself is fully deterministic.</p>
+<p>One last whole-picture view: the vocab is one of the few parts of this inference system "a human can read directly". Weights are a pile of floats, the compute graph a chain of operators; only the vocab lets you look ids back into text and see with your own eyes "what the model read, what it wants to say". When debugging model behavior, printing the tokens first is often the fastest way in.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why so many tokenizer algorithms (SPM/BPE/WPM...)? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>The direct reason is <strong>history and ecosystem</strong>: the LLaMA family inherits SentencePiece, the GPT family uses byte-level BPE, the BERT family uses WordPiece, the T5 family uses Unigram. Whatever a model family trains with, it must infer with - vocab and weights are a matched set, not swappable.</p>
+    <p>One layer deeper is <strong>trade-offs</strong>: algorithms differ in multilingual coverage, friendliness to code/numbers, and compression rate (how many tokens the same text becomes). Byte-level BPE is robust for any language (it drops to bytes first); WordPiece is friendly to English morphology. No silver bullet, hence the variety.</p>
+    <p>llama.cpp's stance is <strong>support them all</strong>: hide each algorithm's implementation difference behind pimpl and expose the same <span class="mono">tokenize</span> upward. So it is not picky about models - exactly what a "general inference engine" should be, the same breadth as L15's table-driven multi-architecture support.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What does byte fallback actually solve? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>It solves <strong>OOV</strong> (out-of-vocabulary). No fixed vocab can exhaust every character in the world (new emoji, rare glyphs, all kinds of symbols keep appearing). Without a fallback, an unseen character can only yield a single <span class="mono">&lt;UNK&gt;</span>, losing the information entirely.</p>
+    <p>Byte fallback's safety net is elegant: UTF-8 is itself a byte sequence, so split any character into 1-4 bytes, each mapping to a <span class="mono">&lt;0xXX&gt;</span> token (256 of them, guaranteed to cover). The concept of "out of vocab" is thus abolished - even the rarest character is encoded losslessly, just at a few more tokens.</p>
+    <p>The cost is worth noting: a rare glyph may take 3-4 byte tokens, several times "pricier" than a common one. So a model processing lots of rare glyphs / certain languages spends noticeably more tokens - one underlying reason some languages "seem more token-hungry".</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why is n_vocab in the vocab, not in hparams (L15)? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because the vocab size is a <strong>property of the vocabulary</strong>, decided by the tokenizer, not a property of the network structure. L15's <span class="mono">llama_hparams</span> describes "how many layers, how wide, how many heads"; the vocab describes "how big the token space is, how to split". Different responsibilities, rightly separated.</p>
+    <p>In practice this is a real trap: L15 deliberately stressed that <span class="mono">n_vocab</span> is not in <span class="mono">hparams</span>, the authoritative source being <span class="mono">llama_vocab::n_tokens()</span>. Although the embedding and output layers' shapes use the vocab size (one of their dimensions is <span class="mono">n_vocab</span>), that number's "owner" is the vocab.</p>
+    <p>This "whose property, whose responsibility" division lets the code stay clean: changing the vocab does not touch hparams, changing the network does not touch the vocab. Clear boundaries are the invisible hero of long-term maintainability - the same discipline you saw again and again in L14 (loader vs model) and L17 (model vs context).</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama_vocab</span> is the two-way translator between text and tokens: <span class="mono">tokenize</span> encodes, <span class="mono">token_to_piece</span>/<span class="mono">detokenize</span> decodes.</li>
+    <li>It is <strong>pimpl</strong>: the concrete tokenizer algorithm is hidden in <span class="mono">impl</span>, exposing only a unified interface.</li>
+    <li>Type <span class="mono">enum llama_vocab_type</span>: SPM/BPE/WPM/UGM/RWKV/PLAMO2, differing in "how to cut", selected by GGUF metadata.</li>
+    <li>Special tokens (<span class="mono">token_bos/eos/eot</span>) are control markers; <strong>byte fallback</strong> <span class="mono">&lt;0xXX&gt;</span> lets any UTF-8 be encoded, abolishing OOV.</li>
+    <li>C API: <span class="mono">llama_model_get_vocab</span> -&gt; <span class="mono">llama_vocab_n_tokens</span>/<span class="mono">llama_tokenize</span>/<span class="mono">llama_token_to_piece</span>; old names <span class="mono">llama_n_vocab</span>/<span class="mono">llama_token_bos</span> are deprecated, use <span class="mono">llama_vocab_*</span>.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The vocabulary cleanly separates the "<strong>text world</strong>" from the "<strong>token world</strong>" - the model lives only in token space and never touches strings; several utterly different splitting algorithms, hidden by pimpl, look like the same <span class="mono">tokenize</span> from above. This thin translator is the only bridge between "the model only does numbers" and "humans only speak text". Understand it, and you see how, every turn in and out, text quietly becomes numbers and becomes text again.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does tokenize do?</div>
+  <ol class="opts">
+    <li>scores each token</li>
+    <li>turns tokens back into text</li>
+    <li>trains a new vocabulary</li>
+    <li>cuts a text string into a list of token ids (to feed the model)</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. tokenize is the encoding direction: text -> a list of token ids, fed into the model. The reverse (id -> text) is done by token_to_piece/detokenize.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. What is byte fallback for?</div>
+  <ol class="opts">
+    <li>removes special tokens</li>
+    <li>compresses the vocab size</li>
+    <li>speeds up inference</li>
+    <li>lets any UTF-8 char be encoded (split into byte tokens), avoiding out-of-vocabulary OOV</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A char absent from the vocab is split into UTF-8 bytes, one &lt;0xXX&gt; token per byte (256 of them, guaranteed to cover), so even rare chars encode losslessly, abolishing OOV; the cost is rare chars take several tokens.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Which API should you use today to get the vocab size?</div>
+  <ol class="opts">
+    <li>strlen</li>
+    <li>llama_n_embd</li>
+    <li>llama_n_ctx</li>
+    <li>llama_vocab_n_tokens (old llama_n_vocab is deprecated)</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Vocab size is a vocab property; the authoritative API is llama_vocab_n_tokens; the old llama_n_vocab is marked DEPRECATED. n_ctx/n_embd are different quantities.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Drawing on L21, describe when tokenize and token_to_piece are each called in one chat generation, and which direction each handles.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="19-kv-cache.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">KV cache</span><span class="lang-en">The KV cache</span></div></a><a class="next" href="21-sampling.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">采样</span><span class="lang-en">Sampling</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

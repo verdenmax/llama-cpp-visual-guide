@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>22 · 对话模板 / Chat templates - llama.cpp 图解教程</title>
+<meta name="description" content="第四部分 · llama 推理内部｜对话模板 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="22 · 对话模板 / Chat templates - llama.cpp 图解教程">
+<meta property="og:description" content="第四部分 · llama 推理内部｜对话模板 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="22 · 对话模板 / Chat templates - llama.cpp 图解教程">
+<meta name="twitter:description" content="第四部分 · llama 推理内部｜对话模板 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></span>
+    <span class="pill">22 / 24</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:91%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></div>
+    <h1><span class="lang-zh">对话模板</span><span class="lang-en">Chat templates</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+M4a 让模型能算，L20 把文字切成 token，L21 教它怎么选下一个词。可还有个关键问题没解决：你在聊天框里一句一句地说，模型怎么知道"哪句是你说的、哪句是它说的、一轮从哪到哪"？这一课讲<strong>对话模板</strong>——把一串带角色的消息（system/user/assistant），按这个模型认得的格式，拼成一段带特殊标记的提示词字符串。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这步看似不起眼，却极其关键：每个模型在训练时，对话都是按某种固定格式喂进去的（ChatML、Llama-2 各不相同）。推理时你必须用<strong>同一种</strong>格式，模型才认得出"轮次"和"角色"。格式拼错，模型轻则答非所问，重则完全不在状态。对话模板就负责把消息正确装进"这个模型的信封"。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  对话模板像<strong>公文的信封格式</strong>：同样一句话，不同机构有不同的抬头和落款。ChatML 把每条消息裹成 <span class="mono">&lt;|im_start|&gt;角色 ... &lt;|im_end|&gt;</span>，Llama-2 用 <span class="mono">[INST] ... [/INST]</span>。模板做的，就是把你的消息装进这个模型训练时认得的那种信封——装错了信封，收信人就读不懂。
+</div>
+
+<h2>为什么需要模板</h2>
+<div class="flow">
+  <div class="node"><div class="nt">消息列表</div><div class="nd">[{system},{user}]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">apply_template</div><div class="nd">套模板</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">提示词串</div><div class="nd">"&lt;|im_start|&gt;..."</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">tokenize</div><div class="nd">L20</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
+</div>
+<p>先看清这步在整条链路里的位置。你的对话是一串结构化消息：每条有个角色（system/user/assistant）和一段内容。但模型吃的不是这种结构，而是一长串 token（L20）。中间必须有一步把"消息列表"压平成"一段字符串"，这一步就是对话模板。</p>
+<p>拼出来的字符串里，除了各条消息的正文，还插了一堆<strong>特殊标记</strong>：标明每条消息从哪开始、到哪结束、是谁说的。这些标记对应词表里的特殊 token（L20），模型正是靠它们识别"现在轮到 assistant 说话了""这一轮用户说完了"。</p>
+<p>顺序是：消息列表 -&gt; 套模板拼成字符串 -&gt; 交给词表 tokenize -&gt; 进模型。模板负责"结构到文本"，tokenize 负责"文本到 token"，两步接力、缺一不可。这也是为什么这一课紧跟在词表（L20）后面——它的产物正是 tokenize 的输入。</p>
+<p>要强调一点：模板拼出来的是<strong>纯文本</strong>，模型并不知道什么"角色""轮次"的高级概念，它只是学会了"看到 <span class="mono">&lt;|im_start|&gt;</span> 这种标记，就该切换说话人"。所谓对话能力，本质上是模型在训练时见过海量这种格式、学会了照着接话。模板只是忠实地复刻那个格式。</p>
+<p>反过来想，如果不套模板、直接把用户的话 tokenize 进去会怎样？模型会以为这是一段普通文本的续写，而不是"一轮对话求回应"。它可能继续替用户往下编，而不是作为助手来回答——因为少了那些界定角色和轮次的标记，它根本不知道"该自己说话了"。模板的有无，直接决定模型是"补全"还是"对话"。</p>
+<p>再往深里想一层：模型本身并不"理解"对话，它只是个超级强大的文本续写器。是对话模板和训练数据一起，把"续写"这件事<strong>伪装</strong>成了"对话"。你看到的一问一答，在模型眼里始终是"给定前文、预测下一个 token"。这个认识很重要——它能帮你理解后面很多看似神奇的行为，其实都只是续写规律的体现。</p>
+<p>正因为对话被编码成了纯文本，很多有趣的事才成为可能：你可以把"系统提示"写进 system 消息里，给模型定个人设；可以把前几轮对话原样拼进去，让它"记住"上下文（其实是每次都把历史重新喂一遍）；甚至可以伪造一段助手的话塞进去，引导它往某个方向接。这些灵活玩法，全建立在"对话不过是一段精心格式化的文本"这个事实上。</p>
+<p>还有个容易忽略的点：模板里的特殊标记，必须是这个模型词表（L20）里真实存在的 token，模型才认得。所以模板和词表是<strong>配套</strong>的——ChatML 的 <span class="mono">&lt;|im_start|&gt;</span> 之所以好使，是因为对应模型的词表里就有这么一个专门的 token。换个不认识这标记的模型硬套 ChatML，反而会把标记拆成一堆碎字节，适得其反。</p>
+
+<h2>内建模板表</h2>
+<pre class="code"><span class="cm">// 简化自 src/llama-chat.h</span>
+<span class="kw">enum</span> <span class="fn">llm_chat_template</span> {
+    LLM_CHAT_TEMPLATE_CHATML,
+    LLM_CHAT_TEMPLATE_LLAMA_2,
+    LLM_CHAT_TEMPLATE_LLAMA_3,
+    LLM_CHAT_TEMPLATE_GEMMA,
+    <span class="cm">/* ... 五十多种 ... */</span>
+    LLM_CHAT_TEMPLATE_UNKNOWN,
+};</pre>
+<p>llama.cpp 内置了一大批常见模型的模板，全列在枚举 <span class="mono">llm_chat_template</span> 里——CHATML、LLAMA_2（还有若干变体）、LLAMA_3、GEMMA、MISTRAL、PHI 等等，加起来五十多种。每一种对应一套具体的"标记 + 拼法"。</p>
+<p>为什么要硬编码这么多？因为不同模型家族的对话格式是它们训练时定死的，五花八门。把常见的都内置进来，用户拿到一个主流模型，引擎多半能<strong>自动认出</strong>它该用哪套格式，开箱即用，不用手动指定。</p>
+<table class="t">
+  <tr><th>模板</th><th>消息标记</th></tr>
+  <tr><td>ChatML</td><td>&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</td></tr>
+  <tr><td>Llama-2</td><td>[INST] ... [/INST]</td></tr>
+  <tr><td>Llama-3</td><td>&lt;|start_header_id|&gt;role&lt;|end_header_id|&gt;</td></tr>
+  <tr><td>Gemma</td><td>&lt;start_of_turn&gt;role ... &lt;end_of_turn&gt;</td></tr>
+</table>
+<p>看几个代表就懂了：ChatML（很多模型用）拿 <span class="mono">&lt;|im_start|&gt;</span>/<span class="mono">&lt;|im_end|&gt;</span> 包消息；Llama-2 用 <span class="mono">[INST]</span>/<span class="mono">[/INST]</span> 框用户指令；Gemma 用 <span class="mono">&lt;start_of_turn&gt;</span>；Llama-3 用 <span class="mono">&lt;|start_header_id|&gt;</span> 标角色。标记不同，但意图一样：界定角色和轮次边界。</p>
+<p>这套"把每个模型的格式收进一张枚举表"的做法，你应该眼熟——和 L15 把架构收进 <span class="mono">LLM_ARCH</span> 表、L20 把分词器类型收进 <span class="mono">vocab_type</span> 是同一种思路：把"会变的差异"集中成数据，让通用代码照表办事。</p>
+<p>你可能会问：模型自己不知道该用哪套格式吗，还要引擎来猜？还真不一定知道。GGUF 文件里<strong>可能</strong>带一个模板字段（很多新模型会写），但也有不少模型没写、或写得不规范。于是 llama.cpp 一边支持读取模型自带的模板，一边内置这几十种常见格式兜底——两手准备，尽量让用户不必手动操心。</p>
+<p>这几十种模板看着多，其实大同小异，无非是"用什么符号标角色、用什么符号断轮次、system 消息放哪"几个维度的排列组合。把它们一一编码进枚举，是一种"用工程量换通用性"的取舍：写的时候累一点，换来的是"一个引擎通吃主流模型"的便利。这种"宁可自己多写、也要让用户省心"的态度，贯穿了 llama.cpp 的很多设计。</p>
+<p>顺便说，枚举里那个 <span class="mono">LLM_CHAT_TEMPLATE_UNKNOWN</span> 哨兵也有讲究：当检测既匹配不上名字、又认不出特征时，就落到它。这时引擎会提示"没认出模板"，提醒用户手动指定一个，而不是默默用错格式蒙混过去。给"认不出"留一个明确的出口，是健壮设计的常见手法。</p>
+<p>一个常被忽略的细节是 system 消息的处理。不同模板对"系统提示"放哪、怎么标记，分歧最大：有的像 ChatML 一样单列一条 system 消息，有的（如某些 Llama-2 变体）要把它揉进第一条 user 消息里，还有的根本不支持独立的 system。所以同一段系统提示，套不同模板出来的位置可能差很远——这也是为什么换模型时，光改提示词内容还不够，得让模板替你摆对位置。</p>
+
+<h2>检测与应用</h2>
+<pre class="code"><span class="cm"># 伪代码: 套用对话模板</span>
+tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span class="cm"># 先按名, 再按内容特征猜</span>
+dest = <span class="st">""</span>
+<span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
+<span class="cm"># add_ass: 末尾追加 assistant 起始标记, 让模型接着写回答</span></pre>
+<p>有了这张表，剩下两件事：一是<strong>认出</strong>该用哪套模板，二是<strong>套用</strong>它把消息拼出来。</p>
+<p>认出靠 <span class="mono">llm_chat_detect_template</span>：它先按名字精确匹配（模型 GGUF 里常自带一个模板名/模板串），认不出就退而看模板内容里有没有 <span class="mono">&lt;|im_start|&gt;</span>、<span class="mono">[INST]</span> 这类特征子串，按特征猜。套用靠 <span class="mono">llm_chat_apply_template</span>：给它模板枚举、消息列表、一个输出字符串，它就按这套格式拼好。</p>
+<p>这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。</p>
+<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。</p>
+<p>检测这一步其实暗藏玄机。最理想的情况是模型 GGUF 里写明了模板名，一查便知；但现实里常常只给出一段模板<strong>内容</strong>（Jinja 文本），没有名字。这时只能靠"内容里有没有某些特征标记"来反推——看到 <span class="mono">[INST]</span> 就猜 Llama-2、看到 <span class="mono">&lt;|im_start|&gt;</span> 就猜 ChatML。这种基于特征的启发式不是百分百可靠，但覆盖了绝大多数情况。</p>
+<p>套用这一步也比看上去讲究。同一套格式，system 消息有的拼在最前、有的并进第一条 user 消息、有的干脆不支持；多轮对话里，历史消息要不要重复加标记、最后一轮怎么收尾，每种模板都有自己的规矩。<span class="mono">apply_template</span> 把这些细节按模板类型一一处理妥当，你只管递进去一个消息列表，它还你一段格式严丝合缝的提示词。</p>
+<p>一个实际的小建议：调试对话效果时，不妨把 <span class="mono">apply_template</span> 拼出来的那段字符串<strong>原样打印</strong>出来看看。很多"模型不好好回答"的问题，根子就在拼出来的提示词格式不对——少了个标记、system 放错了位置、add_ass 忘了开。先看清喂进去的到底长什么样，往往比反复调参数更快定位问题。</p>
+
+<h2>两条路：内建 vs Jinja</h2>
+<div class="cols">
+  <div class="col"><h4>内建（llama-chat.cpp）</h4><p>固定枚举、纯字符串拼接、零依赖、快；只认预定义的几十种。C API <span class="mono">llama_chat_apply_template</span> 走这条。</p></div>
+  <div class="col"><h4>Jinja（common/jinja）</h4><p>渲染<strong>任意</strong>模板：模型自带的 Jinja chat_template 原样执行，最忠实。<span class="mono">common/chat.cpp</span> 封装，还支持工具调用。</p></div>
+</div>
+<p>内建模板只覆盖"已知的那些模型"。要是来了个全新模型、带着自己独特的模板呢？这就引出第二条路：<strong>Jinja</strong>。</p>
+<p>内建这条路（<span class="mono">src/llama-chat.cpp</span>）是纯 C++ 字符串拼接，固定枚举、零依赖、快，但只认预定义的那几十种。C API <span class="mono">llama_chat_apply_template</span> 走的就是这条——注意它<strong>只收模板字符串、不带模型参数</strong>（旧版带 model 的重载已移除），注释也明说"不用 jinja，只支持预定义列表"。</p>
+<p>Jinja 这条路（vendored 在 <span class="mono">common/jinja/</span>）能渲染<strong>任意</strong>模板：模型在 GGUF 里自带的 chat_template（往往是一段 Jinja 文本）可以被原样执行，最忠实。上层 <span class="mono">common/chat.cpp</span> 的 <span class="mono">common_chat_templates</span> 封装了它，还顺带支持工具调用、输出解析等高级花样。</p>
+<p>两条路分工很清楚：内建管"已知模型、要快要稳"，Jinja 管"任意模型、要忠实"。衔接上，无论哪条路，拼好的提示词都要再经 L20 的 tokenize、进 L17 的 decode——对话模板只是把"消息"变成"字符串"的那一棒。</p>
+<p>为什么不干脆<strong>全</strong>用 Jinja，省得维护几十种内建模板？因为 Jinja 是一套完整的模板语言，要带一个解释器、要解析执行任意逻辑，开销和复杂度都不小。对那些格式早已固定的常见模型，用几行 C++ 直接拼，又快又稳、还没有解析任意模板带来的安全顾虑。所以内建这条"快路"有它不可替代的价值。</p>
+<p>反过来，为什么又非要有 Jinja 不可？因为模型层出不穷，总有内建表里没有的新格式、或带着复杂条件逻辑的模板（比如"有 system 就这样拼、没有就那样拼""带工具定义时再加一段"）。这些用固定枚举根本表达不了，只能靠一个真正的模板引擎去执行。两条路各补各的短，合起来才既覆盖广、又跑得快。</p>
+<p>把视角拉高一点：对话模板这一层，本质上是在弥合"人类的对话观"和"模型的文本观"之间的鸿沟。人觉得对话是你一言我一语的结构，模型只认一条连续的 token 流。模板就是这两种世界观之间的翻译协议——而它居然能用"一张枚举表 + 一个可选的 Jinja 引擎"就基本搞定，足见把复杂性收进数据是多么有力的一招。</p>
+<p>还值得一提的是工具调用（function calling）这类高级用法。当你想让模型调用外部工具时，工具的定义、调用的格式、返回的拼接，都要按特定约定塞进提示词——这远超内建模板"拼几条消息"的能力，正是 common 层结合 Jinja 与语法约束（L23）来做的。所以对话模板不只是"聊天"，它还是更复杂的"结构化交互"的地基。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> add_ass（add assistant）这个开关到底干嘛？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>它决定要不要在拼好的提示词<strong>末尾</strong>，补上 assistant 角色的起始标记（如 ChatML 的 <span class="mono">&lt;|im_start|&gt;assistant</span>），但不含任何内容。等于在纸上写好"助手："然后把笔递过去——模型自然会从这个位置接着往下写回答。</p>
+    <p>为真是<strong>聊天</strong>的常态：你想要模型作为助手回应，就得把"该它说话"的起点标出来。为假则用于<strong>补全</strong>：你只想让模型接着某段已有文本往下写，不需要切换到 assistant 身份。一个开关，区分了"对话"和"续写"两种用法。</p>
+    <p>这也解释了一个常见现象：如果忘了开 add_ass，模型有时会"自言自语"地替用户多说几句，而不是直接回答——因为提示词停在了用户那一轮，没给它"轮到你了"的信号。理解这个开关，能省掉不少"模型怎么不好好回答"的困惑。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么 C API 的 apply_template 不再带 model 参数？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为套模板这件事，需要的只是"<strong>模板字符串 + 消息列表</strong>"，跟整个模型没关系。模板串本身可以来自 GGUF 元数据、也可以由用户直接指定；把 model 从参数里拿掉，函数职责更单一、更好测试、也更灵活。</p>
+    <p>这是个典型的<strong>解耦</strong>动作，和 L20 把 <span class="mono">llama_token_bos</span> 等改成 <span class="mono">llama_vocab_*</span> 一个道理：让每个 API 只依赖它真正需要的东西。旧版带 <span class="mono">llama_model *</span> 的重载已经移除，看老代码时别再按那个签名调用。</p>
+    <p>注释里还点明：这个 C API <strong>不走 jinja</strong>，只支持内建的预定义模板列表。换句话说，它是"快而专"的那条路；要 jinja 的全部灵活性，得上 <span class="mono">common/chat.cpp</span> 那层。API 的边界划得很清楚。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 内建模板 vs Jinja，何时用哪个？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>原则上：模型在 GGUF 里<strong>自带了 chat_template</strong>（一段 Jinja 文本）、或你需要工具调用这类高级特性时，走 Jinja（<span class="mono">common/chat.cpp</span> 的 <span class="mono">common_chat_templates</span>，开 <span class="mono">use_jinja</span>），最忠实于模型作者的意图。</p>
+    <p>反过来，模型是<strong>已知的主流款</strong>、或你想要零依赖、要快要稳时，用内建枚举即可——几十种常见格式都覆盖了，纯 C++ 拼接没有额外开销。命令行小工具、嵌入式场景，往往选这条。</p>
+    <p>两者不是对立，而是<strong>分层覆盖</strong>："已知模型"由内建快速搞定，"任意模型"由 Jinja 兜底。这种"常见走快路、罕见走通路"的设计，和 L20 词表的"高频片段直接收、罕见字符靠字节回退"是同一种务实智慧。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>对话模板把带角色的消息列表 -&gt; 该模型约定格式的提示词字符串，再交给 L20 tokenize。</li>
+    <li>内建模板枚举 <span class="mono">llm_chat_template</span>（五十多种）；<span class="mono">llm_chat_detect_template</span>（先按名、再按特征子串）+ <span class="mono">llm_chat_apply_template</span>（渲染，<span class="mono">add_ass</span> 控制是否递话筒）。</li>
+    <li><span class="mono">llama_chat_message</span> 只有 <span class="mono">role</span> + <span class="mono">content</span> 两个字段。</li>
+    <li>C API <span class="mono">llama_chat_apply_template</span> <strong>只收模板字符串、无 model 参数</strong>，且只走内建、不用 jinja。</li>
+    <li>两条路：内建（<span class="mono">llama-chat.cpp</span>，快/已知模型）vs Jinja（<span class="mono">common/jinja</span> + <span class="mono">common/chat.cpp</span>，任意模型/工具调用）。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  对话模板把"<strong>模型的对话方言</strong>"收进一张表——同样的消息，换个模型就换个信封，引擎主干不必关心。它和 L15 的"表驱动架构"、L20 的"表驱动分词"是同一种智慧：把"每个模型各不相同的部分"沉淀成数据/模板，让通用代码照着办。而内建与 Jinja 两条路，又是"常见走快路、罕见走通路"的经典分层。读懂它，你就明白为什么同一个 llama.cpp 能流利地说几十种模型的"话"。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 对话模板（chat template）做什么？</div>
+  <ol class="opts">
+    <li>把带角色的消息列表拼成该模型约定格式的提示词字符串</li>
+    <li>把文本切成 token</li>
+    <li>压缩对话历史</li>
+    <li>给回答打分</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。模板负责把 system/user/assistant 的消息列表，按这个模型训练时的格式（插入特殊标记）拼成一段字符串，再交给词表 tokenize。切 token 是 L20、打分是 L21 的事。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ChatML 模板用哪对标记包裹每条消息？</div>
+  <ol class="opts">
+    <li>&lt;|im_start|&gt; 和 &lt;|im_end|&gt;</li>
+    <li>{{ 和 }}</li>
+    <li>&lt;s&gt; 和 &lt;/s&gt;</li>
+    <li>[INST] 和 [/INST]</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。ChatML 用 &lt;|im_start|&gt;role ... &lt;|im_end|&gt; 包每条消息；[INST]/[/INST] 是 Llama-2 的；&lt;s&gt;/&lt;/s&gt; 是序列起止符；{{ }} 是 Jinja 语法。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. add_ass（add assistant）为真时会做什么？</div>
+  <ol class="opts">
+    <li>把回答翻译成英文</li>
+    <li>在末尾追加 assistant 起始标记，让模型接着生成回答</li>
+    <li>关闭采样</li>
+    <li>删除 system 消息</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。add_ass 在拼好的提示词末尾补上 assistant 的起始标记（不含内容），相当于把话筒递给模型，让它从"该助手说话"处续写。聊天时开、纯补全时关。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>结合 L20，说说为什么要"先套对话模板、再 tokenize"，如果把顺序反过来会出什么问题。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+M4a let the model compute, L20 cut text into tokens, L21 taught it to pick the next word. But one key question remains: you speak sentence by sentence in a chat box, so how does the model know "which line is yours, which is its own, where one turn starts and ends"? This lesson covers <strong>chat templates</strong> - assembling a list of role-tagged messages (system/user/assistant), in the format this model recognizes, into a prompt string with special markers.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This step looks minor but is crucial: every model was trained with conversations fed in some fixed format (ChatML, Llama-2 differ). At inference you must use the <strong>same</strong> format for the model to recognize "turns" and "roles". Get the format wrong and the model is, at best, off-topic; at worst, completely out of character. The chat template is what packs messages correctly into "this model's envelope".</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  A chat template is like an <strong>official envelope format</strong>: the same words get different headers and sign-offs at different institutions. ChatML wraps each message as <span class="mono">&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</span>, Llama-2 uses <span class="mono">[INST] ... [/INST]</span>. What the template does is pack your message into the envelope this model learned to recognize at training - wrong envelope, and the recipient cannot read it.
+</div>
+
+<h2>Why a template is needed</h2>
+<div class="flow">
+  <div class="node"><div class="nt">message list</div><div class="nd">[{system},{user}]</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">apply_template</div><div class="nd">apply template</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">prompt string</div><div class="nd">"&lt;|im_start|&gt;..."</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">tokenize</div><div class="nd">L20</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
+</div>
+<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure, but rather a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
+<p>The assembled string, besides each message's body, inserts a pile of <strong>special markers</strong>: marking where each message starts, ends, and who spoke. These markers correspond to special tokens in the vocab (L20), and the model relies on them to recognize "it is the assistant's turn now", "the user is done with this turn".</p>
+<p>The order is: message list -&gt; apply the template into a string -&gt; hand to the vocab to tokenize -&gt; into the model. The template handles "structure to text", tokenize handles "text to tokens" - two relays, neither dispensable. This is also why this lesson follows the vocab (L20) closely - its product is exactly tokenize's input.</p>
+<p>One point to stress: what the template assembles is <strong>plain text</strong>; the model has no high-level notion of "role" or "turn", it merely learned that "seeing a marker like <span class="mono">&lt;|im_start|&gt;</span> means switch speakers". So-called chat ability is essentially the model having seen vast amounts of this format at training and learned to continue along it. The template just faithfully reproduces that format.</p>
+<p>Conversely, what if you skip the template and tokenize the user's words directly? The model would think it is the continuation of some ordinary text, not "a turn of dialogue asking for a reply". It might keep writing on the user's behalf rather than answer as the assistant - because without the markers delimiting role and turn, it has no idea "it is its turn to speak". The presence or absence of a template directly decides whether the model "completes" or "converses".</p>
+<p>Go one layer deeper: the model itself does not "understand" conversation; it is just an extremely powerful text continuer. It is the chat template together with the training data that <strong>disguises</strong> "continuation" as "conversation". The question-and-answer you see is, to the model, always "given the prefix, predict the next token". This realization matters - it helps you understand why many seemingly magical behaviors later are just continuation patterns at work.</p>
+<p>Precisely because conversation is encoded as plain text, many interesting things become possible: you can write a "system prompt" into the system message to give the model a persona; you can splice prior turns verbatim so it "remembers" context (really, the history is re-fed each time); you can even insert a fabricated assistant line to steer where it continues. These flexible tricks all rest on the fact that "a conversation is just carefully formatted text".</p>
+<p>One easily missed point: the template's special markers must be tokens that truly exist in this model's vocab (L20) for the model to recognize them. So template and vocab are a <strong>matched set</strong> - ChatML's <span class="mono">&lt;|im_start|&gt;</span> works because that model's vocab has a dedicated token for it. Force ChatML onto a model that does not know the marker and it gets split into a pile of byte fragments, backfiring.</p>
+
+<h2>The built-in template table</h2>
+<pre class="code"><span class="cm">// simplified from src/llama-chat.h</span>
+<span class="kw">enum</span> <span class="fn">llm_chat_template</span> {
+    LLM_CHAT_TEMPLATE_CHATML,
+    LLM_CHAT_TEMPLATE_LLAMA_2,
+    LLM_CHAT_TEMPLATE_LLAMA_3,
+    LLM_CHAT_TEMPLATE_GEMMA,
+    <span class="cm">/* ... fifty-odd of them ... */</span>
+    LLM_CHAT_TEMPLATE_UNKNOWN,
+};</pre>
+<p>llama.cpp ships a big batch of common models' templates, all listed in the enum <span class="mono">llm_chat_template</span> - CHATML, LLAMA_2 (plus several variants), LLAMA_3, GEMMA, MISTRAL, PHI, and so on, fifty-odd in total. Each corresponds to a concrete "markers + assembly rule".</p>
+<p>Why hardcode so many? Because each model family's chat format is fixed at its training time, and they vary widely. Building the common ones in means that, given a mainstream model, the engine can mostly <strong>auto-detect</strong> which format to use, working out of the box without manual specification.</p>
+<table class="t">
+  <tr><th>Template</th><th>Message markers</th></tr>
+  <tr><td>ChatML</td><td>&lt;|im_start|&gt;role ... &lt;|im_end|&gt;</td></tr>
+  <tr><td>Llama-2</td><td>[INST] ... [/INST]</td></tr>
+  <tr><td>Llama-3</td><td>&lt;|start_header_id|&gt;role&lt;|end_header_id|&gt;</td></tr>
+  <tr><td>Gemma</td><td>&lt;start_of_turn&gt;role ... &lt;end_of_turn&gt;</td></tr>
+</table>
+<p>A few representatives make it clear: ChatML (used by many models) wraps messages with <span class="mono">&lt;|im_start|&gt;</span>/<span class="mono">&lt;|im_end|&gt;</span>; Llama-2 frames user instructions with <span class="mono">[INST]</span>/<span class="mono">[/INST]</span>; Gemma uses <span class="mono">&lt;start_of_turn&gt;</span>; Llama-3 marks roles with <span class="mono">&lt;|start_header_id|&gt;</span>. Different markers, same intent: delimit role and turn boundaries.</p>
+<p>This "gather every model's format into one enum table" should look familiar - the same idea as L15 gathering architectures into the <span class="mono">LLM_ARCH</span> table and L20 gathering tokenizer types into <span class="mono">vocab_type</span>: concentrate "the differences that vary" into data, and let generic code act by the table.</p>
+<p>You might ask: does the model not know which format to use, needing the engine to guess? Not necessarily. The GGUF file <strong>may</strong> carry a template field (many new models write one), but plenty of models omit it or write it loosely. So llama.cpp both supports reading the model's own template and builds in these dozens of common formats as a backstop - a two-pronged setup to spare the user manual fuss.</p>
+<p>These dozens of templates look many but are largely alike, just permutations of a few dimensions: "which symbol marks the role, which breaks the turn, where the system message goes". Encoding them one by one into an enum is an "engineering effort for generality" trade-off: a bit more work to write, in exchange for "one engine handling mainstream models". This "rather write more ourselves than burden the user" attitude runs through much of llama.cpp's design.</p>
+<p>By the way, the enum's <span class="mono">LLM_CHAT_TEMPLATE_UNKNOWN</span> sentinel has a purpose too: when detection matches neither a name nor a feature, it lands here. The engine then signals "template not recognized", prompting the user to specify one manually rather than silently using a wrong format. Leaving a clear exit for "cannot recognize" is a common robust-design technique.</p>
+<p>An often-overlooked detail is how the system message is handled. Templates diverge most on where the "system prompt" goes and how it is marked: some, like ChatML, list a separate system message; some (like certain Llama-2 variants) fold it into the first user message; some support no standalone system at all. So the same system prompt can land in very different places under different templates - which is also why, switching models, changing the prompt text alone is not enough; the template must place it correctly for you.</p>
+
+<h2>Detection and application</h2>
+<pre class="code"><span class="cm"># pseudocode: apply a chat template</span>
+tmpl = <span class="fn">llm_chat_detect_template</span>(template_str)   <span class="cm"># by name first, then guess by content</span>
+dest = <span class="st">""</span>
+<span class="fn">llm_chat_apply_template</span>(tmpl, messages, dest, add_ass=<span class="kw">True</span>)
+<span class="cm"># add_ass: append the assistant start marker so the model writes the reply</span></pre>
+<p>With this table, two things remain: <strong>recognize</strong> which template to use, and <strong>apply</strong> it to assemble the messages.</p>
+<p>Recognizing uses <span class="mono">llm_chat_detect_template</span>: it first matches by name exactly (the model's GGUF often carries a template name/string), and failing that, looks for feature substrings like <span class="mono">&lt;|im_start|&gt;</span> or <span class="mono">[INST]</span> in the template body and guesses by feature. Applying uses <span class="mono">llm_chat_apply_template</span>: give it the template enum, the message list, and an output string, and it assembles per that format.</p>
+<p>One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.</p>
+<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt.</p>
+<p>Detection actually hides subtlety. Ideally the GGUF states the template name and a lookup settles it; but in reality it often gives only a template <strong>body</strong> (Jinja text) with no name. Then one can only infer from "whether certain feature markers appear in the body" - see <span class="mono">[INST]</span> and guess Llama-2, see <span class="mono">&lt;|im_start|&gt;</span> and guess ChatML. This feature-based heuristic is not 100% reliable but covers the vast majority.</p>
+<p>Application is also fussier than it looks. For the same format, the system message may go at the very front, be merged into the first user message, or not be supported at all; in multi-turn dialogue, whether history repeats the markers and how the last turn closes - each template has its own rules. <span class="mono">apply_template</span> handles these details per template type, so you just hand in a message list and it returns a precisely formatted prompt.</p>
+<p>A practical tip: when debugging chat behavior, print the string <span class="mono">apply_template</span> produces <strong>verbatim</strong> and look at it. Many "the model won't answer properly" issues are rooted in a wrong assembled prompt - a missing marker, the system placed wrong, add_ass forgotten. Seeing exactly what is fed in often locates the problem faster than repeatedly tuning parameters.</p>
+
+<h2>Two paths: built-in vs Jinja</h2>
+<div class="cols">
+  <div class="col"><h4>Built-in (llama-chat.cpp)</h4><p>fixed enum, pure string assembly, zero deps, fast; recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path.</p></div>
+  <div class="col"><h4>Jinja (common/jinja)</h4><p>renders <strong>any</strong> template: the model's own Jinja chat_template runs as-is, most faithful. <span class="mono">common/chat.cpp</span> wraps it and even supports tool calls.</p></div>
+</div>
+<p>The built-in templates cover only "the known models". What about a brand-new model bringing its own unique template? That leads to the second path: <strong>Jinja</strong>.</p>
+<p>The built-in path (<span class="mono">src/llama-chat.cpp</span>) is pure C++ string assembly - fixed enum, zero deps, fast, but recognizes only the predefined few dozen. The C API <span class="mono">llama_chat_apply_template</span> takes this path - note it <strong>only takes a template string, no model parameter</strong> (the old model-taking overload is removed), and its comment plainly says "no jinja, only the predefined list".</p>
+<p>The Jinja path (vendored in <span class="mono">common/jinja/</span>) can render <strong>any</strong> template: the chat_template a model carries in GGUF (often a piece of Jinja text) runs as-is, most faithful. The upper layer <span class="mono">common/chat.cpp</span>'s <span class="mono">common_chat_templates</span> wraps it and also supports tool calls, output parsing, and other advanced tricks.</p>
+<p>The two paths divide cleanly: built-in for "known models, fast and steady", Jinja for "any model, faithful". For the hand-off, whichever path, the assembled prompt still goes through L20's tokenize and into L17's decode - the chat template is merely the leg that turns "messages" into "a string".</p>
+<p>Why not just use Jinja for <strong>everything</strong> and skip maintaining dozens of built-in templates? Because Jinja is a full template language, requiring an interpreter and executing arbitrary logic, with non-trivial cost and complexity. For common models whose format is long fixed, a few lines of C++ assembling directly is faster, steadier, and free of the security concerns of running arbitrary templates. So the built-in "fast path" has irreplaceable value.</p>
+<p>Conversely, why is Jinja indispensable? Because models keep appearing, and there are always new formats absent from the built-in table, or templates with complex conditional logic ("assemble this way if there is a system message, that way if not", "add a section when tool definitions are present"). A fixed enum simply cannot express these; only a real template engine can execute them. Each path covers the other's weakness; together they are both broad and fast.</p>
+<p>Zoom out: the chat-template layer essentially bridges the gap between "the human view of conversation" and "the model's view of text". People see dialogue as a back-and-forth structure; the model knows only one continuous token stream. The template is the translation protocol between these worldviews - and that it largely manages with "one enum table + an optional Jinja engine" shows how powerful settling complexity into data really is.</p>
+<p>Also worth mentioning is the advanced use of tool calling (function calling). When you want the model to call an external tool, the tool definitions, the call format, and the splicing of returns must all be packed into the prompt per a specific convention - far beyond the built-in template's "stitch a few messages", and exactly what the common layer does by combining Jinja with grammar constraints (L23). So chat templates are not only "chat"; they are the foundation of more complex "structured interaction" too.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What does the add_ass (add assistant) switch actually do? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>It decides whether to append, at the <strong>end</strong> of the assembled prompt, the assistant role's start marker (like ChatML's <span class="mono">&lt;|im_start|&gt;assistant</span>) with no content. It is like writing "Assistant:" on the page and handing over the pen - the model naturally continues writing the reply from that spot.</p>
+    <p>True is the norm for <strong>chat</strong>: if you want the model to respond as the assistant, you must mark the start of "its turn to speak". False is for <strong>completion</strong>: when you only want the model to continue some existing text, with no switch to the assistant identity. One switch separates "converse" from "continue".</p>
+    <p>This also explains a common phenomenon: forget add_ass and the model sometimes "talks to itself", adding a few more lines on the user's behalf instead of answering directly - because the prompt stopped at the user's turn, with no "your turn" signal. Understanding this switch saves much "why won't the model answer properly" confusion.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why does the C API apply_template no longer take a model parameter? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because applying a template needs only "<strong>a template string + a message list</strong>", nothing to do with the whole model. The template string can come from GGUF metadata or be given by the user directly; dropping model from the parameters makes the function's job more single-purpose, easier to test, and more flexible.</p>
+    <p>This is a classic <strong>decoupling</strong> move, the same idea as L20 renaming <span class="mono">llama_token_bos</span> etc. to <span class="mono">llama_vocab_*</span>: let each API depend only on what it truly needs. The old overload taking <span class="mono">llama_model *</span> is removed, so do not call it by that signature when reading old code.</p>
+    <p>The comment also makes plain: this C API <strong>does not use jinja</strong>, only the built-in predefined template list. In other words, it is the "fast and specialized" path; for jinja's full flexibility you go to the <span class="mono">common/chat.cpp</span> layer. The API draws its boundary clearly.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Built-in vs Jinja, when to use which? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>In principle: when the model <strong>carries its own chat_template</strong> in GGUF (a piece of Jinja text), or you need advanced features like tool calls, go Jinja (<span class="mono">common/chat.cpp</span>'s <span class="mono">common_chat_templates</span> with <span class="mono">use_jinja</span>), most faithful to the model author's intent.</p>
+    <p>Conversely, when the model is a <strong>known mainstream one</strong>, or you want zero deps, fast and steady, the built-in enum suffices - it covers dozens of common formats, with no extra cost of pure C++ assembly. Command-line tools and embedded scenarios often pick this path.</p>
+    <p>The two are not opposed but a <strong>layered coverage</strong>: "known models" handled fast by built-in, "any model" backstopped by Jinja. This "common takes the fast path, rare takes the full path" is the same pragmatic wisdom as L20's vocab "keep high-frequency pieces directly, rare chars via byte fallback".</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>A chat template turns a role-tagged message list -&gt; a prompt string in the model's agreed format, then handed to L20 tokenize.</li>
+    <li>Built-in template enum <span class="mono">llm_chat_template</span> (fifty-odd); <span class="mono">llm_chat_detect_template</span> (by name, then feature substring) + <span class="mono">llm_chat_apply_template</span> (render, <span class="mono">add_ass</span> controls whether to hand over the mic).</li>
+    <li><span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> + <span class="mono">content</span>.</li>
+    <li>The C API <span class="mono">llama_chat_apply_template</span> <strong>takes only a template string, no model parameter</strong>, and goes built-in only, not jinja.</li>
+    <li>Two paths: built-in (<span class="mono">llama-chat.cpp</span>, fast / known models) vs Jinja (<span class="mono">common/jinja</span> + <span class="mono">common/chat.cpp</span>, any model / tool calls).</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The chat template gathers "<strong>a model's conversational dialect</strong>" into a table - the same messages, a different model, a different envelope, with the engine trunk none the wiser. It is the same wisdom as L15's "table-driven architecture" and L20's "table-driven tokenization": settle "the part each model differs in" into data/templates and let generic code act by it. And the built-in vs Jinja two paths are the classic "common takes the fast path, rare takes the full path" layering. Understand it, and you see why one llama.cpp can fluently speak the "tongue" of dozens of models.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What does a chat template do?</div>
+  <ol class="opts">
+    <li>assemble a role-tagged message list into a prompt string in the model's agreed format</li>
+    <li>cut text into tokens</li>
+    <li>compress the conversation history</li>
+    <li>score the reply</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The template assembles the system/user/assistant message list into a string per the model's training format (inserting special markers), then hands it to the vocab to tokenize. Cutting tokens is L20, scoring is L21.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which pair of markers does ChatML use to wrap each message?</div>
+  <ol class="opts">
+    <li>&lt;|im_start|&gt; and &lt;|im_end|&gt;</li>
+    <li>{{ and }}</li>
+    <li>&lt;s&gt; and &lt;/s&gt;</li>
+    <li>[INST] and [/INST]</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. ChatML wraps each message as &lt;|im_start|&gt;role ... &lt;|im_end|&gt;; [INST]/[/INST] is Llama-2's; &lt;s&gt;/&lt;/s&gt; are sequence delimiters; {{ }} is Jinja syntax.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does add_ass (add assistant) do when true?</div>
+  <ol class="opts">
+    <li>translate the reply into English</li>
+    <li>append the assistant start marker at the end so the model continues generating the reply</li>
+    <li>turn off sampling</li>
+    <li>remove the system message</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. add_ass appends the assistant's start marker (no content) at the end of the assembled prompt, like handing over the mic so the model continues from 'the assistant's turn'. On for chat, off for plain completion.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Drawing on L20, explain why you 'apply the chat template first, then tokenize', and what goes wrong if you reverse the order.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="21-sampling.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">采样</span><span class="lang-en">Sampling</span></div></a><a class="next" href="23-grammar.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">语法约束</span><span class="lang-en">Grammar (GBNF)</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
