@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>21 · 采样 / Sampling - llama.cpp 图解教程</title>
+<meta name="description" content="第四部分 · llama 推理内部｜采样 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="21 · 采样 / Sampling - llama.cpp 图解教程">
+<meta property="og:description" content="第四部分 · llama 推理内部｜采样 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="21 · 采样 / Sampling - llama.cpp 图解教程">
+<meta name="twitter:description" content="第四部分 · llama 推理内部｜采样 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></span>
+    <span class="pill">21 / 21</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第四部分 · llama 推理内部</span><span class="lang-en">Part 4 · Inside llama inference</span></div>
+    <h1><span class="lang-zh">采样</span><span class="lang-en">Sampling</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课词表把文字变成 token id 喂进模型，模型一路计算（M4a），最后在<strong>输出层</strong>吐出一排 <span class="mono">logits</span>——词表里每个 token 各对应一个原始分数，分数越高代表模型越"看好"它当下一个词。可下一个词只能有一个，怎么从几万个分数里挑出它？这一课讲的<strong>采样</strong>（sampling），就是"从一排分数到一个 token"的最后一步。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">采样远不止"选最大的"那么简单。每次都选最高分，模型会死板、重复、毫无新意；可纯随机又会胡言乱语。真正的采样是一套<strong>裁剪 + 塑形 + 抽选</strong>的组合拳：先划掉没希望的候选、再调分布的软硬、压一压老重复的词，最后才按概率抽一个。llama.cpp 把这些手段做成一个个可插拔的<strong>采样器</strong>，串成一条<strong>采样链</strong>。</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  采样像<strong>摇号抽奖</strong>：<span class="mono">logits</span> 是每个号码的原始权重，温度调节"凭实力还是凭运气"，top-k/top-p 先划掉没希望的号，惩罚项压低最近老出现的号，最后 <span class="mono">dist</span> 按权重摇一个出来——或者 <span class="mono">greedy</span> 干脆选权重最大的那个。同一堆号码，配不同的规则，摇出来的"性格"就完全不同。
+</div>
+
+<h2>从 logits 到 token</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">每个 token 一个分数</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">penalties</div><div class="nd">压低重复</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_k / top_p</div><div class="nd">裁剪候选</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">塑形分布</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">dist</div><div class="nd">选一个 token</div></div>
+</div>
+<p>先看清采样的输入和输出。输入是一个<strong>候选数组</strong>：词表里每个 token 一条记录，含 token id、它的 logit（原始分数）、以及待会儿算出来的概率 p。输出是其中<strong>一个</strong>被选中的 id。采样要做的，就是在这个数组上一通操作，最后挑出一条。</p>
+<p>这个候选数组在 llama.cpp 里叫 <span class="mono">llama_token_data_array</span>，每条记录是 <span class="mono">llama_token_data</span>。整条采样管线，本质上就是<strong>不断改写这个数组</strong>：有的采样器把某些候选的 logit 砸成负无穷（等于划掉），有的重新算概率、重新排序，最后一步从中选定一个、把它的下标记在数组的 <span class="mono">selected</span> 字段上。</p>
+<p>为什么要分这么多步、而不是一步选完？因为"选下一个词"需求多样：写代码要严谨（偏确定），写诗要发散（偏随机），还要避免老车轱辘话来回说。把这些需求拆成一个个独立的小操作、按需组合，远比写一个巨大的"全能采样函数"灵活。</p>
+<p>于是管线大致长这样：先用惩罚压低重复，再用 top-k/top-p 砍掉长尾候选，接着用温度调节剩下分布的软硬，最后用 dist 按概率抽一个（或 greedy 直接取最大）。每一步只做一件小事，叠起来就是一套完整的采样策略。</p>
+<p>要强调的是，这套管线只动 logits/概率、<strong>不碰模型本身</strong>。模型每步老老实实算出同一排 logits，至于怎么从中选词，全由采样这层说了算。所以"换个生成风格"根本不用动模型，调调采样参数即可——这也是同一个模型能时而严谨、时而天马行空的原因。</p>
+<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。</p>
+
+<h2>采样器接口</h2>
+<pre class="code"><span class="cm">// 简化自 include/llama.h</span>
+<span class="kw">struct</span> <span class="fn">llama_sampler_i</span> {
+    <span class="kw">const char</span> * (*name)  (...);                          <span class="cm">// 名字(可空)</span>
+    <span class="kw">void</span> (*accept)(llama_sampler *, llama_token);          <span class="cm">// 喂回选中 token(可空)</span>
+    <span class="kw">void</span> (*apply) (llama_sampler *, llama_token_data_array * cur_p); <span class="cm">// 改/排候选(必需)</span>
+    <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// 清状态(可空)</span>
+};
+<span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<p>看看一个采样器到底是什么。<span class="mono">llama_sampler_i</span> 就是一组函数指针：<span class="mono">apply</span>（核心，改写候选数组）、<span class="mono">accept</span>（把选中的 token 喂回来给有状态采样器记账）、<span class="mono">reset</span>（清状态），还有 name/clone/free。配上一块状态 <span class="mono">ctx</span>，就构成一个 <span class="mono">llama_sampler</span>。</p>
+<p>这里 <span class="mono">apply</span> 是唯一<strong>必需</strong>的——它拿到候选数组，按自己的规则改一改（划掉一些、重排一下、重算概率）。<span class="mono">accept</span> 可空，只有"有记忆"的采样器才用得上：惩罚项要记住前面出过哪些 token、mirostat 要根据反馈调参，它们都靠 accept 把"刚选中的 token"收进自己的状态。</p>
+<p>这种"一组函数指针 + 一块状态"的设计，你应该眼熟——它就是 L10 后端、L19 记忆接口那套<strong>接口 + 实现</strong>的又一次运用。每个采样器只要实现这几个函数，就能被统一调度；引擎不在乎你内部是 top-k 还是 mirostat，只管按顺序调 apply。</p>
+<p>把采样器抽象成统一接口，最大的好处是<strong>可组合</strong>。既然它们长一个样，就能像积木一样排成一队，挨个作用在同一个候选数组上。下一节的"采样链"，就是这种可组合性的直接产物。</p>
+<p>顺带说状态 <span class="mono">ctx</span>：它是每个采样器私有的小账本。无状态的采样器（如 top_k）ctx 几乎是空的；有状态的（penalties/mirostat/grammar）则把历史、参数、反馈都存在这里。采样器之间互不干扰，各记各的账。</p>
+<p>为什么接口里好几个函数都标着"可空"？因为不是每个采样器都用得上每件事。像 top_k 这种纯粹"裁一刀"的，根本不需要记忆，也就不必实现 accept；而 reset 只在复用同一个采样器跑多段生成时才有意义。把这些做成可选，让最简单的采样器可以只写一个 apply，既省事又清晰——接口只要求"必需的那件事"，其余按需。</p>
+
+<h2>采样链</h2>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>chain_init</h4><p>建一条空的采样链（<span class="mono">llama_sampler_chain</span>）。</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chain_add 若干采样器</h4><p>按顺序加入 penalties、top_k、top_p、temp、dist……每个都是独立采样器。</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sample</h4><p>对候选数组按加入顺序逐个 apply，最后一个（dist/greedy）选出 token。</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>accept</h4><p>把选中 token 喂回链，让有状态采样器（penalties 等）记住它。</p></div></div>
+</div>
+<p>采样链 <span class="mono">llama_sampler_chain</span> 本身也是一个采样器——它内部装着一串子采样器，它的 <span class="mono">apply</span> 就是<strong>按加入顺序</strong>把每个子采样器的 apply 挨个跑一遍。这是典型的"组合模式"：一条链对外看也是一个采样器，对内是许多采样器的队列。</p>
+<pre class="code"><span class="cm"># 伪代码: 组一条采样链</span>
+chain = <span class="fn">llama_sampler_chain_init</span>(params)
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_penalties</span>(...))    <span class="cm"># 压低重复</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_k</span>(40))         <span class="cm"># 留前 40</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_p</span>(0.95, 1))     <span class="cm"># 核采样</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_temp</span>(0.8))          <span class="cm"># 温度</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_dist</span>(seed))         <span class="cm"># 按概率随机选</span>
+id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span class="cm"># 跑全链 -&gt; 返回 token id</span></pre>
+<p>用起来很直观：先 <span class="mono">chain_init</span> 建空链，再 <span class="mono">chain_add</span> 按想要的顺序把采样器一个个塞进去，最后 <span class="mono">llama_sampler_sample</span> 一把梭——它读出某位置的 logits、组成候选数组、跑完整条链、返回选中的 token id，并顺手把这个 token <span class="mono">accept</span> 回去。</p>
+<p><strong>顺序很重要</strong>。同样几个采样器，排列不同，结果可能不同：一般先做惩罚和裁剪（缩小候选集），再做温度（调软硬），最后才是 dist/greedy（真正选定）。把"选定"放最后，是因为前面每一步都在为这"临门一脚"准备一个更合理的候选分布。</p>
+<p>注意链会<strong>接管</strong>加进来的采样器的所有权——一旦 add 进去，释放链时会一并释放它们，你不用单独操心。这种"加进去就交给链管"的约定，让组装采样策略很省心：拼好一条链，用完整体释放即可。</p>
+<p>这套"链"的设计，本质上是把"采样策略"变成了<strong>数据</strong>（一串采样器配置），而不是写死的代码。于是用户在命令行/配置里调几个参数，就能拼出千变万化的采样行为，引擎主干一行都不用改——又是一次"会变的部分集中起来"的体现。</p>
+<p>举个顺序影响结果的例子。假如你把温度放在 top-p <strong>之前</strong>，温度会先把分布整体烫平、再让 top-p 去圈范围，圈出来的核就偏大、偏发散；反过来先 top-p 圈定再升温，则是在一个已经收紧的小集合里调随机性，结果更可控。同样的零件、不同的次序，最终"性格"就有微妙差别——这正是把顺序交给用户配置的价值。</p>
+<p>实际项目里，这条链常有个约定俗成的默认顺序。llama.cpp 的上层（<span class="mono">common</span>）大致按"惩罚 -&gt; 裁剪（top-k/top-p/min-p 等）-&gt; 温度 -&gt; dist"来排。你不必死记，但记住那个大原则就够了：<strong>先缩小候选、再调软硬、最后才抽签</strong>。绝大多数采样策略，都是在这条主轴上加加减减。</p>
+
+<h2>常见采样器与 greedy vs dist</h2>
+<table class="t">
+  <tr><th>采样器</th><th>作用</th></tr>
+  <tr><td>greedy</td><td>选 logit 最大的（argmax，确定）</td></tr>
+  <tr><td>dist</td><td>按概率随机选（靠 seed）</td></tr>
+  <tr><td>top_k</td><td>只留前 k 个候选</td></tr>
+  <tr><td>top_p</td><td>核采样：留累积概率达 p 的最小集</td></tr>
+  <tr><td>min_p</td><td>留概率不低于"最大值 × p"的候选</td></tr>
+  <tr><td>temp</td><td>缩放 logits，调随机性</td></tr>
+  <tr><td>penalties</td><td>压低重复/高频/已出现的 token</td></tr>
+  <tr><td>mirostat</td><td>动态调温，稳住困惑度</td></tr>
+</table>
+<p>来认认常用的几个采样器。它们各管一段：有的负责"裁"（缩小候选集），有的负责"塑"（改分布形状），有的负责"选"（最终拍板）。</p>
+<p>先说最终拍板的两个：<span class="mono">greedy</span> 永远选 logit 最大的那个——确定性，同样输入永远同样输出，适合要复现、要严谨的场景；<span class="mono">dist</span> 则把 logits 经 softmax 变成概率，再按概率<strong>随机</strong>抽一个，带来多样性，靠随机种子 seed 控制。一条链最后接 greedy 还是 dist，决定这次生成是"确定"还是"随机"。</p>
+<p>再说"裁"的两位主力：<span class="mono">top_k</span> 留分数最高的固定 k 个、其余划掉；<span class="mono">top_p</span>（核采样）按概率从高到低累加、留到累计达 p 为止——候选数随分布自适应（分布尖时留得少、平时留得多）。两者常配合：先 top_k 砍掉长尾，再 top_p 自适应收口。</p>
+<p>"塑"的代表是温度 <span class="mono">temp</span>：把 logits 除以一个温度值 T 再 softmax。T 小则分布更尖（更确定），T 大则更平（更随机）。它不改候选集，只改"软硬"。还有 <span class="mono">penalties</span> 压低重复、<span class="mono">mirostat</span> 动态调温稳住困惑度等，各有专长。</p>
+<p>这里要提醒：2023 年那套全局采样函数（<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> 等）<strong>已经全部移除</strong>，统一换成了"采样器对象 + 链"这套模型。看老教程别再找那些函数了。</p>
+<p>单独说说 <span class="mono">penalties</span> 这一类，因为它最贴近日常体验。它盯着最近生成过的 token，对老重复的词施加惩罚（调低 logit），于是模型不容易陷进"复读机"式的循环。常见的有重复惩罚、频率惩罚、存在惩罚几种口味，分别对应"出现过就罚""出现越多越罚""只要出现就一视同仁地罚"。调它们，能在"连贯"和"啰嗦"之间找平衡。</p>
+
+<h2>接回主回路与衔接</h2>
+<p>把采样接回主回路：每生成一个 token，<span class="mono">llama_decode</span>（L17）算出 logits，采样链从中选一个 id，这个 id 一边经词表（L20）变回文字显示、一边被包成新 batch 喂回 <span class="mono">llama_decode</span> 进入下一步。采样就是自回归循环里"<strong>挑下一个词</strong>"那一环。</p>
+<p>还有一个和 grammar（L23）的衔接要先打招呼：语法约束本质上也是一个采样器（它的 apply 把不合语法的 token 划掉）。但它通常<strong>不</strong>塞进主链，而是作为独立对象、按 <span class="mono">grammar_first</span> 决定在链前还是链后单独施加——这一课熟悉了采样器接口，L23 再看 grammar 就水到渠成。</p>
+<p>所以这一课真正要带走的，是一个心智模型：<strong>采样 = 在候选数组上排一队小变换，最后选一个</strong>。模型决定"每个词多大概率合适"，采样决定"这次到底挑谁"。理解了它，你就理解了为什么同一个模型、同一句提示，调调参数就能从"一本正经"变到"天马行空"。</p>
+<p>顺带点一个实用细节：要让随机生成<strong>可复现</strong>，关键在 <span class="mono">dist</span> 的那个随机种子 seed。固定 seed、固定采样参数，同一段提示就能跑出完全一样的结果——这在调试、对比实验时极有用。反过来，想要每次都不一样，让 seed 随时间变即可。确定性到底掌握在你手里。</p>
+<p>最后澄清一个常见误解：采样调不出模型本来没有的能力。它只能在模型给出的那排 logits 上做文章——好的采样能让一个模型<strong>扬长避短</strong>（少出昏招、保持多样），但变不出模型压根学不会的知识。所以效果不好时，先分清是"模型不行"还是"采样没调好"：前者要换模型/微调（L24），后者调调参数即可。</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 温度（temperature）到底在做什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>温度 T 的作用是缩放 logits：把每个分数除以 T，再 softmax 变概率。T=1 是原样；T 小于 1，大分数被进一步放大、小分数被压扁，分布更<strong>尖锐</strong>，模型更倾向选最可能的词（更确定、更保守）；T 大于 1 则把差距拉平，分布更<strong>平坦</strong>，冷门词也有机会（更随机、更有创意）。</p>
+    <p>两个极端很有意思：T 趋近 0，分布尖到只剩最大那个，温度采样就<strong>退化成 greedy</strong>；T 很大时分布趋于均匀，几乎是瞎猜。所以温度是一个连续的"确定 &lt;-&gt; 随机"旋钮，greedy 不过是它的一个极端特例。</p>
+    <p>要记住温度<strong>只改软硬、不改候选集</strong>——它不删任何 token，只重新分配大家的概率。删候选是 top-k/top-p 的活。两类操作正交，组合才好用：先用 top-p 圈定合理候选集，再用温度调这个集合内部的随机程度。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> top-k 和 top-p 有何不同？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">top_k</span> 留<strong>固定个数</strong>：把候选按分数排序，留前 k 个、其余划掉。简单直接，但有个毛病——分布尖时 k 个里混进很多没希望的，分布平时又可能把好候选挡在门外。它不看分布形状，只数个数。</p>
+    <p><span class="mono">top_p</span>（核采样 nucleus）留<strong>累积概率达 p 的最小集合</strong>：按概率从高到低累加，加到超过 p 就停。它的候选数是<strong>自适应</strong>的——分布尖时可能只留两三个，分布平时可能留几十个。这种"按概率密度收口"往往比固定 k 更合理。</p>
+    <p>实践中常<strong>两者叠用</strong>：先 top_k（比如 40）砍掉绝大多数长尾、控制开销，再 top_p（比如 0.95）在剩下的里自适应收口。一个管"最多留多少"，一个管"按质量留多少"，配合起来既快又稳。</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> 为什么做成"链"而不是一个大函数？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>因为<strong>可组合 + 可配置 + 状态隔离</strong>。每个采样器是独立小部件、自带状态（penalties 记历史、mirostat 记反馈、dist 记随机数），顺序可调、增删自由。用户在配置里写一串采样器名字和参数，引擎照单拼出一条链——想要什么策略就拼什么，不必改一行引擎代码。</p>
+    <p>对比"一个写死的大采样函数"：那样每加一种新手段都得改主函数、各种 if 越堆越多，参数也纠缠不清。拆成链之后，新增一种采样器只是多写一个独立实现，对已有的零影响。这正是 L11 算子、L16 建图积木一脉相承的"小部件组合出复杂行为"。</p>
+    <p>还有个细节：grammar（L23）这种采样器通常<strong>不进主链</strong>，而是按 <span class="mono">grammar_first</span> 在链前或链后单独施加。这说明"链"也不死板——它给特殊约束留了在合适位置插入的余地，足够灵活。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>采样 = 在候选数组 <span class="mono">llama_token_data_array</span> 上裁剪塑形、最后选一个 token。</li>
+    <li>采样器 <span class="mono">llama_sampler_i</span>：<span class="mono">apply</span>（必需，改候选）+ <span class="mono">accept</span>（喂回选中 token）+ reset；配状态 <span class="mono">ctx</span> 成 <span class="mono">llama_sampler</span>。</li>
+    <li>采样链：<span class="mono">chain_init</span> -&gt; <span class="mono">chain_add</span> 若干采样器 -&gt; <span class="mono">sample</span>，按<strong>顺序</strong>逐个 apply。</li>
+    <li><span class="mono">greedy</span>=选最大（确定）、<span class="mono">dist</span>=按概率随机；<span class="mono">top_k</span>/<span class="mono">top_p</span> 裁候选、<span class="mono">temp</span> 调软硬、<span class="mono">penalties</span>/<span class="mono">mirostat</span> 各有专长。</li>
+    <li>旧全局 <span class="mono">llama_sample_*</span> 已移除，统一为采样器对象 + 链；grammar（L23）是链外的特殊采样器。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  把采样从"一个写死的大函数"拆成"一串可插拔的小变换"，是典型的<strong>责任链 / 管道</strong>设计——和你在 ggml 算子链（L09）、建图积木（L16）里见过的是同一种味道：用小而独立的部件，组合出复杂多变的行为。于是"换一种生成风格"只是换链里几个环、调几个数，模型和引擎主干纹丝不动。读懂采样，你就握住了把模型从"一本正经"调到"天马行空"的那几个旋钮。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. greedy 采样选哪个 token？</div>
+  <ol class="opts">
+    <li>最后一个</li>
+    <li>logit 最大的那个（argmax，确定性）</li>
+    <li>logit 最小的那个</li>
+    <li>随机一个</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。greedy 永远取 logit 最大的候选（argmax），同样输入永远同样输出；dist 才是按概率随机抽。要复现/严谨用 greedy，要多样性用 dist。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. top_p（核采样）保留哪些候选？</div>
+  <ol class="opts">
+    <li>按概率从高到低累加、达到阈值 p 的最小候选集合</li>
+    <li>全部候选</li>
+    <li>固定的前 50 个</li>
+    <li>概率大于 p 的全部</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。top_p 按概率累加到达 p 为止，候选数随分布自适应（尖时少、平时多）；top_k 才是固定个数。两者常配合：先 top_k 砍长尾，再 top_p 收口。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 把采样做成"链"（chain）的主要好处是什么？</div>
+  <ol class="opts">
+    <li>可组合——按顺序施加多个独立、可配置的采样器</li>
+    <li>省内存</li>
+    <li>只能用一个采样器</li>
+    <li>跑得更快</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。链把采样策略变成数据：每个采样器是独立小部件、自带状态，顺序可调、增删自由，用户调参就能拼出任意策略，引擎主干不动。快/省内存不是它的设计目的。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>结合 L20 和 L23，说说采样器为什么是在"词表的 token 空间"里工作，以及 grammar 如何作为一种"掩码"来约束这一步。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson the vocab turned text into token ids fed to the model; the model computes all the way through (M4a) and finally, at the <strong>output layer</strong>, emits a row of <span class="mono">logits</span> - one raw score per token in the vocab, a higher score meaning the model "favors" it more as the next word. But the next word can be only one, so how do you pick it from tens of thousands of scores? This lesson's topic, <strong>sampling</strong>, is that last step "from a row of scores to one token".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Sampling is far more than "pick the max". Always picking the top score makes the model rigid, repetitive, dull; but pure randomness babbles. Real sampling is a combo of <strong>prune + shape + draw</strong>: first cut hopeless candidates, then tune the distribution's softness, push down words that keep repeating, and only then draw one by probability. llama.cpp makes these means into pluggable <strong>samplers</strong>, strung into a <strong>sampler chain</strong>.</p>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Sampling is like a <strong>lottery draw</strong>: <span class="mono">logits</span> are each ticket's raw weight, temperature tunes "by skill or by luck", top-k/top-p first strike out hopeless tickets, the penalty pushes down tickets that keep showing up lately, and finally <span class="mono">dist</span> draws one by weight - or <span class="mono">greedy</span> simply takes the heaviest. The same pile of tickets, with different rules, draws an entirely different "personality".
+</div>
+
+<h2>From logits to a token</h2>
+<div class="flow">
+  <div class="node"><div class="nt">logits</div><div class="nd">one score per token</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">penalties</div><div class="nd">damp repeats</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_k / top_p</div><div class="nd">prune candidates</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">shape distribution</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">dist</div><div class="nd">pick one token</div></div>
+</div>
+<p>First, see sampling's input and output clearly. The input is a <strong>candidate array</strong>: one record per token in the vocab, holding the token id, its logit (raw score), and a probability p computed later. The output is <strong>one</strong> selected id among them. What sampling does is work over this array and finally pick one record.</p>
+<p>This candidate array is called <span class="mono">llama_token_data_array</span> in llama.cpp, each record a <span class="mono">llama_token_data</span>. The whole pipeline is essentially <strong>repeatedly rewriting this array</strong>: some samplers slam certain candidates' logit to negative infinity (a strike-out), some recompute probabilities and re-sort, and the last step selects one, recording its index in the array's <span class="mono">selected</span> field.</p>
+<p>Why so many steps instead of picking in one shot? Because "pick the next word" has varied needs: code wants rigor (lean deterministic), poetry wants divergence (lean random), and you must avoid rehashing the same phrases. Splitting these needs into independent small operations to combine on demand is far more flexible than one giant "do-it-all sampling function".</p>
+<p>So the pipeline looks roughly like this: penalties damp repeats first, top-k/top-p chop the long tail, then temperature tunes the softness of what remains, and finally dist draws one by probability (or greedy takes the max). Each step does one small thing; stacked together they are a complete sampling strategy.</p>
+<p>Worth stressing: this pipeline touches only logits/probabilities, <strong>never the model itself</strong>. The model dutifully computes the same row of logits each step; how a word is chosen from them is entirely up to the sampling layer. So "change the generation style" needs no change to the model, just sampling parameters - which is why one model can be rigorous one moment and wildly imaginative the next.</p>
+<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy.</p>
+
+<h2>The sampler interface</h2>
+<pre class="code"><span class="cm">// simplified from include/llama.h</span>
+<span class="kw">struct</span> <span class="fn">llama_sampler_i</span> {
+    <span class="kw">const char</span> * (*name)  (...);                          <span class="cm">// name (nullable)</span>
+    <span class="kw">void</span> (*accept)(llama_sampler *, llama_token);          <span class="cm">// feed back chosen token (nullable)</span>
+    <span class="kw">void</span> (*apply) (llama_sampler *, llama_token_data_array * cur_p); <span class="cm">// edit/rank candidates (required)</span>
+    <span class="kw">void</span> (*reset)(llama_sampler *);                        <span class="cm">// clear state (nullable)</span>
+};
+<span class="kw">struct</span> <span class="fn">llama_sampler</span> { <span class="kw">const</span> llama_sampler_i * iface; llama_sampler_context_t ctx; };</pre>
+<p>See what a sampler actually is. <span class="mono">llama_sampler_i</span> is just a set of function pointers: <span class="mono">apply</span> (the core, rewrites the candidate array), <span class="mono">accept</span> (feeds the chosen token back so stateful samplers can keep tally), <span class="mono">reset</span> (clear state), plus name/clone/free. With a state blob <span class="mono">ctx</span>, it forms a <span class="mono">llama_sampler</span>.</p>
+<p>Here <span class="mono">apply</span> is the only <strong>required</strong> one - it takes the candidate array and edits it by its own rule (strike some out, re-rank, recompute probabilities). <span class="mono">accept</span> is nullable, needed only by samplers with memory: the penalty must remember which tokens appeared before, mirostat must adjust by feedback; both use accept to take "the just-chosen token" into their state.</p>
+<p>This "a set of function pointers + a state blob" design should look familiar - it is another use of that <strong>interface + implementation</strong> pattern from L10's backends and L19's memory interface. Each sampler need only implement these functions to be scheduled uniformly; the engine does not care whether you are top-k or mirostat inside, it just calls apply in order.</p>
+<p>Abstracting samplers into a unified interface buys <strong>composability</strong> above all. Since they look alike, they can line up like blocks, each acting on the same candidate array. Next section's "sampler chain" is the direct product of this composability.</p>
+<p>A word on the state <span class="mono">ctx</span>: it is each sampler's private ledger. A stateless sampler (like top_k) has an almost-empty ctx; a stateful one (penalties/mirostat/grammar) keeps history, parameters, feedback here. Samplers do not interfere with one another, each keeping its own books.</p>
+<p>Why are several interface functions marked "nullable"? Because not every sampler needs everything. A pure "one cut" sampler like top_k needs no memory and thus need not implement accept; reset matters only when reusing one sampler across several generations. Making these optional lets the simplest sampler write just an apply - tidy and clear; the interface demands only "the required thing", the rest on demand.</p>
+
+<h2>The sampler chain</h2>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc"><h4>chain_init</h4><p>Build an empty sampler chain (<span class="mono">llama_sampler_chain</span>).</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>chain_add several samplers</h4><p>Add penalties, top_k, top_p, temp, dist... in order; each is an independent sampler.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="sc"><h4>sample</h4><p>apply over the candidate array in add-order; the last (dist/greedy) picks the token.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="sc"><h4>accept</h4><p>Feed the chosen token back into the chain so stateful samplers (penalties etc.) remember it.</p></div></div>
+</div>
+<p>The sampler chain <span class="mono">llama_sampler_chain</span> is itself a sampler - it holds a list of child samplers, and its <span class="mono">apply</span> simply runs each child's apply <strong>in add-order</strong>. This is the classic "composite" pattern: a chain looks like one sampler outside, while inside it is a queue of many.</p>
+<pre class="code"><span class="cm"># pseudocode: build a sampler chain</span>
+chain = <span class="fn">llama_sampler_chain_init</span>(params)
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_penalties</span>(...))    <span class="cm"># damp repeats</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_k</span>(40))         <span class="cm"># keep top 40</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_top_p</span>(0.95, 1))     <span class="cm"># nucleus</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_temp</span>(0.8))          <span class="cm"># temperature</span>
+chain.<span class="fn">add</span>(<span class="fn">llama_sampler_init_dist</span>(seed))         <span class="cm"># draw by probability</span>
+id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span class="cm"># run the whole chain -&gt; return a token id</span></pre>
+<p>It is straightforward to use: <span class="mono">chain_init</span> an empty chain, <span class="mono">chain_add</span> samplers in the order you want, and finally <span class="mono">llama_sampler_sample</span> does it all - it reads a position's logits, forms the candidate array, runs the whole chain, returns the chosen token id, and conveniently <span class="mono">accept</span>s that token back.</p>
+<p><strong>Order matters</strong>. The same few samplers in a different arrangement can give different results: generally do penalties and pruning first (shrink the candidate set), then temperature (tune softness), and dist/greedy last (the actual selection). Putting "selection" last is because every earlier step is preparing a more reasonable candidate distribution for that "final kick".</p>
+<p>Note the chain <strong>takes ownership</strong> of the samplers added to it - once added, freeing the chain frees them too, so you need not track them separately. This "add it and the chain manages it" convention makes assembling a strategy carefree: build a chain, free it whole when done.</p>
+<p>This "chain" design essentially turns "the sampling strategy" into <strong>data</strong> (a list of sampler configs) rather than hardcoded code. So a user tuning a few parameters on the command line / config can assemble endlessly varied sampling behavior with not a line of the engine trunk changed - once more "gather the parts that vary".</p>
+<p>An example of order affecting the result. If you put temperature <strong>before</strong> top-p, temperature first flattens the whole distribution and then top-p draws the range, so the nucleus comes out larger and more divergent; conversely, top-p fencing first then heating tunes randomness within an already-tightened small set, more controllable. Same parts, different order, subtly different "personality" - exactly the value of leaving order to user config.</p>
+<p>In real projects this chain often has a conventional default order. llama.cpp's upper layer (<span class="mono">common</span>) roughly arranges "penalties -&gt; pruning (top-k/top-p/min-p etc.) -&gt; temperature -&gt; dist". You need not memorize it, but the big principle suffices: <strong>shrink candidates first, tune softness next, draw last</strong>. The vast majority of sampling strategies are just additions and subtractions along this main axis.</p>
+
+<h2>Common samplers and greedy vs dist</h2>
+<table class="t">
+  <tr><th>Sampler</th><th>What it does</th></tr>
+  <tr><td>greedy</td><td>pick the max logit (argmax, deterministic)</td></tr>
+  <tr><td>dist</td><td>draw randomly by probability (via seed)</td></tr>
+  <tr><td>top_k</td><td>keep only the top k candidates</td></tr>
+  <tr><td>top_p</td><td>nucleus: keep the smallest set with cumulative prob p</td></tr>
+  <tr><td>min_p</td><td>keep candidates with prob no less than "max x p"</td></tr>
+  <tr><td>temp</td><td>scale logits, tune randomness</td></tr>
+  <tr><td>penalties</td><td>damp repeated/frequent/seen tokens</td></tr>
+  <tr><td>mirostat</td><td>dynamically tune temperature to hold perplexity</td></tr>
+</table>
+<p>Meet the common samplers. Each owns a stage: some "prune" (shrink the candidate set), some "shape" (change the distribution's form), some "select" (the final call).</p>
+<p>First the two that make the final call: <span class="mono">greedy</span> always picks the max logit - deterministic, same input always same output, good for reproducible, rigorous scenarios; <span class="mono">dist</span> softmaxes logits into probabilities and then draws one <strong>randomly</strong> by probability, bringing diversity, controlled by a random seed. Whether a chain ends in greedy or dist decides if this generation is "deterministic" or "random".</p>
+<p>Then the two pruning mainstays: <span class="mono">top_k</span> keeps the fixed top k by score and strikes out the rest; <span class="mono">top_p</span> (nucleus) accumulates by probability from high to low, keeping until the cumulative reaches p - the candidate count is <strong>adaptive</strong> (few when the distribution is peaked, many when flat). The two often pair: top_k chops the long tail, then top_p closes adaptively.</p>
+<p>The "shape" representative is temperature <span class="mono">temp</span>: divide logits by a temperature T then softmax. Small T makes the distribution peakier (more deterministic), large T flatter (more random). It does not change the candidate set, only the softness. There are also <span class="mono">penalties</span> to damp repeats, <span class="mono">mirostat</span> to dynamically tune temperature and hold perplexity, each with a specialty.</p>
+<p>A reminder here: the 2023-era global sampling functions (<span class="mono">llama_sample_top_k</span>/<span class="mono">llama_sample_top_p</span>/<span class="mono">llama_sample_temperature</span> etc.) are <strong>all removed</strong>, unified into this "sampler object + chain" model. Do not go looking for those functions in old tutorials.</p>
+<p>A word on the <span class="mono">penalties</span> family, since it is closest to everyday experience. It watches recently generated tokens and penalizes oft-repeated words (lowering their logit), so the model is less likely to fall into a "broken record" loop. Common flavors are repeat, frequency, and presence penalties - "penalize if seen", "penalize more the more it appears", "penalize once seen, flatly". Tuning them balances "coherent" against "verbose".</p>
+
+<h2>Back to the main loop and the hand-off</h2>
+<p>Connecting sampling back to the main loop: per generated token, <span class="mono">llama_decode</span> (L17) computes logits, the chain picks one id from them, and this id is both turned back into text via the vocab (L20) for display and wrapped into a new batch fed back to <span class="mono">llama_decode</span> for the next step. Sampling is the "<strong>pick the next word</strong>" link in the autoregressive loop.</p>
+<p>One hand-off with grammar (L23) to flag early: a grammar constraint is essentially a sampler too (its apply strikes out tokens that break the grammar). But it usually does <strong>not</strong> go into the main chain; it is a separate object applied before or after the chain per <span class="mono">grammar_first</span> - having learned the sampler interface here, grammar in L23 will come naturally.</p>
+<p>So what to truly take from this lesson is a mental model: <strong>sampling = line up a queue of small transforms over the candidate array, then pick one</strong>. The model decides "how likely each word is appropriate", sampling decides "who exactly gets picked this time". Understand it and you see why one model, one prompt, can go from "buttoned-up" to "wildly free" just by tuning parameters.</p>
+<p>A practical detail in passing: to make random generation <strong>reproducible</strong>, the key is <span class="mono">dist</span>'s random seed. Fix the seed and the sampling parameters, and the same prompt runs to identical results - invaluable for debugging and comparison experiments. Conversely, to vary each run, let the seed change with time. Determinism is firmly in your hands.</p>
+<p>Finally, clear a common misconception: sampling cannot conjure abilities the model lacks. It can only work on the row of logits the model gives - good sampling lets a model <strong>play to its strengths</strong> (fewer blunders, kept diversity), but cannot invent knowledge the model never learned. So when results are poor, first tell "the model is weak" from "the sampling is mistuned": the former needs a different model / fine-tuning (L24), the latter just parameter tweaks.</p>
+
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What does temperature actually do? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Temperature T scales logits: divide each score by T, then softmax into probabilities. T=1 is as-is; T below 1 amplifies big scores further and squashes small ones, making the distribution <strong>peakier</strong>, the model leaning toward the most likely word (more deterministic, more conservative); T above 1 flattens the gaps, making it <strong>flatter</strong> so longshots get a chance (more random, more creative).</p>
+    <p>The two extremes are interesting: as T approaches 0, the distribution peaks down to just the max, and temperature sampling <strong>degenerates into greedy</strong>; at very large T the distribution nears uniform, almost blind guessing. So temperature is a continuous "deterministic &lt;-&gt; random" knob, and greedy is merely one extreme special case of it.</p>
+    <p>Remember temperature <strong>only changes softness, not the candidate set</strong> - it deletes no token, only redistributes everyone's probability. Deleting candidates is top-k/top-p's job. The two operations are orthogonal and combine well: use top-p to fence a reasonable candidate set, then temperature to tune the randomness within that set.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">2</span> How do top-k and top-p differ? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">top_k</span> keeps a <strong>fixed count</strong>: sort candidates by score, keep the top k, strike out the rest. Simple and direct, but with a flaw - when the distribution is peaked, many hopeless ones sneak into the k, and when it is flat, good candidates may be shut out. It does not look at the distribution's shape, only counts.</p>
+    <p><span class="mono">top_p</span> (nucleus) keeps the <strong>smallest set whose cumulative probability reaches p</strong>: accumulate by probability from high to low, stopping once it passes p. Its candidate count is <strong>adaptive</strong> - maybe just two or three when peaked, dozens when flat. This "closing by probability density" is often more reasonable than a fixed k.</p>
+    <p>In practice the two are often <strong>stacked</strong>: top_k (say 40) chops the vast long tail and bounds cost, then top_p (say 0.95) closes adaptively among the rest. One governs "how many at most", the other "how many by quality"; together they are both fast and steady.</p>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary><span class="badge-num">3</span> Why a "chain" rather than one big function? <span class="hint">Click to expand</span></summary>
+  <div class="acc-body">
+    <p>Because of <strong>composability + configurability + state isolation</strong>. Each sampler is an independent small part with its own state (penalties keeps history, mirostat keeps feedback, dist keeps the RNG), with adjustable order and free add/remove. A user writes a list of sampler names and parameters in config, and the engine assembles a chain to order - whatever strategy you want, without changing a line of engine code.</p>
+    <p>Compare "one hardcoded big sampling function": there every new sampling means edits to the main function, ever more ifs, tangled parameters. Split into a chain, adding a new sampler is just one more independent implementation, with zero impact on the existing ones. This is the same "small parts compose complex behavior" as L11's operators and L16's graph blocks.</p>
+    <p>One more detail: a sampler like grammar (L23) usually does <strong>not</strong> enter the main chain but is applied before or after per <span class="mono">grammar_first</span>. This shows the "chain" is not rigid either - it leaves room to insert special constraints at the right spot, flexible enough.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Sampling = prune and shape the candidate array <span class="mono">llama_token_data_array</span>, then pick one token.</li>
+    <li>Sampler <span class="mono">llama_sampler_i</span>: <span class="mono">apply</span> (required, edits candidates) + <span class="mono">accept</span> (feed back chosen token) + reset; with state <span class="mono">ctx</span> it forms a <span class="mono">llama_sampler</span>.</li>
+    <li>Sampler chain: <span class="mono">chain_init</span> -&gt; <span class="mono">chain_add</span> several samplers -&gt; <span class="mono">sample</span>, applying each <strong>in order</strong>.</li>
+    <li><span class="mono">greedy</span>=pick the max (deterministic), <span class="mono">dist</span>=random by probability; <span class="mono">top_k</span>/<span class="mono">top_p</span> prune, <span class="mono">temp</span> tunes softness, <span class="mono">penalties</span>/<span class="mono">mirostat</span> have specialties.</li>
+    <li>Old global <span class="mono">llama_sample_*</span> are removed, unified into sampler object + chain; grammar (L23) is a special sampler outside the chain.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  Splitting sampling from "one hardcoded big function" into "a string of pluggable small transforms" is the classic <strong>chain-of-responsibility / pipeline</strong> design - the same flavor you saw in ggml's operator chain (L09) and graph blocks (L16): small independent parts composing complex, varied behavior. So "change the generation style" is just swapping a few links and tuning a few numbers, with the model and engine trunk untouched. Understand sampling, and you hold the very knobs that turn a model from "buttoned-up" to "wildly free".
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Which token does greedy sampling pick?</div>
+  <ol class="opts">
+    <li>the last one</li>
+    <li>the one with the max logit (argmax, deterministic)</li>
+    <li>the one with the min logit</li>
+    <li>a random one</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. greedy always takes the max-logit candidate (argmax); same input always same output. dist is the one that draws randomly by probability. Use greedy for reproducibility/rigor, dist for diversity.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which candidates does top_p (nucleus) keep?</div>
+  <ol class="opts">
+    <li>the smallest set whose cumulative probability (high to low) reaches threshold p</li>
+    <li>all candidates</li>
+    <li>a fixed top 50</li>
+    <li>all with probability greater than p</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. top_p accumulates probability until reaching p, so the candidate count adapts to the distribution (few when peaked, many when flat); top_k is the fixed-count one. They often pair: top_k chops the tail, top_p closes adaptively.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What is the main benefit of making sampling a 'chain'?</div>
+  <ol class="opts">
+    <li>composability - apply several independent, configurable samplers in order</li>
+    <li>it saves memory</li>
+    <li>it allows only one sampler</li>
+    <li>it runs faster</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The chain turns the strategy into data: each sampler is an independent part with its own state, order is adjustable, add/remove is free; users tune parameters to assemble any strategy without touching the engine. Speed/memory are not its design goal.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Drawing on L20 and L23, explain why a sampler works in 'the vocabulary's token space', and how grammar acts as a 'mask' to constrain this step.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="20-vocabulary.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">词表</span><span class="lang-en">Vocabulary</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

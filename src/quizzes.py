@@ -1382,6 +1382,67 @@ QUIZZES = {
             },
         ],
     },
+    "21-sampling.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "greedy 采样选哪个 token？",
+                    "en": "Which token does greedy sampling pick?",
+                },
+                "opts": [
+                    {"zh": "logit 最大的那个（argmax，确定性）", "en": "the one with the max logit (argmax, deterministic)"},
+                    {"zh": "随机一个", "en": "a random one"},
+                    {"zh": "最后一个", "en": "the last one"},
+                    {"zh": "logit 最小的那个", "en": "the one with the min logit"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "greedy 永远取 logit 最大的候选（argmax），同样输入永远同样输出；dist 才是按概率随机抽。要复现/严谨用 greedy，要多样性用 dist。",
+                    "en": "greedy always takes the max-logit candidate (argmax); same input always same output. dist is the one that draws randomly by probability. Use greedy for reproducibility/rigor, dist for diversity.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "top_p（核采样）保留哪些候选？",
+                    "en": "Which candidates does top_p (nucleus) keep?",
+                },
+                "opts": [
+                    {"zh": "按概率从高到低累加、达到阈值 p 的最小候选集合", "en": "the smallest set whose cumulative probability (high to low) reaches threshold p"},
+                    {"zh": "固定的前 50 个", "en": "a fixed top 50"},
+                    {"zh": "概率大于 p 的全部", "en": "all with probability greater than p"},
+                    {"zh": "全部候选", "en": "all candidates"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "top_p 按概率累加到达 p 为止，候选数随分布自适应（尖时少、平时多）；top_k 才是固定个数。两者常配合：先 top_k 砍长尾，再 top_p 收口。",
+                    "en": "top_p accumulates probability until reaching p, so the candidate count adapts to the distribution (few when peaked, many when flat); top_k is the fixed-count one. They often pair: top_k chops the tail, top_p closes adaptively.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "把采样做成\"链\"（chain）的主要好处是什么？",
+                    "en": "What is the main benefit of making sampling a 'chain'?",
+                },
+                "opts": [
+                    {"zh": "可组合——按顺序施加多个独立、可配置的采样器", "en": "composability - apply several independent, configurable samplers in order"},
+                    {"zh": "跑得更快", "en": "it runs faster"},
+                    {"zh": "省内存", "en": "it saves memory"},
+                    {"zh": "只能用一个采样器", "en": "it allows only one sampler"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "链把采样策略变成数据：每个采样器是独立小部件、自带状态，顺序可调、增删自由，用户调参就能拼出任意策略，引擎主干不动。快/省内存不是它的设计目的。",
+                    "en": "The chain turns the strategy into data: each sampler is an independent part with its own state, order is adjustable, add/remove is free; users tune parameters to assemble any strategy without touching the engine. Speed/memory are not its design goal.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L20 和 L23，说说采样器为什么是在\"词表的 token 空间\"里工作，以及 grammar 如何作为一种\"掩码\"来约束这一步。",
+                "en": "Drawing on L20 and L23, explain why a sampler works in 'the vocabulary's token space', and how grammar acts as a 'mask' to constrain this step.",
+            },
+        ],
+    },
 }
 
 
