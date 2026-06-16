@@ -30,4 +30,5 @@ CONTENT = {
     "17-context-session.html": part4.LESSON_17,
     "18-batching.html": part4.LESSON_18,
     "19-kv-cache.html": part4.LESSON_19,
+    "20-vocabulary.html": part4.LESSON_20,
 }

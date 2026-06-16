@@ -84,6 +84,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("19-kv-cache.html", "KV cache", "The KV cache",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("20-vocabulary.html", "词表", "Vocabulary",
+     "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
 ]
 
 
@@ -535,6 +537,8 @@ SUBTITLES = {
                          "llama_batch; pos/seq_id/logits flags; llama_batch_allocr -> ubatch"),
     "19-kv-cache.html": ("llama_kv_cache · cell(pos/seq_id) · 上下文移位 · 多序列 · 变体",
                          "llama_kv_cache; cell(pos/seq_id); context shift; multi-seq; variants"),
+    "20-vocabulary.html": ("llama_vocab · tokenize/detokenize · SPM/BPE/WPM · 字节回退",
+                           "llama_vocab; tokenize/detokenize; SPM/BPE/WPM; byte fallback"),
 }
 
 

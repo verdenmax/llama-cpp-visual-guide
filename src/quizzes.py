@@ -1321,6 +1321,67 @@ QUIZZES = {
             },
         ],
     },
+    "20-vocabulary.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "tokenize 做什么？",
+                    "en": "What does tokenize do?",
+                },
+                "opts": [
+                    {"zh": "把文本字符串切成一串 token id（喂给模型）", "en": "cuts a text string into a list of token ids (to feed the model)"},
+                    {"zh": "把 token 还原成文本", "en": "turns tokens back into text"},
+                    {"zh": "训练一张新词表", "en": "trains a new vocabulary"},
+                    {"zh": "给每个 token 打分", "en": "scores each token"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "tokenize 是编码方向：文本 -> token id 序列，喂进模型。反方向（id -> 文本）是 token_to_piece/detokenize 干的。",
+                    "en": "tokenize is the encoding direction: text -> a list of token ids, fed into the model. The reverse (id -> text) is done by token_to_piece/detokenize.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "字节回退（byte fallback）的作用是什么？",
+                    "en": "What is byte fallback for?",
+                },
+                "opts": [
+                    {"zh": "让任何 UTF-8 字符都能被编码（拆成字节 token），避免未登录词 OOV", "en": "lets any UTF-8 char be encoded (split into byte tokens), avoiding out-of-vocabulary OOV"},
+                    {"zh": "压缩词表大小", "en": "compresses the vocab size"},
+                    {"zh": "加速推理", "en": "speeds up inference"},
+                    {"zh": "删除特殊 token", "en": "removes special tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "词表里没有的字符按 UTF-8 拆成字节、每字节一个 &lt;0xXX&gt; token（256 个必覆盖），于是再罕见的字符也能无损编码，消灭 OOV；代价是生僻字占多个 token。",
+                    "en": "A char absent from the vocab is split into UTF-8 bytes, one &lt;0xXX&gt; token per byte (256 of them, guaranteed to cover), so even rare chars encode losslessly, abolishing OOV; the cost is rare chars take several tokens.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "取词表大小，当前应该用哪个 API？",
+                    "en": "Which API should you use today to get the vocab size?",
+                },
+                "opts": [
+                    {"zh": "llama_vocab_n_tokens（旧 llama_n_vocab 已弃用）", "en": "llama_vocab_n_tokens (old llama_n_vocab is deprecated)"},
+                    {"zh": "llama_n_ctx", "en": "llama_n_ctx"},
+                    {"zh": "strlen", "en": "strlen"},
+                    {"zh": "llama_n_embd", "en": "llama_n_embd"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "词表大小是词表的属性，权威 API 是 llama_vocab_n_tokens；旧名 llama_n_vocab 已标 DEPRECATED。n_ctx/n_embd 是别的量。",
+                    "en": "Vocab size is a vocab property; the authoritative API is llama_vocab_n_tokens; the old llama_n_vocab is marked DEPRECATED. n_ctx/n_embd are different quantities.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "结合 L21，描述一次对话生成里 tokenize 和 token_to_piece 各在什么时候被调用、各处理哪个方向。",
+                "en": "Drawing on L21, describe when tokenize and token_to_piece are each called in one chat generation, and which direction each handles.",
+            },
+        ],
+    },
 }
 
 
