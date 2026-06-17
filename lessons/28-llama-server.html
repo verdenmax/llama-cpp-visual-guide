@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>28 · llama-server / llama-server - llama.cpp 图解教程</title>
+<meta name="description" content="第五部分 · 公共 API 与工具｜llama-server - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="28 · llama-server / llama-server - llama.cpp 图解教程">
+<meta property="og:description" content="第五部分 · 公共 API 与工具｜llama-server - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="28 · llama-server / llama-server - llama.cpp 图解教程">
+<meta name="twitter:description" content="第五部分 · 公共 API 与工具｜llama-server - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 公共 API 与工具</span><span class="lang-en">Part 5 · Public API &amp; tools</span></span>
+    <span class="pill">28 / 28</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 公共 API 与工具</span><span class="lang-en">Part 5 · Public API &amp; tools</span></div>
+    <h1><span class="lang-zh">llama-server</span><span class="lang-en">llama-server</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课的 <span class="mono">llama-cli</span> 给共享引擎套了个"命令行壳"；这一课的 <span class="mono">llama-server</span> 给同一台引擎换上"HTTP 壳"——把推理变成一个网络服务：多个用户、多条请求同时连进来，还兼容 OpenAI 的接口，现成的 SDK 改个地址就能用。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">既然 cli 和 server 共用一台引擎（L27 已揭晓），这一课我们就正面看这台引擎在"要同时伺候很多请求"时是怎么转的。它最精彩、也最值得记住的一招，叫<strong>连续批处理</strong>（continuous batching）：一次前向，同时推进多条请求。</p>
+<p style="color:var(--muted)">本课只做<strong>架构总览</strong>——把请求从进门到出门的主干道走通，把 slot 与连续批处理这两个核心概念讲清。更深的调度取舍（prefill 与 decode 如何交错、batch 容量、抢占与公平）留到第七部分的 L35 再展开。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  server 的本事可以浓缩成一句话：<strong>把"一台引擎"变成"一个能同时服务很多人的服务"</strong>。难点不在"收发 HTTP"——那是现成的；难点在"一台 GPU、一份模型权重，怎么同时伺候十几条请求还都不慢"。答案就是连续批处理：与其让请求排长队、GPU 一次只算一条，不如把多条请求的"当前这一步"打包进同一次前向，一次算完、各取所需。读懂这一点，你就抓住了 server 区别于 cli 的根本——cli 一次只伺候你一个人，server 要在同一台引擎上把"并发"这件事做漂亮。它不是把引擎复制很多份，而是让一份引擎学会"分身"同时照顾多条对话。再往深一层看，这件事之所以可能，靠的是 KV cache（L19）的隔离：每条请求有自己独立的一段 KV，互不污染，它们才能安全地共用同一次前向计算而不"串台"。所以 server 的并发，本质上是"<strong>计算共享、状态隔离</strong>"——一次前向把算力摊给所有人，而每个人的对话历史各自存好、谁也看不见谁。这两件事缺一不可：只共享不隔离会乱套，只隔离不共享就退回到一条条排队的笨办法。把这对搭配记牢，后面所有关于 slot、batch、调度的细节，都是在这两条原则上做文章；也正因如此，server 真正的难点从来不是"怎么收 HTTP 请求"，而是"怎么让一台 GPU 在严格隔离各请求状态的前提下，仍能一次前向把大家一起往前推"。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 server 想成一家<strong>餐厅后厨</strong>：每张餐桌（slot）坐一桌客人（一条请求），厨房（引擎）只有一个。笨办法是一桌一桌做——做完第一桌才招呼第二桌，客人全在干等。连续批处理像一个<strong>会"并灶"的大厨</strong>：他把此刻所有桌"下一道菜要下的料"一起下锅、一次翻炒，再分到各桌去。灶台（GPU 的一次前向）开一次火，同时把好几桌的菜往前推进了一步。桌子的数量（<span class="mono">--parallel N</span>）决定了后厨能同时招呼几桌；而那位会并灶的大厨，就是 <span class="mono">update_slots</span>。这个类比还藏着一个容易被忽略的点：并灶之所以划算，前提是各桌的"下一道菜"恰好能同时下锅——也就是各请求都正好处在"该算下一个 token"的节拍上。真实的 server 里，有的桌还在吃前菜（prefill 一大段 prompt）、有的已在逐字上主菜（生成），大厨得把这些不同阶段的活儿巧妙编排进同一锅。这也是"连续"二字的分量：它不是把请求一次性凑齐再开火，而是每一轮都重新决定"这一锅放谁的料"——有桌吃完就撤下、新客来了就补位，灶台一刻不停地转。本课先尝到"并灶"的甜头，至于大厨具体怎么排班、怎么在"多接客"和"每桌都快"之间拿捏分寸，留到 L35。
+</div>
+
+<h2>整体架构：一条请求的旅程</h2>
+<p>先把一条请求从进门到出门的主干道走一遍。一个 HTTP 请求进来后，会被包装成一个 <span class="mono">server_task</span>（一个待办任务）丢进 <span class="mono">server_queue</span>（任务队列）；调度器把它分配给一个空闲的 <span class="mono">server_slot</span>；然后 <span class="mono">update_slots</span> 这个连续批处理循环不断推进它，每出一个 token 就产出一个 <span class="mono">server_task_result</span>（可以流式地一段段发回）；最后由 HTTP 层拼成响应回给客户端。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>HTTP 层 (server-http)</h4>
+    <p>收下请求、解析 JSON；最后把结果（可流式）写回客户端。</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>任务队列 (server-queue)</h4>
+    <p>请求包成 server_task 进 server_queue；post() 投递、recv() 取出，调度给空闲 slot。</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>引擎 + slots (server-context)</h4>
+    <p>server_context 持有一组 server_slot；update_slots 连续批处理循环推进所有活跃 slot。</p>
+  </div></div>
+  <div class="step"><div class="num">4</div><div class="sc">
+    <h4>结果 (server_task_result)</h4>
+    <p>每步产出一个结果，流式回传；server-chat 负责 OpenAI 兼容的格式转换。</p>
+  </div></div>
+</div>
+<p>这套<strong>模块化</strong>是 server 好读的关键：<span class="mono">server-http</span> 只管网络、<span class="mono">server-queue</span> 只管排队、<span class="mono">server-context</span> 只管推理、<span class="mono">server-chat</span> 只管 OpenAI 兼容转换。各司其职，互不纠缠——你想看"请求怎么排队"就翻 queue，想看"怎么生成"就翻 context，不必在一坨大文件里大海捞针。这种切分也呼应了 L27：cli 复用的正是中间这块 <span class="mono">server_context</span> 引擎。读 server 源码时，这张模块地图就是你的导航：迷路了就回来看一眼，先定位"我此刻关心的是网络、排队、推理还是兼容"，再钻进对应的那个文件，而不必把整座 server 一口气从头啃到尾。</p>
+
+<h2>slot 是什么</h2>
+<p>slot 是理解 server 的第一块基石。启动时 <span class="mono">--parallel N</span> 会开 <span class="mono">N</span> 个 slot（源码里叫 <span class="mono">n_parallel</span>），每个 slot 就是一条<strong>独立的并行序列</strong>：有自己的 <span class="mono">seq_id</span>、自己的一块 KV 区（呼应 L19 的 KV cache），还有一个小小的<strong>状态机</strong>。总上下文会切给各 slot，每个分到的那份叫 <span class="mono">n_ctx_slot</span>。</p>
+<div class="flow">
+  <div class="node"><div class="nt">IDLE</div><div class="nd">空闲, 可接新请求</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">STARTED</div><div class="nd">分到任务</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">PROCESSING_PROMPT</div><div class="nd">吃 prompt (prefill)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">GENERATING</div><div class="nd">逐 token 生成</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">IDLE</div><div class="nd">完成, 放回池子</div></div>
+</div>
+<p>一个 slot 的一生就是这个圈：空闲（<span class="mono">IDLE</span>）时待命；接到任务后进入 <span class="mono">STARTED</span>，开始吃 prompt（<span class="mono">PROCESSING_PROMPT</span>，也就是 prefill）；prompt 吃完（<span class="mono">DONE_PROMPT</span>）就转入 <span class="mono">GENERATING</span> 一个一个吐 token；生成完毕（撞上结束符或长度上限）就回到 <span class="mono">IDLE</span>，等下一个请求。N 个 slot 各自独立地在这个圈里转，互不干扰——这就是 server 能"同时开很多条对话"的底子。每个 slot 都有自己的 KV，所以这条对话的上下文不会和那条串味。还有一点值得记：正因为 slot 数是固定的，server 启动时就把这 N 份 KV 区一次性划好，运行时不再频繁向显存申请、释放——既快又稳，但也意味着 N 一旦定下，能同时跑几条就定死了，想再多接就只能排队。</p>
+
+<h2>连续批处理（核心）</h2>
+<p>现在到了 server 最精彩的一招。设想 3 条请求同时在跑：有的 slot 在 prefill（吃 prompt）、有的在 decode（吐词）。笨办法是一条一条来，GPU 一次只服务一个 slot，其余干等。<strong>连续批处理</strong>反其道而行：它把当下所有活跃 slot"这一步要算的 token"统统拼进<strong>同一个</strong> <span class="mono">llama_batch</span>，一次 <span class="mono">llama_decode</span> 把它们的序列<strong>全部往前推进一步</strong>。</p>
+<pre class="code"><span class="cm">// 连续批处理的核心 (精简自 server-context.cpp 的 update_slots)</span>
+<span class="fn">common_batch_clear</span>(batch);
+<span class="kw">for</span> (slot : slots) {                       <span class="cm">// 遍历所有活跃 slot</span>
+    <span class="kw">if</span> (slot.state == GENERATING || slot.state == PROCESSING_PROMPT)
+        <span class="fn">common_batch_add</span>(batch, slot.token, slot.pos, { slot.id }); <span class="cm">// 打上 seq_id=slot.id</span>
+}
+<span class="fn">llama_decode</span>(ctx, batch);                 <span class="cm">// 一次前向, 推进所有活跃序列</span>
+<span class="kw">for</span> (slot : slots)
+    slot.next = <span class="fn">common_sampler_sample</span>(slot.smpl, ctx, slot.i_logits); <span class="cm">// 各取自己那行</span></pre>
+<p>关键就在那句 <span class="mono">common_batch_add(batch, token, pos, { slot.id })</span>：它给每个 token 打上"我属于哪个 slot"的 <span class="mono">seq_id</span> 标签。于是一个 batch 里混着好几个 slot 的 token，<span class="mono">llama_decode</span> 借助注意力掩码让每条序列只看自己的历史，算完后每个 slot 再按自己的行号取走那一行 logits 去采样。下面这张图把"某一步"定格下来看：3 个 slot 的 token 如何挤进同一个 batch、一次 decode 后又如何各自分到下一个 token。看图时请特别留意中间那个"合并 batch"框：它不是按请求分成三段，而是把三个 slot 的 token 真正<strong>混</strong>在一格一格里，只靠每格标注的 <span class="mono">seq</span> 区分归属——正是这种"混装一锅、靠标签认人"的做法，让一次前向同时喂进了三条请求的活儿。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次连续批处理</b>：slot0/slot2 在生成、slot1 在预填充，三者的 token 拼进同一个 batch；一次 llama_decode 后，每个 slot 各取下一个 token（数值为示意）。</div>
+  <svg viewBox="0 0 640 250" width="100%" role="img" aria-label="连续批处理示例：三个 slot 的 token 合并进同一 batch，一次解码全推进">
+<g font-family="ui-monospace,monospace">
+<text x="84" y="30" text-anchor="middle" fill="#5b6470" font-size="11">3 个 slot = 3 条序列</text>
+<text x="320" y="30" text-anchor="middle" fill="#5b6470" font-size="11">合并 batch（按 slot 上色）</text>
+<text x="595" y="30" text-anchor="middle" fill="#5b6470" font-size="11">各取下一 token</text>
+<rect x="8" y="48" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="48" width="6" height="40" rx="3" fill="#c2630e"/>
+<text x="24" y="65" fill="#1d2129" font-weight="700" font-size="12">slot0</text>
+<rect x="74" y="54" width="78" height="16" rx="8" fill="#c2630e"/><text x="113" y="66" text-anchor="middle" fill="#ffffff" font-size="10">生成</text>
+<text x="24" y="81" fill="#5b6470" font-size="10">seq=0 pos=41</text>
+<rect x="8" y="100" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="100" width="6" height="40" rx="3" fill="#2563eb"/>
+<text x="24" y="117" fill="#1d2129" font-weight="700" font-size="12">slot1</text>
+<rect x="74" y="106" width="78" height="16" rx="8" fill="#2563eb"/><text x="113" y="118" text-anchor="middle" fill="#ffffff" font-size="10">预填充</text>
+<text x="24" y="133" fill="#5b6470" font-size="10">seq=1 pos=0</text>
+<rect x="8" y="152" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="152" width="6" height="40" rx="3" fill="#7c3aed"/>
+<text x="24" y="169" fill="#1d2129" font-weight="700" font-size="12">slot2</text>
+<rect x="74" y="158" width="78" height="16" rx="8" fill="#7c3aed"/><text x="113" y="170" text-anchor="middle" fill="#ffffff" font-size="10">生成</text>
+<text x="24" y="185" fill="#5b6470" font-size="10">seq=2 pos=57</text>
+<line x1="160" y1="68" x2="207" y2="92" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 96 L 205 96 L 209 89 z" fill="#9aa6b2"/>
+<line x1="160" y1="120" x2="206" y2="118" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 118 L 206 122 L 206 114 z" fill="#9aa6b2"/>
+<line x1="160" y1="172" x2="207" y2="144" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 140 L 209 148 L 205 141 z" fill="#9aa6b2"/>
+<rect x="214" y="44" width="212" height="120" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="226" y="84" width="32" height="38" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="242" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="242" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s0</text>
+<rect x="264" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="280" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="280" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="302" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="318" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="318" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="340" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="356" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="356" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="378" y="84" width="32" height="38" rx="5" fill="#7c3aed" stroke="#7c3aed"/><text x="394" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="394" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s2</text>
+<text x="320" y="140" text-anchor="middle" fill="#5b6470" font-size="10">prefill 放多个，生成各放 1 个</text>
+<text x="320" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">一次 llama_decode(batch)</text>
+<line x1="320" y1="164" x2="320" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 320 174 L 316 166 L 324 166 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="68" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 66 L 551 72 L 549 64 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="117" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 118 L 550 121 L 550 113 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="551" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 170 L 549 170 L 553 163 z" fill="#9aa6b2"/>
+<rect x="558" y="51" width="74" height="34" rx="5" fill="#ffffff" stroke="#c2630e"/>
+<text x="595" y="66" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="79" text-anchor="middle" fill="#5b6470" font-size="9">slot0</text>
+<rect x="558" y="103" width="74" height="34" rx="5" fill="#ffffff" stroke="#2563eb"/>
+<text x="595" y="118" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="131" text-anchor="middle" fill="#5b6470" font-size="9">slot1</text>
+<rect x="558" y="155" width="74" height="34" rx="5" fill="#ffffff" stroke="#7c3aed"/>
+<text x="595" y="170" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="183" text-anchor="middle" fill="#5b6470" font-size="9">slot2</text>
+<text x="320" y="234" text-anchor="middle" fill="#5b6470" font-size="11">一次前向，多请求共享</text>
+</g></svg>
+</div>
+
+<h2>OpenAI 兼容</h2>
+<p>server 还有一个让它格外好用的特性：它直接长出了一套和 <strong>OpenAI API 一样</strong>的端点，比如 <span class="mono">/v1/chat/completions</span>。这意味着任何为 OpenAI 写的客户端、SDK、前端，只要把请求地址（base URL）指向你的 llama-server，就能直接连上本地模型，几乎不用改代码。负责这层"翻译"的是 <span class="mono">server-chat</span>：它在 OpenAI 的 JSON schema（messages、tools 等）和引擎内部表示之间来回转换，连工具调用（tool calls）也照顾到了。这一层翻译看似不起眼，却是 server 能融入现有生态的关键——你已有的工具链、监控面板、客户端代码，几乎都能不改一行就复用，把"换成本地模型"的迁移成本压到了最低。</p>
+<pre class="code"><span class="cm"># 起一个服务, 然后像调 OpenAI 一样调它</span>
+llama-server -m model.gguf --port 8080   <span class="cm"># 默认开 N 个 slot (--parallel)</span>
+
+curl http://localhost:8080/v1/chat/completions \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{"messages":[{"role":"user","content":"你好"}]}'</span></pre>
+<div class="card spark">
+  <div class="tag">💡 动手试试</div>
+  最能体会 server 价值的一步：<span class="mono">llama-server -m model.gguf --port 8080</span> 起服务，然后开几个终端同时 <span class="mono">curl /v1/chat/completions</span>——你会看到它们<strong>同时</strong>都有响应，而不是排队一个个来，这就是连续批处理在背后并灶。再把 <span class="mono">--parallel</span> 调大或调小，观察"能同时伺候几条请求"怎么变。因为端点是 OpenAI 兼容的，你甚至可以拿现成的 OpenAI Python SDK，把 <span class="mono">base_url</span> 指到 <span class="mono">http://localhost:8080/v1</span> 直接用——本地模型，云端 API 的手感。想更直观地看见连续批处理的威力，可以做个对比实验：先用 <span class="mono">--parallel 1</span> 起服务（只有一个 slot），同时发 4 条请求，你会看到它们基本排队、一条接一条地出字；再用 <span class="mono">--parallel 4</span> 起、同样发 4 条，这次它们几乎一起开始、一起往外蹦字。同一台机器、同一个模型，只因为多开了几个 slot、让引擎"并灶"，整体观感就天差地别。这个小实验最能把"批处理换吞吐"从一句口号，变成你亲眼见过的事实；再进一步，一边压测一边盯着 server 打印的吞吐日志，你还能亲手找到那个"再加 slot 也不见更快"的拐点——那就是这张卡的算力上限。
+</div>
+
+<h2>为什么不直接开很多进程？</h2>
+<p>读到这里，你可能会冒出一个很自然的问题：要同时服务很多请求，为什么不干脆开很多个 llama 进程，一个进程伺候一条请求，岂不简单？答案藏在<strong>显存</strong>里。模型权重动辄几个 GB 到几十 GB，每开一个独立进程，就要把这份权重<strong>再加载一份</strong>进显存——开 8 个进程，同一份权重就被占了 8 遍，普通显卡根本扛不住。</p>
+<p>server 的做法恰恰相反：<strong>一份权重，多条会话</strong>。模型只加载一次（呼应 L25 的 <span class="mono">llama_model</span> 只读、可共享），所有 slot 共用这同一份权重，各自只额外占一小块 KV（L19）。于是显存开销从"权重 × 进程数"变成了"权重 × 1 + KV × slot 数"——而一块 KV 比整份权重小得多。这就是为什么"单引擎多 slot"能在一张卡上塞下远比"多进程"更多的并发。</p>
+<p>更何况多进程还各算各的前向，享受不到连续批处理那"一次前向、服务多人"的吞吐红利。所以"单引擎 + 多 slot + 连续批处理"这套组合，不是为了写起来优雅，而是被显存和吞吐这两条硬约束逼出来的最优解：省显存（共享权重）又高吞吐（共享前向），一举两得。当然多进程也有它的好处——隔离更彻底（一个崩了不连累别的）、部署更省心；但在"一张卡尽量多伺候几条请求"这个最常见的目标下，单引擎多 slot 几乎总是更划算，这也是主流推理服务器（不只 llama.cpp）几乎都选这条路的原因。</p>
+
+<h2>深入：排队与吞吐</h2>
+<p>最后两个折叠，回答两个一问就到点子上的问题：slot 不够用了会怎样，以及连续批处理为什么能把吞吐做高。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> slot 占满了，新请求怎么办？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>slot 的数量是固定的（<span class="mono">--parallel N</span>）。如果 N 个 slot 全在忙，又来了新请求，它不会被丢弃，而是<strong>排队等待</strong>：留在 <span class="mono">server_queue</span> 里（实现上有一条"延后任务"的队列），直到某个 slot 生成完、回到 <span class="mono">IDLE</span>，调度器再把它取出来分配进去。所以 <span class="mono">--parallel</span> 这个数字是一种取舍：调大，能同时接的请求更多，但每条分到的 KV 上下文（<span class="mono">n_ctx_slot</span>）和算力被摊薄；调小则相反。怎么权衡要看你的显存和负载——这正是 L35 要细讲的调度话题。一个实用的经验法则是：先按"单条请求大概要多长上下文"估出每个 slot 至少要留多少 KV，再拿剩余显存除以它，得到的大致就是 N 的上限——超过这个数，要么爆显存，要么每条分到的上下文被压得不够用。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 连续批处理为什么比"逐请求"快？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>关键在于 GPU 的特性：它做一次大矩阵运算（一次前向）的开销，<strong>几乎</strong>不随"同时算几条序列"线性增长——一次算 1 条和一次算 8 条，耗时差得远没有 8 倍。所以把多条请求的 token 合进一次 <span class="mono">llama_decode</span>，等于让同一次前向的成本摊给了好几条请求，单位时间能吐出的 token 总量（吞吐）大大提高。代价是实现复杂了（要管 seq_id、注意力掩码、各 slot 的进度），还有一些公平与延迟的权衡——但"一次前向、服务多人"这个核心收益，足以让它成为现代推理服务的标配。更深的取舍留给 L35。顺带一提，这也解释了"延迟"和"吞吐"为什么常是一对冤家：连续批处理拉高了整体吞吐，却可能让单条请求因为要和别人挤同一次前向而稍稍变慢——到底偏向哪头，取决于你是想让一个人尽快拿到答案，还是想让一整批人平均都不等太久。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama-server</span> 给共享引擎套"HTTP 壳"，把推理变成<strong>网络服务</strong>：多请求并发 + OpenAI 兼容端点。</li>
+    <li>请求旅程：HTTP -&gt; <span class="mono">server_task</span> -&gt; <span class="mono">server_queue</span> -&gt; 空闲 <span class="mono">server_slot</span> -&gt; <span class="mono">update_slots</span> -&gt; <span class="mono">server_task_result</span> -&gt; 响应；模块化分层（http/queue/context/chat）。</li>
+    <li><span class="mono">slot</span>：<span class="mono">--parallel N</span> 开 N 条并行序列，各有 seq_id + KV + 状态机（IDLE -&gt; STARTED -&gt; PROCESSING_PROMPT -&gt; GENERATING -&gt; IDLE）。</li>
+    <li><strong>连续批处理</strong>（核心）：<span class="mono">common_batch_add(..., {slot.id})</span> 把多个 slot 的 token 拼进同一 batch，一次 <span class="mono">llama_decode</span> 推进所有活跃序列——一次前向、服务多人。</li>
+    <li>OpenAI 兼容：<span class="mono">server-chat</span> 转换 <span class="mono">/v1/chat/completions</span> 等端点，现成 OpenAI 客户端改 base URL 即可连。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  server 这一课的精华，是"<strong>批处理换吞吐</strong>"这个朴素而深刻的工程思想。单看一条请求，连续批处理并不会让它更快（延迟没变小）；但把视角放大到"整台服务器单位时间能服务多少 token"，它就是数量级的提升。这背后是对硬件的深刻顺应——GPU 擅长"一次算一大批"，那就把请求攒成批喂给它，而不是逼它一条条算。从 cli 到 server，你看到的是同一台引擎的两种用法：cli 追求"一个人用得顺手"，server 追求"一群人用得高效"。而把"一群人"伺候好的关键，从来不是把引擎复制很多份，而是让一份引擎学会"并灶"。把这个思想记住，等到 L35 拆解更细的调度时，你会发现一切取舍都围着它转。再把它放进更大的图景：从 L25 的 C API、L26 的 common、L27 的 cli，到这一课的 server，第五部分其实在反复讲同一件事——如何把"一份稳定的核"用在越来越复杂的场景里。cli 让一个人用得顺，server 让一群人用得起，而支撑这一切的，始终是前四部分打磨出来的那台引擎。当你下次面对"如何让一个系统服务更多用户"时，不妨先问一句：我的"那一次前向"是什么？能不能把多个请求的它合并起来一次做完？它的反面也值得警惕——如果一个系统天然无法批处理、每个请求都得独占资源跑到底，那它的扩展性从架构之初就被卡死了。能不能批，往往一开始就决定了上限。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. 连续批处理（continuous batching）的核心做法是什么？</div>
+  <ol class="opts">
+    <li>把多个活跃 slot 的 token 用 common_batch_add(..., {slot.id}) 拼进同一个 batch，一次 llama_decode 同时推进所有序列</li>
+    <li>为每条请求开一个独立进程，各自加载一份权重并行跑</li>
+    <li>把模型权重复制 N 份到显存，每份服务一条请求</li>
+    <li>把请求排成队列，GPU 严格一条接一条地处理</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。连续批处理把处于 prefill / decode 的多个 slot 的 token 用 common_batch_add 打上各自的 seq_id 拼进同一 batch，一次 llama_decode 借注意力掩码同时推进所有活跃序列——一次前向、服务多人，这是 server 高吞吐的核心。复制权重/多进程恰恰是它要避免的。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. server 的 slot 数量由哪个参数决定？</div>
+  <ol class="opts">
+    <li>--n-predict / -n</li>
+    <li>--threads / -t</li>
+    <li>--ctx-size / -c</li>
+    <li>--parallel N（源码里的 n_parallel）</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。--parallel N 开 N 个 slot（n_parallel），每个 slot 是一条独立并行序列，有自己的 seq_id + KV + 状态机。-c 设的是总上下文（再切给各 slot 成 n_ctx_slot），-t 是线程数，-n 是生成长度，都不决定 slot 数。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. llama-server 怎么做到兼容 OpenAI 客户端？</div>
+  <ol class="opts">
+    <li>server-chat 在 OpenAI 的 schema 与引擎内部表示间转换，暴露 /v1/chat/completions 等端点</li>
+    <li>它把请求转发给 OpenAI 的云端服务器</li>
+    <li>它要求客户端改用 llama.cpp 专有协议</li>
+    <li>靠 llama.h 的 C API 直接说 HTTP</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。server-chat 负责把 OpenAI 的 JSON schema（messages、tools 等）与引擎内部表示来回转换，并暴露 /v1/chat/completions 等与 OpenAI 一致的端点；于是现成的 OpenAI 客户端/SDK 只要把 base URL 指向 llama-server 就能用，无需改协议、更不经过 OpenAI 云端。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>为什么 server 用“一份权重 + 多 slot + 连续批处理”，而不是“多进程、每进程一份权重”？请从显存占用和吞吐两个角度说明，并谈谈这套设计的代价（比如延迟、公平、实现复杂度）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a "command-line shell"; this lesson's <span class="mono">llama-server</span> fits the same engine with an "HTTP shell" - turning inference into a network service: many users and many requests connect at once, and it speaks the OpenAI API, so an existing SDK just needs a new address.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Since cli and server share one engine (revealed in L27), this lesson looks head-on at how that engine runs when it must serve many requests at once. Its most brilliant and most memorable move is <strong>continuous batching</strong>: one forward pass advances many requests together.</p>
+<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) wait for L35 in Part 7.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  server's skill boils down to one line: <strong>turn "one engine" into "a service that serves many people at once"</strong>. The hard part is not "send and receive HTTP" - that is off the shelf; the hard part is "one GPU, one copy of the model weights, serving a dozen requests at once without any of them crawling". The answer is continuous batching: rather than queue requests and let the GPU compute one at a time, pack each request's "current step" into the same forward pass, compute once, and hand each its share. Grasp this and you have server's essential difference from cli - cli serves only you, while server must do "concurrency" well on the very same engine. It does not copy the engine many times; it teaches one engine to "split itself" across many conversations. Look one level deeper and this is possible thanks to KV-cache (L19) isolation: each request has its own slice of KV, uncontaminated, so they can safely share the same forward computation without "crossing wires". So server's concurrency is essentially "<strong>shared compute, isolated state</strong>" - one forward spreads the compute across everyone, while each conversation's history is stored apart, invisible to the others. Neither half can be dropped: share without isolation and it descends into chaos; isolate without sharing and you are back to the clumsy one-at-a-time queue. Hold this pairing and every later detail about slots, batches, and scheduling is just elaboration on these two principles; that is also why server's real hard part is never "how to receive HTTP requests", but "how to let one GPU, while strictly isolating each request's state, still advance everyone together in one forward".
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is left to L35.
+</div>
+
+<h2>Overall architecture: a request's journey</h2>
+<p>First walk a request's main road from door to door. An incoming HTTP request is wrapped into a <span class="mono">server_task</span> (a to-do) and dropped into the <span class="mono">server_queue</span> (a task queue); the scheduler assigns it to an idle <span class="mono">server_slot</span>; then the <span class="mono">update_slots</span> continuous-batching loop keeps advancing it, producing a <span class="mono">server_task_result</span> per token (streamable in pieces); finally the HTTP layer assembles the response back to the client.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>HTTP layer (server-http)</h4>
+    <p>Take the request, parse JSON; at the end write the result (streamable) back to the client.</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>Task queue (server-queue)</h4>
+    <p>The request becomes a server_task in server_queue; post() submits, recv() takes out, scheduled to an idle slot.</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>Engine + slots (server-context)</h4>
+    <p>server_context holds a set of server_slot; update_slots advances all active slots by continuous batching.</p>
+  </div></div>
+  <div class="step"><div class="num">4</div><div class="sc">
+    <h4>Result (server_task_result)</h4>
+    <p>Each step yields a result, streamed back; server-chat handles OpenAI-compatible format conversion.</p>
+  </div></div>
+</div>
+<p>This <strong>modularity</strong> is why server reads well: <span class="mono">server-http</span> minds only the network, <span class="mono">server-queue</span> only the queue, <span class="mono">server-context</span> only inference, <span class="mono">server-chat</span> only OpenAI compatibility. Each to its own, untangled - want to see "how requests queue" open queue, want "how it generates" open context, no needle-in-a-haystack in one giant file. This split also echoes L27: what cli reuses is exactly that middle <span class="mono">server_context</span> engine. When you read server's source, this module map is your navigation: lost, come back and glance at it, first locate "is what I care about now the network, the queue, inference, or compatibility", then dive into the matching file, rather than gnawing through the whole server front to back in one go.</p>
+
+<h2>What a slot is</h2>
+<p>A slot is the first cornerstone for understanding server. At startup <span class="mono">--parallel N</span> opens <span class="mono">N</span> slots (called <span class="mono">n_parallel</span> in the source), and each slot is an <strong>independent parallel sequence</strong>: with its own <span class="mono">seq_id</span>, its own slice of KV (echoing L19's KV cache), and a small <strong>state machine</strong>. The total context is divided among slots, and each one's share is <span class="mono">n_ctx_slot</span>.</p>
+<div class="flow">
+  <div class="node"><div class="nt">IDLE</div><div class="nd">free, can take a request</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">STARTED</div><div class="nd">assigned a task</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">PROCESSING_PROMPT</div><div class="nd">eat prompt (prefill)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">GENERATING</div><div class="nd">emit token by token</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">IDLE</div><div class="nd">done, back to pool</div></div>
+</div>
+<p>A slot's life is this circle: idle (<span class="mono">IDLE</span>) on standby; on a task it enters <span class="mono">STARTED</span> and begins eating the prompt (<span class="mono">PROCESSING_PROMPT</span>, that is prefill); once the prompt is eaten (<span class="mono">DONE_PROMPT</span>) it turns to <span class="mono">GENERATING</span> and emits tokens one by one; when generation finishes (an end token or the length cap) it returns to <span class="mono">IDLE</span> and waits for the next request. The N slots each turn this circle independently, without interfering - that is the basis for server "running many conversations at once". Each slot has its own KV, so one conversation's context never bleeds into another's. One more thing worth noting: because the slot count is fixed, server carves out these N KV regions once at startup and no longer keeps asking VRAM for memory and freeing it at runtime - fast and stable, but it also means once N is set, how many can run at once is set too, and anything beyond must queue.</p>
+
+<h2>Continuous batching (the core)</h2>
+<p>Now to server's most brilliant move. Picture 3 requests running at once: some slots are in prefill (eating the prompt), some in decode (emitting words). The clumsy way takes them one at a time, the GPU serving only one slot while the rest wait. <strong>Continuous batching</strong> does the opposite: it packs "the tokens to compute this step" from all currently active slots into the <strong>same</strong> <span class="mono">llama_batch</span>, and one <span class="mono">llama_decode</span> advances all their sequences <strong>by one step together</strong>.</p>
+<pre class="code"><span class="cm">// the heart of continuous batching (condensed from update_slots in server-context.cpp)</span>
+<span class="fn">common_batch_clear</span>(batch);
+<span class="kw">for</span> (slot : slots) {                       <span class="cm">// iterate all active slots</span>
+    <span class="kw">if</span> (slot.state == GENERATING || slot.state == PROCESSING_PROMPT)
+        <span class="fn">common_batch_add</span>(batch, slot.token, slot.pos, { slot.id }); <span class="cm">// tag with seq_id=slot.id</span>
+}
+<span class="fn">llama_decode</span>(ctx, batch);                 <span class="cm">// one forward, advance all active sequences</span>
+<span class="kw">for</span> (slot : slots)
+    slot.next = <span class="fn">common_sampler_sample</span>(slot.smpl, ctx, slot.i_logits); <span class="cm">// each reads its own row</span></pre>
+<p>The key is that line <span class="mono">common_batch_add(batch, token, pos, { slot.id })</span>: it tags each token with "which slot I belong to" as a <span class="mono">seq_id</span>. So one batch holds tokens from several slots, <span class="mono">llama_decode</span> uses the attention mask to let each sequence see only its own history, and afterward each slot reads its own row of logits to sample. The diagram below freezes "one step": how 3 slots' tokens squeeze into one batch, and how after one decode each gets its own next token. When you read it, look closely at the middle "merged batch" box: it is not split into three request-segments, but truly <strong>mixes</strong> the three slots' tokens cell by cell, telling them apart only by the <span class="mono">seq</span> tag on each cell - it is exactly this "mix into one pan, recognize by tag" that lets one forward feed in the work of three requests at once.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one continuous-batch step</b>: slot0/slot2 are generating, slot1 is prefilling; their tokens pack into one batch, and after one llama_decode each slot gets its next token (values are illustrative).</div>
+  <svg viewBox="0 0 640 250" width="100%" role="img" aria-label="continuous batching example: tokens from three slots merged into one batch, one decode advances all">
+<g font-family="ui-monospace,monospace">
+<text x="84" y="30" text-anchor="middle" fill="#5b6470" font-size="11">3 slots = 3 seqs</text>
+<text x="320" y="30" text-anchor="middle" fill="#5b6470" font-size="11">merged batch (colored by slot)</text>
+<text x="595" y="30" text-anchor="middle" fill="#5b6470" font-size="11">next tokens</text>
+<rect x="8" y="48" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="48" width="6" height="40" rx="3" fill="#c2630e"/>
+<text x="24" y="65" fill="#1d2129" font-weight="700" font-size="12">slot0</text>
+<rect x="74" y="54" width="78" height="16" rx="8" fill="#c2630e"/><text x="113" y="66" text-anchor="middle" fill="#ffffff" font-size="10">gen</text>
+<text x="24" y="81" fill="#5b6470" font-size="10">seq=0 pos=41</text>
+<rect x="8" y="100" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="100" width="6" height="40" rx="3" fill="#2563eb"/>
+<text x="24" y="117" fill="#1d2129" font-weight="700" font-size="12">slot1</text>
+<rect x="74" y="106" width="78" height="16" rx="8" fill="#2563eb"/><text x="113" y="118" text-anchor="middle" fill="#ffffff" font-size="10">prefill</text>
+<text x="24" y="133" fill="#5b6470" font-size="10">seq=1 pos=0</text>
+<rect x="8" y="152" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="152" width="6" height="40" rx="3" fill="#7c3aed"/>
+<text x="24" y="169" fill="#1d2129" font-weight="700" font-size="12">slot2</text>
+<rect x="74" y="158" width="78" height="16" rx="8" fill="#7c3aed"/><text x="113" y="170" text-anchor="middle" fill="#ffffff" font-size="10">gen</text>
+<text x="24" y="185" fill="#5b6470" font-size="10">seq=2 pos=57</text>
+<line x1="160" y1="68" x2="207" y2="92" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 96 L 205 96 L 209 89 z" fill="#9aa6b2"/>
+<line x1="160" y1="120" x2="206" y2="118" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 118 L 206 122 L 206 114 z" fill="#9aa6b2"/>
+<line x1="160" y1="172" x2="207" y2="144" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 140 L 209 148 L 205 141 z" fill="#9aa6b2"/>
+<rect x="214" y="44" width="212" height="120" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="226" y="84" width="32" height="38" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="242" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="242" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s0</text>
+<rect x="264" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="280" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="280" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="302" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="318" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="318" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="340" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="356" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="356" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="378" y="84" width="32" height="38" rx="5" fill="#7c3aed" stroke="#7c3aed"/><text x="394" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="394" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s2</text>
+<text x="320" y="140" text-anchor="middle" fill="#5b6470" font-size="10">prefill adds many, each gen adds 1</text>
+<text x="320" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">one llama_decode(batch)</text>
+<line x1="320" y1="164" x2="320" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 320 174 L 316 166 L 324 166 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="68" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 66 L 551 72 L 549 64 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="117" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 118 L 550 121 L 550 113 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="551" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 170 L 549 170 L 553 163 z" fill="#9aa6b2"/>
+<rect x="558" y="51" width="74" height="34" rx="5" fill="#ffffff" stroke="#c2630e"/>
+<text x="595" y="66" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="79" text-anchor="middle" fill="#5b6470" font-size="9">slot0</text>
+<rect x="558" y="103" width="74" height="34" rx="5" fill="#ffffff" stroke="#2563eb"/>
+<text x="595" y="118" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="131" text-anchor="middle" fill="#5b6470" font-size="9">slot1</text>
+<rect x="558" y="155" width="74" height="34" rx="5" fill="#ffffff" stroke="#7c3aed"/>
+<text x="595" y="170" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="183" text-anchor="middle" fill="#5b6470" font-size="9">slot2</text>
+<text x="320" y="234" text-anchor="middle" fill="#5b6470" font-size="11">one forward pass, shared by all requests</text>
+</g></svg>
+</div>
+
+<h2>OpenAI compatibility</h2>
+<p>server has one more feature that makes it especially handy: it grows a set of endpoints <strong>identical to the OpenAI API</strong>, such as <span class="mono">/v1/chat/completions</span>. This means any client, SDK, or front-end written for OpenAI only needs to point its request URL (base URL) at your llama-server to talk to a local model, with almost no code change. The layer doing this "translation" is <span class="mono">server-chat</span>: it converts back and forth between OpenAI's JSON schema (messages, tools, and so on) and the engine's internal representation, tool calls included. This translation layer looks humble but is the key to server fitting into the existing ecosystem - your existing tool chains, monitoring dashboards, and client code can almost all be reused without changing a line, cutting the cost of "switching to a local model" to a minimum.</p>
+<pre class="code"><span class="cm"># start a service, then call it like OpenAI</span>
+llama-server -m model.gguf --port 8080   <span class="cm"># opens N slots by default (--parallel)</span>
+
+curl http://localhost:8080/v1/chat/completions \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{"messages":[{"role":"user","content":"Hello"}]}'</span></pre>
+<div class="card spark">
+  <div class="tag">💡 Hands-on</div>
+  The step that best conveys server's value: <span class="mono">llama-server -m model.gguf --port 8080</span> to start the service, then open a few terminals and <span class="mono">curl /v1/chat/completions</span> at the same time - you will see them all respond <strong>concurrently</strong>, not one at a time in a queue; that is continuous batching cooking several woks behind the scenes. Then turn <span class="mono">--parallel</span> up or down and watch "how many requests it serves at once" change. Because the endpoints are OpenAI-compatible, you can even take the off-the-shelf OpenAI Python SDK, point <span class="mono">base_url</span> at <span class="mono">http://localhost:8080/v1</span>, and use it directly - a local model with the feel of a cloud API. To see continuous batching's power directly, run a comparison: first start with <span class="mono">--parallel 1</span> (one slot) and send 4 requests at once - they basically queue, emitting one after another; then start with <span class="mono">--parallel 4</span> and send 4 again - this time they begin together and spill out words together. Same machine, same model, yet just opening a few slots and letting the engine "cook many woks" makes the overall feel night and day. This small experiment best turns "batching for throughput" from a slogan into a fact seen with your own eyes; go further, watch the throughput logs while you load-test, and you can find by hand the knee where "more slots no longer means faster" - that is this card's compute ceiling.
+</div>
+
+<h2>Why not just run many processes?</h2>
+<p>By here a natural question may surface: to serve many requests at once, why not simply run many llama processes, one process per request - is that not simpler? The answer hides in <strong>VRAM</strong>. Model weights run from a few GB to tens of GB, and each independent process must load <strong>another copy</strong> of those weights into VRAM - run 8 processes and the same weights are paid for 8 times, which an ordinary GPU cannot bear.</p>
+<p>server does the opposite: <strong>one set of weights, many sessions</strong>. The model loads once (echoing L25's read-only, shareable <span class="mono">llama_model</span>), all slots share these same weights, and each only takes one extra small slice of KV (L19). So VRAM cost goes from "weights x process count" to "weights x 1 + KV x slot count" - and one KV slice is far smaller than a full set of weights. That is why "one engine, many slots" fits far more concurrency on a single card than "many processes".</p>
+<p>Besides, many processes each run their own forward pass and miss continuous batching's "one forward, serve many" throughput dividend. So the combo of "one engine + many slots + continuous batching" is not for elegance, but the optimum forced by two hard constraints, VRAM and throughput: save VRAM (shared weights) and high throughput (shared forward), two wins at once. Many processes do have merits - cleaner isolation (one crash spares the rest), simpler deployment; but under the most common goal of "serve as many requests as possible on one card", one engine with many slots almost always wins, which is why mainstream inference servers (not just llama.cpp) nearly all take this road.</p>
+
+<h2>Deep dive: queueing and throughput</h2>
+<p>Two final folds answering two questions that cut to the point: what happens when slots run out, and why continuous batching makes throughput high.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Slots are full - what happens to a new request? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly the scheduling topic L35 covers in detail. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is continuous batching faster than "per request"? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are left to L35. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama-server</span> fits the shared engine with an "HTTP shell", turning inference into a <strong>network service</strong>: concurrent requests + OpenAI-compatible endpoints.</li>
+    <li>Request journey: HTTP -&gt; <span class="mono">server_task</span> -&gt; <span class="mono">server_queue</span> -&gt; idle <span class="mono">server_slot</span> -&gt; <span class="mono">update_slots</span> -&gt; <span class="mono">server_task_result</span> -&gt; response; modular layering (http/queue/context/chat).</li>
+    <li><span class="mono">slot</span>: <span class="mono">--parallel N</span> opens N parallel sequences, each with a seq_id + KV + state machine (IDLE -&gt; STARTED -&gt; PROCESSING_PROMPT -&gt; GENERATING -&gt; IDLE).</li>
+    <li><strong>Continuous batching</strong> (core): <span class="mono">common_batch_add(..., {slot.id})</span> packs many slots' tokens into one batch, one <span class="mono">llama_decode</span> advances all active sequences - one forward, serve many.</li>
+    <li>OpenAI compatibility: <span class="mono">server-chat</span> converts <span class="mono">/v1/chat/completions</span> and other endpoints; an existing OpenAI client just changes the base URL.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when L35 dissects finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the core mechanism of continuous batching?</div>
+  <ol class="opts">
+    <li>pack many active slots' tokens into one batch via common_batch_add(..., {slot.id}), and one llama_decode advances all sequences at once</li>
+    <li>spawn an independent process per request, each loading its own weights and running in parallel</li>
+    <li>copy the model weights N times into VRAM, one copy per request</li>
+    <li>queue the requests and have the GPU process them strictly one after another</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Continuous batching tags each active slot's token with its seq_id via common_batch_add and packs them into one batch; one llama_decode then advances all active sequences using the attention mask - one forward, serve many, the heart of server throughput. Copying weights / many processes is exactly what it avoids.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Which parameter sets server's number of slots?</div>
+  <ol class="opts">
+    <li>--n-predict / -n</li>
+    <li>--threads / -t</li>
+    <li>--ctx-size / -c</li>
+    <li>--parallel N (n_parallel in the source)</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. --parallel N opens N slots (n_parallel), each an independent parallel sequence with its own seq_id + KV + state machine. -c sets the total context (divided among slots as n_ctx_slot), -t is thread count, -n is generation length - none set the slot count.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. How does llama-server stay compatible with OpenAI clients?</div>
+  <ol class="opts">
+    <li>server-chat converts between OpenAI's schema and the engine's internal representation, exposing endpoints like /v1/chat/completions</li>
+    <li>it forwards requests to OpenAI's cloud servers</li>
+    <li>it requires clients to switch to a llama.cpp proprietary protocol</li>
+    <li>the llama.h C API speaks HTTP directly</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. server-chat converts between OpenAI's JSON schema (messages, tools, ...) and the engine's internal representation and exposes OpenAI-identical endpoints like /v1/chat/completions; an existing OpenAI client/SDK just points its base URL at llama-server, with no protocol change and no detour through OpenAI's cloud.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Why does server use 'one set of weights + many slots + continuous batching' instead of 'many processes, one set of weights each'? Argue from VRAM usage and throughput, and discuss the costs of this design (e.g. latency, fairness, implementation complexity).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="27-llama-cli.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">llama-cli</span><span class="lang-en">llama-cli</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

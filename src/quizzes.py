@@ -1809,6 +1809,67 @@ QUIZZES = {
             },
         ],
     },
+    "28-llama-server.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "连续批处理（continuous batching）的核心做法是什么？",
+                    "en": "What is the core mechanism of continuous batching?",
+                },
+                "opts": [
+                    {"zh": "把多个活跃 slot 的 token 用 common_batch_add(..., {slot.id}) 拼进同一个 batch，一次 llama_decode 同时推进所有序列", "en": "pack many active slots' tokens into one batch via common_batch_add(..., {slot.id}), and one llama_decode advances all sequences at once"},
+                    {"zh": "为每条请求开一个独立进程，各自加载一份权重并行跑", "en": "spawn an independent process per request, each loading its own weights and running in parallel"},
+                    {"zh": "把请求排成队列，GPU 严格一条接一条地处理", "en": "queue the requests and have the GPU process them strictly one after another"},
+                    {"zh": "把模型权重复制 N 份到显存，每份服务一条请求", "en": "copy the model weights N times into VRAM, one copy per request"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "连续批处理把处于 prefill / decode 的多个 slot 的 token 用 common_batch_add 打上各自的 seq_id 拼进同一 batch，一次 llama_decode 借注意力掩码同时推进所有活跃序列——一次前向、服务多人，这是 server 高吞吐的核心。复制权重/多进程恰恰是它要避免的。",
+                    "en": "Continuous batching tags each active slot's token with its seq_id via common_batch_add and packs them into one batch; one llama_decode then advances all active sequences using the attention mask - one forward, serve many, the heart of server throughput. Copying weights / many processes is exactly what it avoids.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "server 的 slot 数量由哪个参数决定？",
+                    "en": "Which parameter sets server's number of slots?",
+                },
+                "opts": [
+                    {"zh": "--parallel N（源码里的 n_parallel）", "en": "--parallel N (n_parallel in the source)"},
+                    {"zh": "--ctx-size / -c", "en": "--ctx-size / -c"},
+                    {"zh": "--threads / -t", "en": "--threads / -t"},
+                    {"zh": "--n-predict / -n", "en": "--n-predict / -n"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "--parallel N 开 N 个 slot（n_parallel），每个 slot 是一条独立并行序列，有自己的 seq_id + KV + 状态机。-c 设的是总上下文（再切给各 slot 成 n_ctx_slot），-t 是线程数，-n 是生成长度，都不决定 slot 数。",
+                    "en": "--parallel N opens N slots (n_parallel), each an independent parallel sequence with its own seq_id + KV + state machine. -c sets the total context (divided among slots as n_ctx_slot), -t is thread count, -n is generation length - none set the slot count.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-server 怎么做到兼容 OpenAI 客户端？",
+                    "en": "How does llama-server stay compatible with OpenAI clients?",
+                },
+                "opts": [
+                    {"zh": "server-chat 在 OpenAI 的 schema 与引擎内部表示间转换，暴露 /v1/chat/completions 等端点", "en": "server-chat converts between OpenAI's schema and the engine's internal representation, exposing endpoints like /v1/chat/completions"},
+                    {"zh": "它把请求转发给 OpenAI 的云端服务器", "en": "it forwards requests to OpenAI's cloud servers"},
+                    {"zh": "它要求客户端改用 llama.cpp 专有协议", "en": "it requires clients to switch to a llama.cpp proprietary protocol"},
+                    {"zh": "靠 llama.h 的 C API 直接说 HTTP", "en": "the llama.h C API speaks HTTP directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "server-chat 负责把 OpenAI 的 JSON schema（messages、tools 等）与引擎内部表示来回转换，并暴露 /v1/chat/completions 等与 OpenAI 一致的端点；于是现成的 OpenAI 客户端/SDK 只要把 base URL 指向 llama-server 就能用，无需改协议、更不经过 OpenAI 云端。",
+                    "en": "server-chat converts between OpenAI's JSON schema (messages, tools, ...) and the engine's internal representation and exposes OpenAI-identical endpoints like /v1/chat/completions; an existing OpenAI client/SDK just points its base URL at llama-server, with no protocol change and no detour through OpenAI's cloud.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 server 用“一份权重 + 多 slot + 连续批处理”，而不是“多进程、每进程一份权重”？请从显存占用和吞吐两个角度说明，并谈谈这套设计的代价（比如延迟、公平、实现复杂度）。",
+                "en": "Why does server use 'one set of weights + many slots + continuous batching' instead of 'many processes, one set of weights each'? Argue from VRAM usage and throughput, and discuss the costs of this design (e.g. latency, fairness, implementation complexity).",
+            },
+        ],
+    },
 }
 
 

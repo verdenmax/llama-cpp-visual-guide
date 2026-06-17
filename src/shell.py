@@ -100,6 +100,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("27-llama-cli.html", "llama-cli", "llama-cli",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("28-llama-server.html", "llama-server", "llama-server",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -588,6 +590,8 @@ SUBTITLES = {
                        "common: arg parsing, sampler wrapper, downloads - the shared glue for every tool"),
     "27-llama-cli.html": ("命令行/交互外壳：跑在共享引擎上的生成主循环",
                           "the CLI/interactive shell: a generation loop on the shared engine"),
+    "28-llama-server.html": ("HTTP + OpenAI 兼容 + slot 连续批处理：把引擎变成服务",
+                             "HTTP + OpenAI-compatible + slot continuous batching: the engine as a service"),
 }
 
 

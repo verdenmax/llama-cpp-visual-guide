@@ -980,3 +980,336 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
 </div>
 """,
 }
+
+LESSON_28 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课的 <span class="mono">llama-cli</span> 给共享引擎套了个"命令行壳"；这一课的 <span class="mono">llama-server</span> 给同一台引擎换上"HTTP 壳"——把推理变成一个网络服务：多个用户、多条请求同时连进来，还兼容 OpenAI 的接口，现成的 SDK 改个地址就能用。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">既然 cli 和 server 共用一台引擎（L27 已揭晓），这一课我们就正面看这台引擎在"要同时伺候很多请求"时是怎么转的。它最精彩、也最值得记住的一招，叫<strong>连续批处理</strong>（continuous batching）：一次前向，同时推进多条请求。</p>
+<p style="color:var(--muted)">本课只做<strong>架构总览</strong>——把请求从进门到出门的主干道走通，把 slot 与连续批处理这两个核心概念讲清。更深的调度取舍（prefill 与 decode 如何交错、batch 容量、抢占与公平）留到第七部分的 L35 再展开。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  server 的本事可以浓缩成一句话：<strong>把"一台引擎"变成"一个能同时服务很多人的服务"</strong>。难点不在"收发 HTTP"——那是现成的；难点在"一台 GPU、一份模型权重，怎么同时伺候十几条请求还都不慢"。答案就是连续批处理：与其让请求排长队、GPU 一次只算一条，不如把多条请求的"当前这一步"打包进同一次前向，一次算完、各取所需。读懂这一点，你就抓住了 server 区别于 cli 的根本——cli 一次只伺候你一个人，server 要在同一台引擎上把"并发"这件事做漂亮。它不是把引擎复制很多份，而是让一份引擎学会"分身"同时照顾多条对话。再往深一层看，这件事之所以可能，靠的是 KV cache（L19）的隔离：每条请求有自己独立的一段 KV，互不污染，它们才能安全地共用同一次前向计算而不"串台"。所以 server 的并发，本质上是"<strong>计算共享、状态隔离</strong>"——一次前向把算力摊给所有人，而每个人的对话历史各自存好、谁也看不见谁。这两件事缺一不可：只共享不隔离会乱套，只隔离不共享就退回到一条条排队的笨办法。把这对搭配记牢，后面所有关于 slot、batch、调度的细节，都是在这两条原则上做文章；也正因如此，server 真正的难点从来不是"怎么收 HTTP 请求"，而是"怎么让一台 GPU 在严格隔离各请求状态的前提下，仍能一次前向把大家一起往前推"。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把 server 想成一家<strong>餐厅后厨</strong>：每张餐桌（slot）坐一桌客人（一条请求），厨房（引擎）只有一个。笨办法是一桌一桌做——做完第一桌才招呼第二桌，客人全在干等。连续批处理像一个<strong>会"并灶"的大厨</strong>：他把此刻所有桌"下一道菜要下的料"一起下锅、一次翻炒，再分到各桌去。灶台（GPU 的一次前向）开一次火，同时把好几桌的菜往前推进了一步。桌子的数量（<span class="mono">--parallel N</span>）决定了后厨能同时招呼几桌；而那位会并灶的大厨，就是 <span class="mono">update_slots</span>。这个类比还藏着一个容易被忽略的点：并灶之所以划算，前提是各桌的"下一道菜"恰好能同时下锅——也就是各请求都正好处在"该算下一个 token"的节拍上。真实的 server 里，有的桌还在吃前菜（prefill 一大段 prompt）、有的已在逐字上主菜（生成），大厨得把这些不同阶段的活儿巧妙编排进同一锅。这也是"连续"二字的分量：它不是把请求一次性凑齐再开火，而是每一轮都重新决定"这一锅放谁的料"——有桌吃完就撤下、新客来了就补位，灶台一刻不停地转。本课先尝到"并灶"的甜头，至于大厨具体怎么排班、怎么在"多接客"和"每桌都快"之间拿捏分寸，留到 L35。
+</div>
+
+<h2>整体架构：一条请求的旅程</h2>
+<p>先把一条请求从进门到出门的主干道走一遍。一个 HTTP 请求进来后，会被包装成一个 <span class="mono">server_task</span>（一个待办任务）丢进 <span class="mono">server_queue</span>（任务队列）；调度器把它分配给一个空闲的 <span class="mono">server_slot</span>；然后 <span class="mono">update_slots</span> 这个连续批处理循环不断推进它，每出一个 token 就产出一个 <span class="mono">server_task_result</span>（可以流式地一段段发回）；最后由 HTTP 层拼成响应回给客户端。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>HTTP 层 (server-http)</h4>
+    <p>收下请求、解析 JSON；最后把结果（可流式）写回客户端。</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>任务队列 (server-queue)</h4>
+    <p>请求包成 server_task 进 server_queue；post() 投递、recv() 取出，调度给空闲 slot。</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>引擎 + slots (server-context)</h4>
+    <p>server_context 持有一组 server_slot；update_slots 连续批处理循环推进所有活跃 slot。</p>
+  </div></div>
+  <div class="step"><div class="num">4</div><div class="sc">
+    <h4>结果 (server_task_result)</h4>
+    <p>每步产出一个结果，流式回传；server-chat 负责 OpenAI 兼容的格式转换。</p>
+  </div></div>
+</div>
+<p>这套<strong>模块化</strong>是 server 好读的关键：<span class="mono">server-http</span> 只管网络、<span class="mono">server-queue</span> 只管排队、<span class="mono">server-context</span> 只管推理、<span class="mono">server-chat</span> 只管 OpenAI 兼容转换。各司其职，互不纠缠——你想看"请求怎么排队"就翻 queue，想看"怎么生成"就翻 context，不必在一坨大文件里大海捞针。这种切分也呼应了 L27：cli 复用的正是中间这块 <span class="mono">server_context</span> 引擎。读 server 源码时，这张模块地图就是你的导航：迷路了就回来看一眼，先定位"我此刻关心的是网络、排队、推理还是兼容"，再钻进对应的那个文件，而不必把整座 server 一口气从头啃到尾。</p>
+
+<h2>slot 是什么</h2>
+<p>slot 是理解 server 的第一块基石。启动时 <span class="mono">--parallel N</span> 会开 <span class="mono">N</span> 个 slot（源码里叫 <span class="mono">n_parallel</span>），每个 slot 就是一条<strong>独立的并行序列</strong>：有自己的 <span class="mono">seq_id</span>、自己的一块 KV 区（呼应 L19 的 KV cache），还有一个小小的<strong>状态机</strong>。总上下文会切给各 slot，每个分到的那份叫 <span class="mono">n_ctx_slot</span>。</p>
+<div class="flow">
+  <div class="node"><div class="nt">IDLE</div><div class="nd">空闲, 可接新请求</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">STARTED</div><div class="nd">分到任务</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">PROCESSING_PROMPT</div><div class="nd">吃 prompt (prefill)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">GENERATING</div><div class="nd">逐 token 生成</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">IDLE</div><div class="nd">完成, 放回池子</div></div>
+</div>
+<p>一个 slot 的一生就是这个圈：空闲（<span class="mono">IDLE</span>）时待命；接到任务后进入 <span class="mono">STARTED</span>，开始吃 prompt（<span class="mono">PROCESSING_PROMPT</span>，也就是 prefill）；prompt 吃完（<span class="mono">DONE_PROMPT</span>）就转入 <span class="mono">GENERATING</span> 一个一个吐 token；生成完毕（撞上结束符或长度上限）就回到 <span class="mono">IDLE</span>，等下一个请求。N 个 slot 各自独立地在这个圈里转，互不干扰——这就是 server 能"同时开很多条对话"的底子。每个 slot 都有自己的 KV，所以这条对话的上下文不会和那条串味。还有一点值得记：正因为 slot 数是固定的，server 启动时就把这 N 份 KV 区一次性划好，运行时不再频繁向显存申请、释放——既快又稳，但也意味着 N 一旦定下，能同时跑几条就定死了，想再多接就只能排队。</p>
+
+<h2>连续批处理（核心）</h2>
+<p>现在到了 server 最精彩的一招。设想 3 条请求同时在跑：有的 slot 在 prefill（吃 prompt）、有的在 decode（吐词）。笨办法是一条一条来，GPU 一次只服务一个 slot，其余干等。<strong>连续批处理</strong>反其道而行：它把当下所有活跃 slot"这一步要算的 token"统统拼进<strong>同一个</strong> <span class="mono">llama_batch</span>，一次 <span class="mono">llama_decode</span> 把它们的序列<strong>全部往前推进一步</strong>。</p>
+<pre class="code"><span class="cm">// 连续批处理的核心 (精简自 server-context.cpp 的 update_slots)</span>
+<span class="fn">common_batch_clear</span>(batch);
+<span class="kw">for</span> (slot : slots) {                       <span class="cm">// 遍历所有活跃 slot</span>
+    <span class="kw">if</span> (slot.state == GENERATING || slot.state == PROCESSING_PROMPT)
+        <span class="fn">common_batch_add</span>(batch, slot.token, slot.pos, { slot.id }); <span class="cm">// 打上 seq_id=slot.id</span>
+}
+<span class="fn">llama_decode</span>(ctx, batch);                 <span class="cm">// 一次前向, 推进所有活跃序列</span>
+<span class="kw">for</span> (slot : slots)
+    slot.next = <span class="fn">common_sampler_sample</span>(slot.smpl, ctx, slot.i_logits); <span class="cm">// 各取自己那行</span></pre>
+<p>关键就在那句 <span class="mono">common_batch_add(batch, token, pos, { slot.id })</span>：它给每个 token 打上"我属于哪个 slot"的 <span class="mono">seq_id</span> 标签。于是一个 batch 里混着好几个 slot 的 token，<span class="mono">llama_decode</span> 借助注意力掩码让每条序列只看自己的历史，算完后每个 slot 再按自己的行号取走那一行 logits 去采样。下面这张图把"某一步"定格下来看：3 个 slot 的 token 如何挤进同一个 batch、一次 decode 后又如何各自分到下一个 token。看图时请特别留意中间那个"合并 batch"框：它不是按请求分成三段，而是把三个 slot 的 token 真正<strong>混</strong>在一格一格里，只靠每格标注的 <span class="mono">seq</span> 区分归属——正是这种"混装一锅、靠标签认人"的做法，让一次前向同时喂进了三条请求的活儿。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次连续批处理</b>：slot0/slot2 在生成、slot1 在预填充，三者的 token 拼进同一个 batch；一次 llama_decode 后，每个 slot 各取下一个 token（数值为示意）。</div>
+  <svg viewBox="0 0 640 250" width="100%" role="img" aria-label="连续批处理示例：三个 slot 的 token 合并进同一 batch，一次解码全推进">
+<g font-family="ui-monospace,monospace">
+<text x="84" y="30" text-anchor="middle" fill="#5b6470" font-size="11">3 个 slot = 3 条序列</text>
+<text x="320" y="30" text-anchor="middle" fill="#5b6470" font-size="11">合并 batch（按 slot 上色）</text>
+<text x="595" y="30" text-anchor="middle" fill="#5b6470" font-size="11">各取下一 token</text>
+<rect x="8" y="48" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="48" width="6" height="40" rx="3" fill="#c2630e"/>
+<text x="24" y="65" fill="#1d2129" font-weight="700" font-size="12">slot0</text>
+<rect x="74" y="54" width="78" height="16" rx="8" fill="#c2630e"/><text x="113" y="66" text-anchor="middle" fill="#ffffff" font-size="10">生成</text>
+<text x="24" y="81" fill="#5b6470" font-size="10">seq=0 pos=41</text>
+<rect x="8" y="100" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="100" width="6" height="40" rx="3" fill="#2563eb"/>
+<text x="24" y="117" fill="#1d2129" font-weight="700" font-size="12">slot1</text>
+<rect x="74" y="106" width="78" height="16" rx="8" fill="#2563eb"/><text x="113" y="118" text-anchor="middle" fill="#ffffff" font-size="10">预填充</text>
+<text x="24" y="133" fill="#5b6470" font-size="10">seq=1 pos=0</text>
+<rect x="8" y="152" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="152" width="6" height="40" rx="3" fill="#7c3aed"/>
+<text x="24" y="169" fill="#1d2129" font-weight="700" font-size="12">slot2</text>
+<rect x="74" y="158" width="78" height="16" rx="8" fill="#7c3aed"/><text x="113" y="170" text-anchor="middle" fill="#ffffff" font-size="10">生成</text>
+<text x="24" y="185" fill="#5b6470" font-size="10">seq=2 pos=57</text>
+<line x1="160" y1="68" x2="207" y2="92" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 96 L 205 96 L 209 89 z" fill="#9aa6b2"/>
+<line x1="160" y1="120" x2="206" y2="118" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 118 L 206 122 L 206 114 z" fill="#9aa6b2"/>
+<line x1="160" y1="172" x2="207" y2="144" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 140 L 209 148 L 205 141 z" fill="#9aa6b2"/>
+<rect x="214" y="44" width="212" height="120" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="226" y="84" width="32" height="38" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="242" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="242" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s0</text>
+<rect x="264" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="280" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="280" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="302" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="318" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="318" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="340" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="356" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="356" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="378" y="84" width="32" height="38" rx="5" fill="#7c3aed" stroke="#7c3aed"/><text x="394" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="394" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s2</text>
+<text x="320" y="140" text-anchor="middle" fill="#5b6470" font-size="10">prefill 放多个，生成各放 1 个</text>
+<text x="320" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">一次 llama_decode(batch)</text>
+<line x1="320" y1="164" x2="320" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 320 174 L 316 166 L 324 166 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="68" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 66 L 551 72 L 549 64 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="117" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 118 L 550 121 L 550 113 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="551" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 170 L 549 170 L 553 163 z" fill="#9aa6b2"/>
+<rect x="558" y="51" width="74" height="34" rx="5" fill="#ffffff" stroke="#c2630e"/>
+<text x="595" y="66" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="79" text-anchor="middle" fill="#5b6470" font-size="9">slot0</text>
+<rect x="558" y="103" width="74" height="34" rx="5" fill="#ffffff" stroke="#2563eb"/>
+<text x="595" y="118" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="131" text-anchor="middle" fill="#5b6470" font-size="9">slot1</text>
+<rect x="558" y="155" width="74" height="34" rx="5" fill="#ffffff" stroke="#7c3aed"/>
+<text x="595" y="170" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">下一 tok</text>
+<text x="595" y="183" text-anchor="middle" fill="#5b6470" font-size="9">slot2</text>
+<text x="320" y="234" text-anchor="middle" fill="#5b6470" font-size="11">一次前向，多请求共享</text>
+</g></svg>
+</div>
+
+<h2>OpenAI 兼容</h2>
+<p>server 还有一个让它格外好用的特性：它直接长出了一套和 <strong>OpenAI API 一样</strong>的端点，比如 <span class="mono">/v1/chat/completions</span>。这意味着任何为 OpenAI 写的客户端、SDK、前端，只要把请求地址（base URL）指向你的 llama-server，就能直接连上本地模型，几乎不用改代码。负责这层"翻译"的是 <span class="mono">server-chat</span>：它在 OpenAI 的 JSON schema（messages、tools 等）和引擎内部表示之间来回转换，连工具调用（tool calls）也照顾到了。这一层翻译看似不起眼，却是 server 能融入现有生态的关键——你已有的工具链、监控面板、客户端代码，几乎都能不改一行就复用，把"换成本地模型"的迁移成本压到了最低。</p>
+<pre class="code"><span class="cm"># 起一个服务, 然后像调 OpenAI 一样调它</span>
+llama-server -m model.gguf --port 8080   <span class="cm"># 默认开 N 个 slot (--parallel)</span>
+
+curl http://localhost:8080/v1/chat/completions \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{"messages":[{"role":"user","content":"你好"}]}'</span></pre>
+<div class="card spark">
+  <div class="tag">💡 动手试试</div>
+  最能体会 server 价值的一步：<span class="mono">llama-server -m model.gguf --port 8080</span> 起服务，然后开几个终端同时 <span class="mono">curl /v1/chat/completions</span>——你会看到它们<strong>同时</strong>都有响应，而不是排队一个个来，这就是连续批处理在背后并灶。再把 <span class="mono">--parallel</span> 调大或调小，观察"能同时伺候几条请求"怎么变。因为端点是 OpenAI 兼容的，你甚至可以拿现成的 OpenAI Python SDK，把 <span class="mono">base_url</span> 指到 <span class="mono">http://localhost:8080/v1</span> 直接用——本地模型，云端 API 的手感。想更直观地看见连续批处理的威力，可以做个对比实验：先用 <span class="mono">--parallel 1</span> 起服务（只有一个 slot），同时发 4 条请求，你会看到它们基本排队、一条接一条地出字；再用 <span class="mono">--parallel 4</span> 起、同样发 4 条，这次它们几乎一起开始、一起往外蹦字。同一台机器、同一个模型，只因为多开了几个 slot、让引擎"并灶"，整体观感就天差地别。这个小实验最能把"批处理换吞吐"从一句口号，变成你亲眼见过的事实；再进一步，一边压测一边盯着 server 打印的吞吐日志，你还能亲手找到那个"再加 slot 也不见更快"的拐点——那就是这张卡的算力上限。
+</div>
+
+<h2>为什么不直接开很多进程？</h2>
+<p>读到这里，你可能会冒出一个很自然的问题：要同时服务很多请求，为什么不干脆开很多个 llama 进程，一个进程伺候一条请求，岂不简单？答案藏在<strong>显存</strong>里。模型权重动辄几个 GB 到几十 GB，每开一个独立进程，就要把这份权重<strong>再加载一份</strong>进显存——开 8 个进程，同一份权重就被占了 8 遍，普通显卡根本扛不住。</p>
+<p>server 的做法恰恰相反：<strong>一份权重，多条会话</strong>。模型只加载一次（呼应 L25 的 <span class="mono">llama_model</span> 只读、可共享），所有 slot 共用这同一份权重，各自只额外占一小块 KV（L19）。于是显存开销从"权重 × 进程数"变成了"权重 × 1 + KV × slot 数"——而一块 KV 比整份权重小得多。这就是为什么"单引擎多 slot"能在一张卡上塞下远比"多进程"更多的并发。</p>
+<p>更何况多进程还各算各的前向，享受不到连续批处理那"一次前向、服务多人"的吞吐红利。所以"单引擎 + 多 slot + 连续批处理"这套组合，不是为了写起来优雅，而是被显存和吞吐这两条硬约束逼出来的最优解：省显存（共享权重）又高吞吐（共享前向），一举两得。当然多进程也有它的好处——隔离更彻底（一个崩了不连累别的）、部署更省心；但在"一张卡尽量多伺候几条请求"这个最常见的目标下，单引擎多 slot 几乎总是更划算，这也是主流推理服务器（不只 llama.cpp）几乎都选这条路的原因。</p>
+
+<h2>深入：排队与吞吐</h2>
+<p>最后两个折叠，回答两个一问就到点子上的问题：slot 不够用了会怎样，以及连续批处理为什么能把吞吐做高。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> slot 占满了，新请求怎么办？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>slot 的数量是固定的（<span class="mono">--parallel N</span>）。如果 N 个 slot 全在忙，又来了新请求，它不会被丢弃，而是<strong>排队等待</strong>：留在 <span class="mono">server_queue</span> 里（实现上有一条"延后任务"的队列），直到某个 slot 生成完、回到 <span class="mono">IDLE</span>，调度器再把它取出来分配进去。所以 <span class="mono">--parallel</span> 这个数字是一种取舍：调大，能同时接的请求更多，但每条分到的 KV 上下文（<span class="mono">n_ctx_slot</span>）和算力被摊薄；调小则相反。怎么权衡要看你的显存和负载——这正是 L35 要细讲的调度话题。一个实用的经验法则是：先按"单条请求大概要多长上下文"估出每个 slot 至少要留多少 KV，再拿剩余显存除以它，得到的大致就是 N 的上限——超过这个数，要么爆显存，要么每条分到的上下文被压得不够用。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 连续批处理为什么比"逐请求"快？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>关键在于 GPU 的特性：它做一次大矩阵运算（一次前向）的开销，<strong>几乎</strong>不随"同时算几条序列"线性增长——一次算 1 条和一次算 8 条，耗时差得远没有 8 倍。所以把多条请求的 token 合进一次 <span class="mono">llama_decode</span>，等于让同一次前向的成本摊给了好几条请求，单位时间能吐出的 token 总量（吞吐）大大提高。代价是实现复杂了（要管 seq_id、注意力掩码、各 slot 的进度），还有一些公平与延迟的权衡——但"一次前向、服务多人"这个核心收益，足以让它成为现代推理服务的标配。更深的取舍留给 L35。顺带一提，这也解释了"延迟"和"吞吐"为什么常是一对冤家：连续批处理拉高了整体吞吐，却可能让单条请求因为要和别人挤同一次前向而稍稍变慢——到底偏向哪头，取决于你是想让一个人尽快拿到答案，还是想让一整批人平均都不等太久。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama-server</span> 给共享引擎套"HTTP 壳"，把推理变成<strong>网络服务</strong>：多请求并发 + OpenAI 兼容端点。</li>
+    <li>请求旅程：HTTP -&gt; <span class="mono">server_task</span> -&gt; <span class="mono">server_queue</span> -&gt; 空闲 <span class="mono">server_slot</span> -&gt; <span class="mono">update_slots</span> -&gt; <span class="mono">server_task_result</span> -&gt; 响应；模块化分层（http/queue/context/chat）。</li>
+    <li><span class="mono">slot</span>：<span class="mono">--parallel N</span> 开 N 条并行序列，各有 seq_id + KV + 状态机（IDLE -&gt; STARTED -&gt; PROCESSING_PROMPT -&gt; GENERATING -&gt; IDLE）。</li>
+    <li><strong>连续批处理</strong>（核心）：<span class="mono">common_batch_add(..., {slot.id})</span> 把多个 slot 的 token 拼进同一 batch，一次 <span class="mono">llama_decode</span> 推进所有活跃序列——一次前向、服务多人。</li>
+    <li>OpenAI 兼容：<span class="mono">server-chat</span> 转换 <span class="mono">/v1/chat/completions</span> 等端点，现成 OpenAI 客户端改 base URL 即可连。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  server 这一课的精华，是"<strong>批处理换吞吐</strong>"这个朴素而深刻的工程思想。单看一条请求，连续批处理并不会让它更快（延迟没变小）；但把视角放大到"整台服务器单位时间能服务多少 token"，它就是数量级的提升。这背后是对硬件的深刻顺应——GPU 擅长"一次算一大批"，那就把请求攒成批喂给它，而不是逼它一条条算。从 cli 到 server，你看到的是同一台引擎的两种用法：cli 追求"一个人用得顺手"，server 追求"一群人用得高效"。而把"一群人"伺候好的关键，从来不是把引擎复制很多份，而是让一份引擎学会"并灶"。把这个思想记住，等到 L35 拆解更细的调度时，你会发现一切取舍都围着它转。再把它放进更大的图景：从 L25 的 C API、L26 的 common、L27 的 cli，到这一课的 server，第五部分其实在反复讲同一件事——如何把"一份稳定的核"用在越来越复杂的场景里。cli 让一个人用得顺，server 让一群人用得起，而支撑这一切的，始终是前四部分打磨出来的那台引擎。当你下次面对"如何让一个系统服务更多用户"时，不妨先问一句：我的"那一次前向"是什么？能不能把多个请求的它合并起来一次做完？它的反面也值得警惕——如果一个系统天然无法批处理、每个请求都得独占资源跑到底，那它的扩展性从架构之初就被卡死了。能不能批，往往一开始就决定了上限。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a "command-line shell"; this lesson's <span class="mono">llama-server</span> fits the same engine with an "HTTP shell" - turning inference into a network service: many users and many requests connect at once, and it speaks the OpenAI API, so an existing SDK just needs a new address.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Since cli and server share one engine (revealed in L27), this lesson looks head-on at how that engine runs when it must serve many requests at once. Its most brilliant and most memorable move is <strong>continuous batching</strong>: one forward pass advances many requests together.</p>
+<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) wait for L35 in Part 7.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  server's skill boils down to one line: <strong>turn "one engine" into "a service that serves many people at once"</strong>. The hard part is not "send and receive HTTP" - that is off the shelf; the hard part is "one GPU, one copy of the model weights, serving a dozen requests at once without any of them crawling". The answer is continuous batching: rather than queue requests and let the GPU compute one at a time, pack each request's "current step" into the same forward pass, compute once, and hand each its share. Grasp this and you have server's essential difference from cli - cli serves only you, while server must do "concurrency" well on the very same engine. It does not copy the engine many times; it teaches one engine to "split itself" across many conversations. Look one level deeper and this is possible thanks to KV-cache (L19) isolation: each request has its own slice of KV, uncontaminated, so they can safely share the same forward computation without "crossing wires". So server's concurrency is essentially "<strong>shared compute, isolated state</strong>" - one forward spreads the compute across everyone, while each conversation's history is stored apart, invisible to the others. Neither half can be dropped: share without isolation and it descends into chaos; isolate without sharing and you are back to the clumsy one-at-a-time queue. Hold this pairing and every later detail about slots, batches, and scheduling is just elaboration on these two principles; that is also why server's real hard part is never "how to receive HTTP requests", but "how to let one GPU, while strictly isolating each request's state, still advance everyone together in one forward".
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is left to L35.
+</div>
+
+<h2>Overall architecture: a request's journey</h2>
+<p>First walk a request's main road from door to door. An incoming HTTP request is wrapped into a <span class="mono">server_task</span> (a to-do) and dropped into the <span class="mono">server_queue</span> (a task queue); the scheduler assigns it to an idle <span class="mono">server_slot</span>; then the <span class="mono">update_slots</span> continuous-batching loop keeps advancing it, producing a <span class="mono">server_task_result</span> per token (streamable in pieces); finally the HTTP layer assembles the response back to the client.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>HTTP layer (server-http)</h4>
+    <p>Take the request, parse JSON; at the end write the result (streamable) back to the client.</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>Task queue (server-queue)</h4>
+    <p>The request becomes a server_task in server_queue; post() submits, recv() takes out, scheduled to an idle slot.</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>Engine + slots (server-context)</h4>
+    <p>server_context holds a set of server_slot; update_slots advances all active slots by continuous batching.</p>
+  </div></div>
+  <div class="step"><div class="num">4</div><div class="sc">
+    <h4>Result (server_task_result)</h4>
+    <p>Each step yields a result, streamed back; server-chat handles OpenAI-compatible format conversion.</p>
+  </div></div>
+</div>
+<p>This <strong>modularity</strong> is why server reads well: <span class="mono">server-http</span> minds only the network, <span class="mono">server-queue</span> only the queue, <span class="mono">server-context</span> only inference, <span class="mono">server-chat</span> only OpenAI compatibility. Each to its own, untangled - want to see "how requests queue" open queue, want "how it generates" open context, no needle-in-a-haystack in one giant file. This split also echoes L27: what cli reuses is exactly that middle <span class="mono">server_context</span> engine. When you read server's source, this module map is your navigation: lost, come back and glance at it, first locate "is what I care about now the network, the queue, inference, or compatibility", then dive into the matching file, rather than gnawing through the whole server front to back in one go.</p>
+
+<h2>What a slot is</h2>
+<p>A slot is the first cornerstone for understanding server. At startup <span class="mono">--parallel N</span> opens <span class="mono">N</span> slots (called <span class="mono">n_parallel</span> in the source), and each slot is an <strong>independent parallel sequence</strong>: with its own <span class="mono">seq_id</span>, its own slice of KV (echoing L19's KV cache), and a small <strong>state machine</strong>. The total context is divided among slots, and each one's share is <span class="mono">n_ctx_slot</span>.</p>
+<div class="flow">
+  <div class="node"><div class="nt">IDLE</div><div class="nd">free, can take a request</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">STARTED</div><div class="nd">assigned a task</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">PROCESSING_PROMPT</div><div class="nd">eat prompt (prefill)</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">GENERATING</div><div class="nd">emit token by token</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">IDLE</div><div class="nd">done, back to pool</div></div>
+</div>
+<p>A slot's life is this circle: idle (<span class="mono">IDLE</span>) on standby; on a task it enters <span class="mono">STARTED</span> and begins eating the prompt (<span class="mono">PROCESSING_PROMPT</span>, that is prefill); once the prompt is eaten (<span class="mono">DONE_PROMPT</span>) it turns to <span class="mono">GENERATING</span> and emits tokens one by one; when generation finishes (an end token or the length cap) it returns to <span class="mono">IDLE</span> and waits for the next request. The N slots each turn this circle independently, without interfering - that is the basis for server "running many conversations at once". Each slot has its own KV, so one conversation's context never bleeds into another's. One more thing worth noting: because the slot count is fixed, server carves out these N KV regions once at startup and no longer keeps asking VRAM for memory and freeing it at runtime - fast and stable, but it also means once N is set, how many can run at once is set too, and anything beyond must queue.</p>
+
+<h2>Continuous batching (the core)</h2>
+<p>Now to server's most brilliant move. Picture 3 requests running at once: some slots are in prefill (eating the prompt), some in decode (emitting words). The clumsy way takes them one at a time, the GPU serving only one slot while the rest wait. <strong>Continuous batching</strong> does the opposite: it packs "the tokens to compute this step" from all currently active slots into the <strong>same</strong> <span class="mono">llama_batch</span>, and one <span class="mono">llama_decode</span> advances all their sequences <strong>by one step together</strong>.</p>
+<pre class="code"><span class="cm">// the heart of continuous batching (condensed from update_slots in server-context.cpp)</span>
+<span class="fn">common_batch_clear</span>(batch);
+<span class="kw">for</span> (slot : slots) {                       <span class="cm">// iterate all active slots</span>
+    <span class="kw">if</span> (slot.state == GENERATING || slot.state == PROCESSING_PROMPT)
+        <span class="fn">common_batch_add</span>(batch, slot.token, slot.pos, { slot.id }); <span class="cm">// tag with seq_id=slot.id</span>
+}
+<span class="fn">llama_decode</span>(ctx, batch);                 <span class="cm">// one forward, advance all active sequences</span>
+<span class="kw">for</span> (slot : slots)
+    slot.next = <span class="fn">common_sampler_sample</span>(slot.smpl, ctx, slot.i_logits); <span class="cm">// each reads its own row</span></pre>
+<p>The key is that line <span class="mono">common_batch_add(batch, token, pos, { slot.id })</span>: it tags each token with "which slot I belong to" as a <span class="mono">seq_id</span>. So one batch holds tokens from several slots, <span class="mono">llama_decode</span> uses the attention mask to let each sequence see only its own history, and afterward each slot reads its own row of logits to sample. The diagram below freezes "one step": how 3 slots' tokens squeeze into one batch, and how after one decode each gets its own next token. When you read it, look closely at the middle "merged batch" box: it is not split into three request-segments, but truly <strong>mixes</strong> the three slots' tokens cell by cell, telling them apart only by the <span class="mono">seq</span> tag on each cell - it is exactly this "mix into one pan, recognize by tag" that lets one forward feed in the work of three requests at once.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one continuous-batch step</b>: slot0/slot2 are generating, slot1 is prefilling; their tokens pack into one batch, and after one llama_decode each slot gets its next token (values are illustrative).</div>
+  <svg viewBox="0 0 640 250" width="100%" role="img" aria-label="continuous batching example: tokens from three slots merged into one batch, one decode advances all">
+<g font-family="ui-monospace,monospace">
+<text x="84" y="30" text-anchor="middle" fill="#5b6470" font-size="11">3 slots = 3 seqs</text>
+<text x="320" y="30" text-anchor="middle" fill="#5b6470" font-size="11">merged batch (colored by slot)</text>
+<text x="595" y="30" text-anchor="middle" fill="#5b6470" font-size="11">next tokens</text>
+<rect x="8" y="48" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="48" width="6" height="40" rx="3" fill="#c2630e"/>
+<text x="24" y="65" fill="#1d2129" font-weight="700" font-size="12">slot0</text>
+<rect x="74" y="54" width="78" height="16" rx="8" fill="#c2630e"/><text x="113" y="66" text-anchor="middle" fill="#ffffff" font-size="10">gen</text>
+<text x="24" y="81" fill="#5b6470" font-size="10">seq=0 pos=41</text>
+<rect x="8" y="100" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="100" width="6" height="40" rx="3" fill="#2563eb"/>
+<text x="24" y="117" fill="#1d2129" font-weight="700" font-size="12">slot1</text>
+<rect x="74" y="106" width="78" height="16" rx="8" fill="#2563eb"/><text x="113" y="118" text-anchor="middle" fill="#ffffff" font-size="10">prefill</text>
+<text x="24" y="133" fill="#5b6470" font-size="10">seq=1 pos=0</text>
+<rect x="8" y="152" width="152" height="40" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="8" y="152" width="6" height="40" rx="3" fill="#7c3aed"/>
+<text x="24" y="169" fill="#1d2129" font-weight="700" font-size="12">slot2</text>
+<rect x="74" y="158" width="78" height="16" rx="8" fill="#7c3aed"/><text x="113" y="170" text-anchor="middle" fill="#ffffff" font-size="10">gen</text>
+<text x="24" y="185" fill="#5b6470" font-size="10">seq=2 pos=57</text>
+<line x1="160" y1="68" x2="207" y2="92" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 96 L 205 96 L 209 89 z" fill="#9aa6b2"/>
+<line x1="160" y1="120" x2="206" y2="118" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 118 L 206 122 L 206 114 z" fill="#9aa6b2"/>
+<line x1="160" y1="172" x2="207" y2="144" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 214 140 L 209 148 L 205 141 z" fill="#9aa6b2"/>
+<rect x="214" y="44" width="212" height="120" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="226" y="84" width="32" height="38" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="242" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="242" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s0</text>
+<rect x="264" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="280" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="280" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="302" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="318" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="318" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="340" y="84" width="32" height="38" rx="5" fill="#2563eb" stroke="#2563eb"/><text x="356" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="356" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s1</text>
+<rect x="378" y="84" width="32" height="38" rx="5" fill="#7c3aed" stroke="#7c3aed"/><text x="394" y="100" text-anchor="middle" fill="#ffffff" font-weight="700" font-size="11">tok</text><text x="394" y="115" text-anchor="middle" fill="#ffffff" font-size="9">s2</text>
+<text x="320" y="140" text-anchor="middle" fill="#5b6470" font-size="10">prefill adds many, each gen adds 1</text>
+<text x="320" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">one llama_decode(batch)</text>
+<line x1="320" y1="164" x2="320" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 320 174 L 316 166 L 324 166 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="68" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 66 L 551 72 L 549 64 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="550" y2="117" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 118 L 550 121 L 550 113 z" fill="#9aa6b2"/>
+<line x1="426" y1="104" x2="551" y2="166" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 558 170 L 549 170 L 553 163 z" fill="#9aa6b2"/>
+<rect x="558" y="51" width="74" height="34" rx="5" fill="#ffffff" stroke="#c2630e"/>
+<text x="595" y="66" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="79" text-anchor="middle" fill="#5b6470" font-size="9">slot0</text>
+<rect x="558" y="103" width="74" height="34" rx="5" fill="#ffffff" stroke="#2563eb"/>
+<text x="595" y="118" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="131" text-anchor="middle" fill="#5b6470" font-size="9">slot1</text>
+<rect x="558" y="155" width="74" height="34" rx="5" fill="#ffffff" stroke="#7c3aed"/>
+<text x="595" y="170" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">next tok</text>
+<text x="595" y="183" text-anchor="middle" fill="#5b6470" font-size="9">slot2</text>
+<text x="320" y="234" text-anchor="middle" fill="#5b6470" font-size="11">one forward pass, shared by all requests</text>
+</g></svg>
+</div>
+
+<h2>OpenAI compatibility</h2>
+<p>server has one more feature that makes it especially handy: it grows a set of endpoints <strong>identical to the OpenAI API</strong>, such as <span class="mono">/v1/chat/completions</span>. This means any client, SDK, or front-end written for OpenAI only needs to point its request URL (base URL) at your llama-server to talk to a local model, with almost no code change. The layer doing this "translation" is <span class="mono">server-chat</span>: it converts back and forth between OpenAI's JSON schema (messages, tools, and so on) and the engine's internal representation, tool calls included. This translation layer looks humble but is the key to server fitting into the existing ecosystem - your existing tool chains, monitoring dashboards, and client code can almost all be reused without changing a line, cutting the cost of "switching to a local model" to a minimum.</p>
+<pre class="code"><span class="cm"># start a service, then call it like OpenAI</span>
+llama-server -m model.gguf --port 8080   <span class="cm"># opens N slots by default (--parallel)</span>
+
+curl http://localhost:8080/v1/chat/completions \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{"messages":[{"role":"user","content":"Hello"}]}'</span></pre>
+<div class="card spark">
+  <div class="tag">💡 Hands-on</div>
+  The step that best conveys server's value: <span class="mono">llama-server -m model.gguf --port 8080</span> to start the service, then open a few terminals and <span class="mono">curl /v1/chat/completions</span> at the same time - you will see them all respond <strong>concurrently</strong>, not one at a time in a queue; that is continuous batching cooking several woks behind the scenes. Then turn <span class="mono">--parallel</span> up or down and watch "how many requests it serves at once" change. Because the endpoints are OpenAI-compatible, you can even take the off-the-shelf OpenAI Python SDK, point <span class="mono">base_url</span> at <span class="mono">http://localhost:8080/v1</span>, and use it directly - a local model with the feel of a cloud API. To see continuous batching's power directly, run a comparison: first start with <span class="mono">--parallel 1</span> (one slot) and send 4 requests at once - they basically queue, emitting one after another; then start with <span class="mono">--parallel 4</span> and send 4 again - this time they begin together and spill out words together. Same machine, same model, yet just opening a few slots and letting the engine "cook many woks" makes the overall feel night and day. This small experiment best turns "batching for throughput" from a slogan into a fact seen with your own eyes; go further, watch the throughput logs while you load-test, and you can find by hand the knee where "more slots no longer means faster" - that is this card's compute ceiling.
+</div>
+
+<h2>Why not just run many processes?</h2>
+<p>By here a natural question may surface: to serve many requests at once, why not simply run many llama processes, one process per request - is that not simpler? The answer hides in <strong>VRAM</strong>. Model weights run from a few GB to tens of GB, and each independent process must load <strong>another copy</strong> of those weights into VRAM - run 8 processes and the same weights are paid for 8 times, which an ordinary GPU cannot bear.</p>
+<p>server does the opposite: <strong>one set of weights, many sessions</strong>. The model loads once (echoing L25's read-only, shareable <span class="mono">llama_model</span>), all slots share these same weights, and each only takes one extra small slice of KV (L19). So VRAM cost goes from "weights x process count" to "weights x 1 + KV x slot count" - and one KV slice is far smaller than a full set of weights. That is why "one engine, many slots" fits far more concurrency on a single card than "many processes".</p>
+<p>Besides, many processes each run their own forward pass and miss continuous batching's "one forward, serve many" throughput dividend. So the combo of "one engine + many slots + continuous batching" is not for elegance, but the optimum forced by two hard constraints, VRAM and throughput: save VRAM (shared weights) and high throughput (shared forward), two wins at once. Many processes do have merits - cleaner isolation (one crash spares the rest), simpler deployment; but under the most common goal of "serve as many requests as possible on one card", one engine with many slots almost always wins, which is why mainstream inference servers (not just llama.cpp) nearly all take this road.</p>
+
+<h2>Deep dive: queueing and throughput</h2>
+<p>Two final folds answering two questions that cut to the point: what happens when slots run out, and why continuous batching makes throughput high.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Slots are full - what happens to a new request? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly the scheduling topic L35 covers in detail. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why is continuous batching faster than "per request"? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are left to L35. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama-server</span> fits the shared engine with an "HTTP shell", turning inference into a <strong>network service</strong>: concurrent requests + OpenAI-compatible endpoints.</li>
+    <li>Request journey: HTTP -&gt; <span class="mono">server_task</span> -&gt; <span class="mono">server_queue</span> -&gt; idle <span class="mono">server_slot</span> -&gt; <span class="mono">update_slots</span> -&gt; <span class="mono">server_task_result</span> -&gt; response; modular layering (http/queue/context/chat).</li>
+    <li><span class="mono">slot</span>: <span class="mono">--parallel N</span> opens N parallel sequences, each with a seq_id + KV + state machine (IDLE -&gt; STARTED -&gt; PROCESSING_PROMPT -&gt; GENERATING -&gt; IDLE).</li>
+    <li><strong>Continuous batching</strong> (core): <span class="mono">common_batch_add(..., {slot.id})</span> packs many slots' tokens into one batch, one <span class="mono">llama_decode</span> advances all active sequences - one forward, serve many.</li>
+    <li>OpenAI compatibility: <span class="mono">server-chat</span> converts <span class="mono">/v1/chat/completions</span> and other endpoints; an existing OpenAI client just changes the base URL.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when L35 dissects finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
+</div>
+""",
+}
