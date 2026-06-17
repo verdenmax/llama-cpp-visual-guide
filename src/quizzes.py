@@ -1748,6 +1748,67 @@ QUIZZES = {
             },
         ],
     },
+    "27-llama-cli.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "现代 llama-cli 内部复用了哪个组件的引擎？",
+                    "en": "Which component's engine does a modern llama-cli reuse internally?",
+                },
+                "opts": [
+                    {"zh": "server-context（server_context）：cli #include server-context.h 并链接 server-context，与 server 同引擎、异壳", "en": "server-context (server_context): cli #includes server-context.h and links server-context, sharing server's engine with a different shell"},
+                    {"zh": "它有一份完全独立的裸 llama_decode 主循环，与 server 无关", "en": "it has a fully standalone bare llama_decode main loop, unrelated to server"},
+                    {"zh": "Python 绑定提供的引擎", "en": "an engine provided by the Python bindings"},
+                    {"zh": "ggml 的计算图执行器，绕过 llama 层", "en": "ggml's graph executor, bypassing the llama layer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "现代 cli 不再自带裸主循环：cli.cpp #include 了 server-common.h / server-context.h / server-task.h，CMake 也链接 server-context，直接复用 server 的 server_context（slot/task）。cli 与 server 是“同引擎、异壳”。",
+                    "en": "A modern cli no longer carries its own bare loop: cli.cpp #includes server-common.h / server-context.h / server-task.h and CMake links server-context, reusing server's server_context (slot/task). cli and server are 'same engine, different shells'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli 的生成主循环靠什么停下来？",
+                    "en": "What makes llama-cli's generation main loop stop?",
+                },
+                "opts": [
+                    {"zh": "三者之一：n_predict 写满、模型吐出 EOG 结束符、或交互模式下命中反向提示（antiprompt）", "en": "any of three: n_predict filled, the model emits an EOG token, or a reverse prompt (antiprompt) is hit in interactive mode"},
+                    {"zh": "只有一种：必须等模型自己吐出 EOG", "en": "only one: it must wait for the model to emit EOG"},
+                    {"zh": "固定生成 2048 个 token 后无条件停止", "en": "it always stops unconditionally after exactly 2048 tokens"},
+                    {"zh": "由操作系统的定时器中断决定", "en": "an operating-system timer interrupt decides"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "三个停止条件：n_predict 计数归零（你设的长度上限）、llama_vocab_is_eog 判定的结束符（模型自己喊停）、交互模式下命中你设的反向提示。忘了设 -n 又遇上模型不吐 EOG，就可能一直生成。",
+                    "en": "Three stop conditions: n_predict counting to zero (your length cap), an end-of-generation token detected by llama_vocab_is_eog (the model stopping itself), or hitting your reverse prompt in interactive mode. Forget -n and meet a model that will not emit EOG, and it may run forever.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli 怎么把命令行变成内部配置？",
+                    "en": "How does llama-cli turn the command line into internal config?",
+                },
+                "opts": [
+                    {"zh": "common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) 把 argv 填进 common_params（L26）", "en": "common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) fills argv into common_params (L26)"},
+                    {"zh": "cli 自己手写一大堆 if-else 直接解析 argv", "en": "cli hand-writes a big pile of if-else to parse argv itself"},
+                    {"zh": "从一个 JSON 配置文件读取，命令行被忽略", "en": "it reads a JSON config file; the command line is ignored"},
+                    {"zh": "llama_model_load_from_file 顺便解析命令行", "en": "llama_model_load_from_file parses the command line along the way"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "cli 复用 common 的参数解析：common_params_parse 按第 4 个参数 LLAMA_EXAMPLE_CLI 选定 cli 的选项集，逐个调用 common_arg 回调把 argv 写进 common_params，再交给 common_init_from_params 产出 model+ctx+sampler。",
+                    "en": "cli reuses common's arg parsing: common_params_parse picks cli's option set via the 4th argument LLAMA_EXAMPLE_CLI, calls each common_arg callback to write argv into common_params, then hands it to common_init_from_params to produce model+ctx+sampler.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "既然 cli 和 server 复用同一台 server_context 引擎、只是外壳不同，试着说说：把“引擎”与“外壳”分开，对维护和加新特性各有什么好处？如果要再写一个 gRPC 版的 llama 服务，你会怎么搭？",
+                "en": "Since cli and server reuse the same server_context engine and differ only in shell, explain: what does separating 'engine' from 'shell' buy you for maintenance and for adding features? If you had to write a gRPC version of a llama service, how would you structure it?",
+            },
+        ],
+    },
 }
 
 

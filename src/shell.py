@@ -98,6 +98,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("26-common.html", "common 工具层", "The common layer",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("27-llama-cli.html", "llama-cli", "llama-cli",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -584,6 +586,8 @@ SUBTITLES = {
                       "include/llama.h: handles, call sequence, the C++ RAII wrappers"),
     "26-common.html": ("common：参数解析、采样包装、下载缓存——各 tool 的共享胶水",
                        "common: arg parsing, sampler wrapper, downloads - the shared glue for every tool"),
+    "27-llama-cli.html": ("命令行/交互外壳：跑在共享引擎上的生成主循环",
+                          "the CLI/interactive shell: a generation loop on the shared engine"),
 }
 
 

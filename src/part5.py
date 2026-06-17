@@ -677,5 +677,306 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
   <div class="tag">💡 Design insight</div>
   common's design philosophy in a phrase: <strong>reuse over rewrite</strong>. It invents no new mechanism; it just lifts the actions every tool repeats - fill params, configure sampling, download models, print logs - into one place, so cli/server's <span class="mono">main()</span> shrinks to something you can read at a glance. But it deliberately does <strong>not</strong> disguise itself as an outward interface: the stable contract is left to <span class="mono">llama.h</span>, and common only does "handy on the inside". This split of "stable outward, convenient inward" is the same thinking as L25's "stable surface plus free interior" - only this time, common stands on the "convenient" end. Grasp this layer and Part 5's coming cli and server are just buildings each raised on top of common. Master it and you will find the coming tool lessons are mostly about "how to assemble common's parts", not yet another brand-new mechanism. In the end, what common teaches is a kind of engineering taste - "lift the repeated chores out, keep the stable promise at the boundary" - and that sense of where to draw the line between "stable outward" and "convenient inward" is worth more than memorizing any single function name.
 </div>
+"""
+}
+
+LESSON_27 = {
+     "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+<span class="mono">llama-cli</span> 多半是你第一个真正跑起来的 llama.cpp 程序——一句 <span class="mono">llama-cli -m model.gguf -p "从前有座山"</span>，模型就开始往下续写。它简单到几乎不用解释，可正因为简单，它是看清"一条命令如何变成满屏文字"的最佳样本。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这一课我们钻进它内部，把"解析命令行 + 一个生成循环"这套骨架拆开看；也借它看清 llama.cpp 的工具到底是怎么搭在 <span class="mono">common</span>（L26）和推理引擎之上的——工具课的"读法"，从这一课开始定调。</p>
+<p style="color:var(--muted)">还有一点要先剧透：现代的 <span class="mono">llama-cli</span> 已经<strong>不是</strong>一份独立的裸 <span class="mono">llama_decode</span> 主循环了，它直接复用了 <span class="mono">llama-server</span> 的那台引擎。所以这一课既是"上手第一课"，也悄悄替下一课的 server 埋好了伏笔。</p>
+
+<div class="card macro">
+   <div class="tag">🌍 宏观理解</div>
+   一句话给 cli 定位：它是<strong>给共享推理引擎套上的一层"命令行外壳"</strong>。引擎负责真正的重活——加载模型、维护 KV、前向、采样；cli 只负责"把人的意图喂进去、把模型的输出递出来"：从命令行和 stdin 读到你的 prompt，驱动引擎一轮轮生成，再把每个新词即时打到屏幕上。看懂这层"壳与引擎"的分工，你就明白为什么 cli 的源码出奇地短——重活早被引擎和 common 包圆了，cli 自己要写的，只剩"读输入、转一圈、流式输出"这点活。换个角度说，cli 的"短"恰恰是整套分层设计交出的成绩单：底层 C API（L25）足够稳，中间的 common（L26）足够厚，到了工具这一层自然就能薄。所以读 cli 的源码，与其说是在读"一个程序"，不如说是在读"前面那几层到底替它省下了多少重复劳动"。这也是我们把它排在第五部分靠前的原因——它像一面镜子，照见 C API 与 common 这些铺垫的价值。你越熟悉前四部分讲过的内部机件——加载、KV、批处理、采样——就越会惊讶于 cli 能把它们用得这么轻：几乎所有重活都发生在别处，它只负责把人和引擎接起来。
+</div>
+
+<div class="card analogy">
+   <div class="tag">🔌 生活类比</div>
+   把 cli 想成一台自动售货机的<strong>面板</strong>：你按下按钮（敲命令行 / 输入文字），机器内部（共享引擎）一件件出货（生成 token），面板只管把货<strong>一件件递出来</strong>（流式打印），不必关心里头是怎么造的。下一课的 server 则是<strong>同一台机器</strong>换了个"网络下单"的面板：货还是那批货，引擎还是那台引擎，只是接单与出货的方式从"按钮"变成了"HTTP 请求"。面板可以有很多种，机器只有一台——这正是 cli 与 server 的关系。这个类比还能再往前推一步：同一台机器，将来完全可以再接上第三块、第四块面板——比如一个 gRPC 服务、一个桌面 GUI——而机器内部的配方、火候、工序，一行都不必改。这正是"面板可换、机器唯一"的威力：你想支持一种新的接入方式，只要再写一层薄薄的壳，把请求翻译成引擎认得的格式就行，完全不用重写推理逻辑。记住这幅画面，下一课看 server 时你就会明白，它无非是换上了一块"能同时接很多张订单"的面板，灶台后面那台机器，还是你在 cli 里见过的那一台。
+</div>
+
+<h2>一条命令的旅程</h2>
+<p>程序入口在 <span class="mono">tools/cli/main.cpp</span>，但它薄得几乎只有一行——把活儿立刻转交给 <span class="mono">tools/cli/cli.cpp</span>。cli.cpp 一上来先调 <span class="mono">common_init()</span> 起好日志系统，再用 <span class="mono">common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI)</span> 把命令行<strong>灌进</strong> <span class="mono">common_params</span>（正是 L26 那套机制）。留意第 4 个参数 <span class="mono">LLAMA_EXAMPLE_CLI</span>：它告诉解析器"按 cli 这套选项集来认参数"，于是 cli 专属的旗标和共享旗标都能被正确识别。</p>
+<pre class="code"><span class="cm">// 入口: 薄薄的 main 转入 cli.cpp (简化自 tools/cli)</span>
+<span class="fn">common_init</span>();                                  <span class="cm">// 全局初始化: 起日志</span>
+<span class="kw">if</span> (!<span class="fn">common_params_parse</span>(argc, argv, params, <span class="cm">/*ex=*/</span> LLAMA_EXAMPLE_CLI))
+     <span class="kw">return</span> 1;                                   <span class="cm">// argv -&gt; common_params</span>
+<span class="kw">auto</span> res = <span class="fn">common_init_from_params</span>(params);     <span class="cm">// 概念上拿到 model+ctx+sampler (cli 实经引擎)</span></pre>
+<p>参数就位后，剩下的事几乎可以排成一条直线：按 <span class="mono">common_params</span> 载入模型、建好上下文，把 prompt 编码成 token 喂进去，进入生成循环，一边采样一边把新词流式打印。下图把这条主线画成五步——前两步你应该眼熟，正是 L25 那条手写序列，如今被 <span class="mono">common_init_from_params</span> 收进了一行。</p>
+<div class="vflow">
+   <div class="step"><div class="num">1</div><div class="sc">
+     <h4>解析参数</h4>
+     <p>common_params_parse 把 argv 按 LLAMA_EXAMPLE_CLI 填进 common_params。</p>
+   </div></div>
+   <div class="step"><div class="num">2</div><div class="sc">
+     <h4>载入模型 + 建上下文</h4>
+     <p>common_init_from_params 一口气加载 model、建好 context、配好 sampler。</p>
+   </div></div>
+   <div class="step"><div class="num">3</div><div class="sc">
+     <h4>编码 prompt</h4>
+     <p>把提示词 tokenize 成 token 序列，喂进上下文当作"已生成"的开头。</p>
+   </div></div>
+   <div class="step"><div class="num">4</div><div class="sc">
+     <h4>生成循环</h4>
+     <p>decode -&gt; 采样 -&gt; 接回上下文，一圈圈转，直到撞上停止条件。</p>
+   </div></div>
+   <div class="step"><div class="num">5</div><div class="sc">
+     <h4>流式输出</h4>
+     <p>每选定一个 token 就还原成文字、即时打印，不必等整段生成完。</p>
+   </div></div>
+</div>
+<p>这条主线里，前两步（解析、初始化）几乎全被 common 包圆了（L26），真正属于 cli 自己的"主戏"，是第 4 步那个一圈圈转的<strong>生成循环</strong>——它把 L19 的 KV 增长、L21 的采样、L20 的 detokenize 串成了一个你能亲眼看到输出的闭环。说得直白些，前四个部分讲过的所有内部机件，到这里终于汇成了一个你能一行行看着它吐字的循环——很多人正是从 cli 开始"爱上"读 llama.cpp 源码的，因为它把抽象的推理，变成了屏幕上实实在在跳动的文字。下面就把这个循环单独拎出来看。</p>
+
+<h2>生成主循环</h2>
+<p>生成的本质是一个<strong>循环</strong>：每一轮让引擎前向一次（<span class="mono">llama_decode</span>）、拿到"下一个词的打分"（logits），用采样器（<span class="mono">common_sampler</span>，L26/L21）挑出一个 token，用 <span class="mono">common_token_to_piece</span> 把它还原成文字、即时打印，再把这个新 token 接回上下文，进入下一轮。如此往复，直到撞上三个"停"条件之一。</p>
+<pre class="code"><span class="cm">// 生成主循环的本质 (现位于引擎 server_context 内, 非 cli.cpp 自有)</span>
+<span class="kw">while</span> (n_remain != 0) {
+     <span class="fn">llama_decode</span>(ctx, batch);                        <span class="cm">// 前向: 末位拿 logits</span>
+     llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1); <span class="cm">// 采样下一个</span>
+     <span class="fn">common_sampler_accept</span>(smpl, id, <span class="kw">true</span>);            <span class="cm">// 反馈: 更新惩罚/语法</span>
+     <span class="kw">if</span> (<span class="fn">llama_vocab_is_eog</span>(vocab, id)) <span class="kw">break</span>;         <span class="cm">// 结束符 -&gt; 停</span>
+     fputs(<span class="fn">common_token_to_piece</span>(ctx, id).c_str(), stdout); <span class="cm">// 流式打印</span>
+     batch = <span class="fn">llama_batch_get_one</span>(&amp;id, 1);              <span class="cm">// 新 token 接回去</span>
+     n_remain--;                                         <span class="cm">// n_predict 计数</span>
+}</pre>
+<p>三个"停下来"的理由要记牢：写满了预定长度（<span class="mono">n_predict</span> 计数到 0）、模型自己吐出了<strong>结束符</strong>（EOG，呼应 L20/L21，用 <span class="mono">llama_vocab_is_eog</span> 判断）、或在交互模式下命中了你设的<strong>反向提示</strong>（antiprompt）。循环里那句 <span class="mono">common_sampler_accept</span> 也一步都不能省——它把刚选的 token 反馈回采样器，更新重复惩罚、推进语法状态（L23），下一轮才采得对。这一点初学时最容易忽略：很多人以为"采样"不过是挑个词那么简单，却忘了采样器其实是<strong>带记忆</strong>的——它要记住已经出过哪些词，好施加重复惩罚；要记住语法走到了哪一步，好约束下一个合法 token。一旦漏掉 accept，这些记忆就停在原地不更新，生成很快就会重复、跑偏甚至卡死。</p>
+<p>把这一圈用一个最小例子走一遍最直观：假设上下文里已经有 "The cat"，看它如何生成下一个词、并把它流式吐到屏幕上。</p>
+<div class="trace">
+   <div class="tcap"><b>追踪生成主循环一轮</b>：从已生成的 token 出发，decode 拿 logits、采样选词、还原打印，再判断是否要停（数值为示意）。</div>
+   <div class="stations">
+     <div class="stn"><h5>① 已生成</h5>
+       <div class="cellrow"><span class="vc">The</span><span class="vc">cat</span></div>
+       <div class="tlab">上下文里的 token</div></div>
+     <div class="op">decode<br>末位</div>
+     <div class="stn"><h5>② logits</h5>
+       <div class="cellrow"><span class="vc">logits[n_vocab]</span></div>
+       <div class="tlab">下一词的打分</div></div>
+     <div class="op">common_<br>sampler_sample</div>
+     <div class="stn"><h5>③ 选定 token</h5>
+       <div class="cellrow"><span class="vc hot">sat</span></div>
+       <div class="tlab">采样挑出</div></div>
+     <div class="op">token_to_piece<br>+ 打印</div>
+     <div class="stn"><h5>④ 流式输出</h5>
+       <div class="cellrow"><span class="vc blue">"The cat sat"</span></div>
+       <div class="tlab">即时写到屏幕</div></div>
+     <div class="op">回环<br>检查停</div>
+     <div class="stn"><h5>⑤ 停?</h5>
+       <div class="cellrow"><span class="vc">n_predict? EOG? antiprompt?</span></div>
+       <div class="tlab">否则回到 ①</div></div>
+   </div>
+</div>
+
+<h2>跑在共享引擎上</h2>
+<p>现在揭开开头那个剧透。如果你翻开 <span class="mono">tools/cli/cli.cpp</span> 的头部，会看到它直接 <span class="mono">#include</span> 了 server 的几个头文件——<span class="mono">server-common.h</span>、<span class="mono">server-context.h</span>、<span class="mono">server-task.h</span>；<span class="mono">tools/cli/CMakeLists.txt</span> 里也把它链接到了 <span class="mono">server-context</span> 这个库。换句话说，现代 <span class="mono">llama-cli</span> 并没有自己再写一份裸的 <span class="mono">llama_decode</span> 主循环，而是<strong>复用了 server 那台引擎</strong> <span class="mono">server_context</span>（带 slot 与 task 的那一套，下一课细讲）。</p>
+<pre class="code"><span class="cm">// tools/cli/cli.cpp 顶部: 直接复用 server 的引擎</span>
+<span class="kw">#include</span> <span class="st">"server-common.h"</span>
+<span class="kw">#include</span> <span class="st">"server-context.h"</span>   <span class="cm">// server_context: slot / task / KV</span>
+<span class="kw">#include</span> <span class="st">"server-task.h"</span>
+
+<span class="cm"># tools/cli/CMakeLists.txt: 链接 server-context 库</span>
+target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
+<p>这件事意味着什么？cli 和 server 其实<strong>共用同一台"发动机"</strong>，只是套了不同的"壳"：cli 的壳是命令行 + 交互终端，server 的壳是 HTTP + 多请求。引擎完全一样（加载、KV、批处理、采样都走同一套 <span class="mono">server_context</span>），区别只在"怎么把请求喂进去、怎么把结果递出来"。</p>
+<div class="cols">
+   <div class="col"><h4>llama-cli（命令行壳）</h4><p>从 argv / stdin 读 prompt，把生成的 token 流式打到 stdout；适合上手、脚本、交互对话。</p></div>
+   <div class="col"><h4>llama-server（HTTP 壳）</h4><p>从 HTTP 请求收 prompt，把结果按 OpenAI 兼容格式返回；适合多用户、做服务。</p></div>
+</div>
+<p>历史上 cli 曾是一份独立的 <span class="mono">main.cpp</span> 生成循环，后来才统一到这台共享引擎上——好处是少维护一份几乎重复的代码，引擎里修一个 bug，cli 和 server 两边都跟着受益。也正因为如此，下一课 server 的不少概念（slot、连续批处理）其实你在 cli 里已经"隔着壳"用上了，只是没察觉而已。</p>
+<div class="card macro">
+   <div class="tag">🌍 宏观理解</div>
+   "同引擎、异壳"是理解整个第五部分工具的一把钥匙。<span class="mono">server_context</span> 是那台发动机，cli 与 server 是两副不同的车壳：你换壳（换交互方式），但发动机不动。这种设计的价值在于<strong>单一事实源</strong>——推理逻辑只有一份实现，所有工具共享；要优化吞吐、修采样 bug、加新特性，只动引擎一处，全家受益。所以别把 cli 看成"另一套实现"，它更像 server 的一个轻量前台。把这把钥匙揣好，下一课直接拆发动机本身。再补一句这套设计的代价与回报。把引擎抽成共享组件，短期看是多添了一层抽象，读代码要多绕一道弯；可长期看，它换回的是"改一次、处处生效"的巨大便利。设想一下：要是 cli 和 server 各管各的生成循环，那么每修一个采样的边界 bug、每加一种新的停止条件，你都得在两个地方分别动手，还要时时提防两边行为不一致、悄悄跑偏。共享引擎把这种"双份维护"的负担一笔勾销了。这种"宁可多一层抽象，也要消灭重复"的取舍，是成熟工程里反复出现的母题，值得你在自己的项目里也留个心眼。
+</div>
+
+<h2>交互模式</h2>
+<p>给命令行加上 <span class="mono">-i</span>，cli 就从"一次性续写"变成"来回对话"：它会在你按回车后，把你的输入编码进上下文，再继续生成，如此一问一答。打断生成靠<strong>反向提示</strong>（antiprompt / reverse prompt）——你设一个字符串（比如 <span class="mono">"User:"</span>），模型一旦要生成到它，就停下来、把话筒交还给你。终端的着色、退格、中文输入，则由 L26 的 <span class="mono">console</span> 在背后撑着。</p>
+<p>几个最常打交道的旗标值得对着主循环记一下：<span class="mono">-n</span> 限制最多生成多少 token（就是 <span class="mono">n_predict</span>，管循环转几圈），<span class="mono">-c</span> 设上下文窗口多大（<span class="mono">n_ctx</span>，呼应 L17/L19），<span class="mono">--temp</span> 调采样温度（L21，管挑词那一步），<span class="mono">-i</span> 进交互。把每个旗标和循环里的某一步对上号，你就能预测它到底改变了什么。</p>
+<div class="card spark">
+   <div class="tag">💡 动手试试</div>
+   最值得记的四个旗标：<span class="mono">-m</span> 指模型、<span class="mono">-p</span> 给提示词、<span class="mono">-n</span> 限生成长度、<span class="mono">-i</span> 进交互。想体会"壳与引擎"的分别，可以同一个模型先 <span class="mono">llama-cli -m x.gguf -p "讲个笑话" -n 64</span> 跑一次性续写，再 <span class="mono">llama-cli -m x.gguf -i</span> 进交互聊几句——你会发现底下那台引擎一模一样，变的只是你和它打交道的方式。再加上 <span class="mono">-c</span> 调上下文、<span class="mono">--temp</span> 调温度，把它们和这一课的生成循环对着看，"参数 -&gt; 循环行为"的因果就一目了然了。还可以再做个小实验加深印象：把 <span class="mono">--temp</span> 分别设成 0 和 1.2，各跑一次同样的 prompt，你会直观看到温度如何左右"挑词"那一步——设 0 时它几乎每次都吐一模一样的话，设 1.2 时则天马行空、花样百出。再把 <span class="mono">-n</span> 调得很小（比如 4），看它怎么话没说完就被硬生生截断，这就是 <span class="mono">n_predict</span> 这道闸门在起作用。把这些旗标一个个亲手拨动、对照生成循环看效果，远比死记每个参数的定义来得有用——你建立起来的，是"参数到行为"的肌肉记忆，将来调任何模型都用得上。
+</div>
+
+<h2>深入：复用的来龙去脉与"何时算停"</h2>
+<p>最后用两个折叠，补两个常被追问的点：cli 复用 server 引擎的来龙去脉，以及"到底什么时候算生成结束"。前者关乎"架构为什么这么演化"，后者关乎一个你每次跑都会遇到、却未必说得清的细节。这两个问题看似琐碎，却分别对应着读源码时最常冒出的两种困惑：一种是"这段代码为什么长这样"（历史与权衡），一种是"它到底什么时候停"（运行时行为）。把它们说清楚，你再去翻 cli 的真实源码就不会被绕晕。</p>
+<details class="accordion">
+   <summary><span class="badge-num">1</span> cli 为什么要复用 server 的引擎？ <span class="hint">点击展开</span></summary>
+   <div class="acc-body">
+     <p>早期的 llama.cpp 里，cli（当时叫 <span class="mono">main</span>）和 server 各有一份生成循环：各自调 <span class="mono">llama_decode</span>、各自管 KV、各自处理停止条件。两份代码做的事高度重叠，却要分别维护——改一处采样逻辑，得记得两边都改，很容易漏。后来项目把引擎抽成共享的 <span class="mono">server_context</span>（slot/task 那套），让 cli 也站上去：cli 退化成"开一个 slot、喂一条序列、流式取回"的瘦客户端。好处是<strong>单一事实源</strong>——生成逻辑只剩一份实现，bug 修一处、特性加一处，cli 与 server 同时受益。</p>
+     <p>所以当你在 cli 里看到 <span class="mono">server_task</span>、<span class="mono">server_slot</span> 这些名字时不必奇怪：它们不是"server 专用"，而是"引擎的词汇"。这也解释了为什么把 cli 放在 server（L28）<strong>前面</strong>讲——先在简单的命令行场景里见过这台引擎，下一课再看它如何同时服务多个 HTTP 请求，就顺理成章了。</p>
+   </div>
+</details>
+<details class="accordion">
+   <summary><span class="badge-num">2</span> "生成结束"到底由谁说了算？ <span class="hint">点击展开</span></summary>
+   <div class="acc-body">
+     <p>循环停下来有三种情形，触发者各不相同。其一是<strong>长度到顶</strong>：你用 <span class="mono">-n</span> 设的 <span class="mono">n_predict</span> 计数归零，这是"你"喊停。其二是<strong>模型自己喊停</strong>：它生成了一个 EOG（end-of-generation）token，比如 <span class="mono">&lt;/s&gt;</span> 或某些聊天模板里的 <span class="mono">&lt;|im_end|&gt;</span>——cli 用 <span class="mono">llama_vocab_is_eog(vocab, id)</span> 判断，呼应 L20 里那个"结束符集合"。其三是<strong>反向提示命中</strong>：交互模式下，模型快要生成到你设的 antiprompt 时被截停，把控制权还给你。</p>
+     <p>这三者的优先级与细节，正是"为什么有时它早早就停 / 为什么停不下来"的根源：忘了设 <span class="mono">-n</span> 又遇上模型不肯吐 EOG，就可能一直生成；而某些模型的 EOG token 若没被模板正确标注，也会让它"刹不住车"。理解这三个闸门，你就能对症下药地控制生成长度。</p>
+   </div>
+</details>
+
+<div class="card key">
+   <div class="tag">✅ 关键要点</div>
+   <ul>
+     <li><span class="mono">llama-cli</span> = 给共享推理引擎套的一层<strong>命令行/交互外壳</strong>：读 stdin、驱动生成、流式打印 stdout，是上手 llama.cpp 最直接的工具。</li>
+     <li>入口 <span class="mono">main.cpp</span>（薄）-&gt; <span class="mono">cli.cpp</span>；<span class="mono">common_init</span> + <span class="mono">common_params_parse(..., LLAMA_EXAMPLE_CLI)</span> 把命令行变成 <span class="mono">common_params</span>（L26）。</li>
+     <li>生成主循环：<span class="mono">decode</span> 拿 logits -&gt; <span class="mono">common_sampler_sample</span> 选 token -&gt; <span class="mono">common_sampler_accept</span> 反馈 -&gt; <span class="mono">common_token_to_piece</span> 流式打印 -&gt; 接回上下文，循环往复。</li>
+     <li>三个停止条件：<span class="mono">n_predict</span> 写满、EOG 结束符（<span class="mono">llama_vocab_is_eog</span>）、交互模式下命中反向提示（antiprompt）。</li>
+     <li><strong>现状重点</strong>：现代 cli 复用 server 的引擎——<span class="mono">#include "server-context.h"</span> 并链接 <span class="mono">server-context</span>，与 server 同引擎、异壳（cli=命令行，server=HTTP）。</li>
+   </ul>
+</div>
+
+<div class="card spark">
+   <div class="tag">💡 设计洞察</div>
+   cli 这一课真正想留给你的，不是某个旗标的用法，而是"<strong>壳与引擎分离</strong>"这一架构直觉。同一台 <span class="mono">server_context</span>，套上命令行壳就是 cli，套上 HTTP 壳就是 server——交互方式千变万化，推理内核始终如一。这种"把稳定的核做厚、把多变的壳做薄"的思路，和 L25 的"稳定 C ABI + 自由内部"、L26 的"对外稳定 + 对内便利"是同一条线索的延续：好的系统总在努力分清"哪些该统一、哪些该各异"。把这层想透，你看第五部分剩下的工具，就不会再把它们当成一个个孤立程序，而会看见底下那台被反复复用的引擎——下一课，我们就正面把它拆开。最后留一个值得反复咀嚼的问题给你：下次自己设计系统时，该怎么判断"哪一部分做成稳定的核、哪一部分做成可换的壳"？cli 给的答案朴素而有力——把"所有接入方式都共享的那部分"（也就是推理逻辑）沉进核里，把"每种接入方式各不相同的那部分"（命令行还是 HTTP）留在壳上。这条看似简单的分界线，其实适用于绝大多数需要支持多种入口的软件：Web 框架的路由与业务、数据库的协议层与存储引擎，背后都是同一种智慧。把它内化成你自己的设计直觉，你带走的就不只是"llama-cli 怎么用"，而是一种能迁移到任何项目的判断力。
+</div>
+""",
+     "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+<span class="mono">llama-cli</span> is most likely the first llama.cpp program you ever run - one line, <span class="mono">llama-cli -m model.gguf -p "Once upon a time"</span>, and the model starts continuing the text. It is so simple it barely needs explaining, but that very simplicity makes it the best sample for seeing "how one command turns into a screen full of text".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This lesson digs inside it and takes apart the skeleton of "parse the command line + one generation loop"; it also uses cli to see how llama.cpp's tools actually sit on top of <span class="mono">common</span> (L26) and the inference engine - the "way to read" the tool lessons is set here.</p>
+<p style="color:var(--muted)">One more spoiler up front: a modern <span class="mono">llama-cli</span> is <strong>no longer</strong> a standalone bare <span class="mono">llama_decode</span> main loop - it directly reuses <span class="mono">llama-server</span>'s engine. So this lesson is both "your first hands-on lesson" and a quiet setup for the server lesson next.</p>
+
+<div class="card macro">
+   <div class="tag">🌍 Big picture</div>
+   cli in one line: it is <strong>a "command-line shell" wrapped around the shared inference engine</strong>. The engine does the real heavy lifting - load the model, maintain the KV, run the forward pass, sample; cli only "feeds in the human's intent and hands out the model's output": read your prompt from the command line and stdin, drive the engine round after round, and print each new word to the screen immediately. Understand this "shell vs engine" split and you see why cli's source is surprisingly short - the heavy lifting was packaged up by the engine and common, leaving cli with just "read input, turn a loop, stream output". Put differently, cli's "shortness" is the report card of the whole layered design: the C API underneath (L25) is stable enough, the common layer in the middle (L26) is thick enough, so by the tool layer it can afford to be thin. Reading cli's source is thus less like reading "a program" and more like reading "how much repeated labor the layers below saved it". That is also why we place it early in Part 5 - it is a mirror reflecting the value of the C API and common groundwork. The more familiar you are with the internal machinery of the first four parts - loading, KV, batching, sampling - the more it surprises you how lightly cli uses them: almost all the heavy lifting happens elsewhere, and it only wires the human to the engine.
+</div>
+
+<div class="card analogy">
+   <div class="tag">🔌 Analogy</div>
+   Think of cli as the <strong>panel</strong> of a vending machine: you press buttons (type the command line / input text), the machine inside (the shared engine) dispenses items one at a time (generates tokens), and the panel just <strong>hands them out one by one</strong> (streams the print), never minding how they were made inside. Next lesson's server is the <strong>same machine</strong> with an "order over the network" panel instead: same goods, same engine, only the way of taking orders and dispensing changes from "buttons" to "HTTP requests". There can be many panels, but only one machine - that is exactly the cli-and-server relationship. The analogy stretches one step further: the same machine could later take a third or fourth panel - a gRPC service, a desktop GUI - while the recipe, the heat, the steps inside change not one line. That is the power of "panels swappable, machine singular": to support a new way in, you write one more thin shell that translates requests into what the engine understands, with no rewrite of the inference logic. Hold this picture, and next lesson server makes sense at once - it is merely fitted with a panel that "takes many orders at once", while the machine behind the stove is the very one you met in cli.
+</div>
+
+<h2>A command's journey</h2>
+<p>The entry point is <span class="mono">tools/cli/main.cpp</span>, but it is so thin it is almost one line - it immediately hands off to <span class="mono">tools/cli/cli.cpp</span>. cli.cpp first calls <span class="mono">common_init()</span> to start the logging system, then uses <span class="mono">common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI)</span> to <strong>pour</strong> the command line into <span class="mono">common_params</span> (exactly L26's mechanism). Note the 4th argument <span class="mono">LLAMA_EXAMPLE_CLI</span>: it tells the parser "recognize parameters by cli's option set", so cli-specific flags and shared flags are both parsed correctly.</p>
+<pre class="code"><span class="cm">// entry: the thin main hands off to cli.cpp (simplified from tools/cli)</span>
+<span class="fn">common_init</span>();                                  <span class="cm">// global init: start logging</span>
+<span class="kw">if</span> (!<span class="fn">common_params_parse</span>(argc, argv, params, <span class="cm">/*ex=*/</span> LLAMA_EXAMPLE_CLI))
+     <span class="kw">return</span> 1;                                   <span class="cm">// argv -&gt; common_params</span>
+<span class="kw">auto</span> res = <span class="fn">common_init_from_params</span>(params);     <span class="cm">// conceptually model+ctx+sampler (cli does it via the engine)</span></pre>
+<p>With the parameters in place, the rest lines up almost straight: load the model and build the context from <span class="mono">common_params</span>, encode the prompt into tokens and feed it in, enter the generation loop, and stream out new words as you sample. The diagram below draws this main line as five steps - the first two should look familiar, they are exactly L25's hand-written sequence, now folded into one line of <span class="mono">common_init_from_params</span>.</p>
+<div class="vflow">
+   <div class="step"><div class="num">1</div><div class="sc">
+     <h4>Parse args</h4>
+     <p>common_params_parse fills argv into common_params per LLAMA_EXAMPLE_CLI.</p>
+   </div></div>
+   <div class="step"><div class="num">2</div><div class="sc">
+     <h4>Load model + build context</h4>
+     <p>common_init_from_params loads the model, builds the context, configures the sampler in one go.</p>
+   </div></div>
+   <div class="step"><div class="num">3</div><div class="sc">
+     <h4>Encode prompt</h4>
+     <p>Tokenize the prompt into a token sequence, fed in as the "already generated" opening.</p>
+   </div></div>
+   <div class="step"><div class="num">4</div><div class="sc">
+     <h4>Generation loop</h4>
+     <p>decode -&gt; sample -&gt; append back, turning round and round until a stop condition hits.</p>
+   </div></div>
+   <div class="step"><div class="num">5</div><div class="sc">
+     <h4>Stream output</h4>
+     <p>Each chosen token is restored to text and printed at once, no waiting for the whole thing.</p>
+   </div></div>
+</div>
+<p>On this main line, the first two steps (parse, init) are almost entirely packaged by common (L26); the part that truly belongs to cli, its "main act", is step 4's looping <strong>generation loop</strong> - it threads L19's KV growth, L21's sampling, and L20's detokenize into a closed loop whose output you can watch live. Put plainly, all the internal machinery the first four parts covered finally converges here into a loop you can watch emit text line by line - many people first "fall for" reading llama.cpp's source from cli, because it turns abstract inference into words actually dancing on the screen. Let us pull that loop out and look at it alone.</p>
+
+<h2>The generation main loop</h2>
+<p>Generation is in essence a <strong>loop</strong>: each round runs one forward pass through the engine (<span class="mono">llama_decode</span>) to get "the next word's scores" (logits), uses the sampler (<span class="mono">common_sampler</span>, L26/L21) to pick a token, restores it to text with <span class="mono">common_token_to_piece</span> and prints it at once, then appends this new token back to the context and goes round again. So it repeats, until it hits one of three "stop" conditions.</p>
+<pre class="code"><span class="cm">// the essence of the generation loop (now inside the engine, server_context)</span>
+<span class="kw">while</span> (n_remain != 0) {
+     <span class="fn">llama_decode</span>(ctx, batch);                        <span class="cm">// forward: logits at last pos</span>
+     llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1); <span class="cm">// sample the next one</span>
+     <span class="fn">common_sampler_accept</span>(smpl, id, <span class="kw">true</span>);            <span class="cm">// feedback: penalties/grammar</span>
+     <span class="kw">if</span> (<span class="fn">llama_vocab_is_eog</span>(vocab, id)) <span class="kw">break</span>;         <span class="cm">// end-of-gen -&gt; stop</span>
+     fputs(<span class="fn">common_token_to_piece</span>(ctx, id).c_str(), stdout); <span class="cm">// stream print</span>
+     batch = <span class="fn">llama_batch_get_one</span>(&amp;id, 1);              <span class="cm">// append new token</span>
+     n_remain--;                                         <span class="cm">// n_predict countdown</span>
+}</pre>
+<p>Keep the three "stop" reasons in mind: the set length is reached (<span class="mono">n_predict</span> counts down to 0), the model itself emits an <strong>end-of-generation</strong> token (EOG, echoing L20/L21, tested with <span class="mono">llama_vocab_is_eog</span>), or in interactive mode it hits the <strong>reverse prompt</strong> (antiprompt) you set. That <span class="mono">common_sampler_accept</span> line cannot be skipped either - it feeds the just-chosen token back to the sampler, updating repetition penalties and advancing grammar state (L23), so the next round samples correctly. This is the easiest thing to overlook as a beginner: many think "sampling" is just picking a word, forgetting the sampler is actually <strong>stateful</strong> - it must remember which words already appeared to apply repetition penalties, and where the grammar has advanced to constrain the next legal token. Skip accept and that memory freezes in place, so generation soon repeats, drifts, or even stalls.</p>
+<p>Walking one turn with a minimal example is the most vivid: suppose the context already holds "The cat", and watch how it generates the next word and streams it to the screen.</p>
+<div class="trace">
+   <div class="tcap"><b>Tracing one generation step</b>: starting from the already-generated tokens, decode for logits, sample a word, restore and print, then decide whether to stop (values are illustrative).</div>
+   <div class="stations">
+     <div class="stn"><h5>(1) generated</h5>
+       <div class="cellrow"><span class="vc">The</span><span class="vc">cat</span></div>
+       <div class="tlab">tokens in context</div></div>
+     <div class="op">decode<br>last pos</div>
+     <div class="stn"><h5>(2) logits</h5>
+       <div class="cellrow"><span class="vc">logits[n_vocab]</span></div>
+       <div class="tlab">scores for next word</div></div>
+     <div class="op">common_<br>sampler_sample</div>
+     <div class="stn"><h5>(3) chosen token</h5>
+       <div class="cellrow"><span class="vc hot">sat</span></div>
+       <div class="tlab">picked by sampling</div></div>
+     <div class="op">token_to_piece<br>+ print</div>
+     <div class="stn"><h5>(4) streamed out</h5>
+       <div class="cellrow"><span class="vc blue">"The cat sat"</span></div>
+       <div class="tlab">written to screen now</div></div>
+     <div class="op">loop<br>check stop</div>
+     <div class="stn"><h5>(5) stop?</h5>
+       <div class="cellrow"><span class="vc">n_predict? EOG? antiprompt?</span></div>
+       <div class="tlab">else back to (1)</div></div>
+   </div>
+</div>
+
+<h2>Running on the shared engine</h2>
+<p>Now lift the spoiler from the start. If you open the top of <span class="mono">tools/cli/cli.cpp</span>, you will see it directly <span class="mono">#include</span>s several of server's headers - <span class="mono">server-common.h</span>, <span class="mono">server-context.h</span>, <span class="mono">server-task.h</span>; and <span class="mono">tools/cli/CMakeLists.txt</span> links it against the <span class="mono">server-context</span> library. In other words, a modern <span class="mono">llama-cli</span> does not write its own bare <span class="mono">llama_decode</span> main loop anymore, it <strong>reuses server's engine</strong> <span class="mono">server_context</span> (the slot-and-task machinery, detailed next lesson).</p>
+<pre class="code"><span class="cm">// top of tools/cli/cli.cpp: reuse server's engine directly</span>
+<span class="kw">#include</span> <span class="st">"server-common.h"</span>
+<span class="kw">#include</span> <span class="st">"server-context.h"</span>   <span class="cm">// server_context: slot / task / KV</span>
+<span class="kw">#include</span> <span class="st">"server-task.h"</span>
+
+<span class="cm"># tools/cli/CMakeLists.txt: link the server-context library</span>
+target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
+<p>What does this mean? cli and server actually <strong>share one "engine"</strong>, just wrapped in different "shells": cli's shell is the command line plus an interactive terminal, server's shell is HTTP plus many requests. The engine is identical (loading, KV, batching, sampling all go through the same <span class="mono">server_context</span>); the only difference is "how requests are fed in and how results are handed out".</p>
+<div class="cols">
+   <div class="col"><h4>llama-cli (command-line shell)</h4><p>reads the prompt from argv / stdin, streams generated tokens to stdout; great for getting started, scripts, interactive chat.</p></div>
+   <div class="col"><h4>llama-server (HTTP shell)</h4><p>takes the prompt from an HTTP request, returns results in an OpenAI-compatible shape; great for many users, running a service.</p></div>
+</div>
+<p>Historically cli was a standalone <span class="mono">main.cpp</span> generation loop, and only later was unified onto this shared engine - the gain is one less near-duplicate copy to maintain, and a bug fixed in the engine benefits cli and server alike. For the same reason, many of next lesson's server concepts (slots, continuous batching) you are in fact already using in cli "through the shell", just without noticing.</p>
+<div class="card macro">
+   <div class="tag">🌍 Big picture</div>
+   "Same engine, different shells" is a key to the whole of Part 5's tools. <span class="mono">server_context</span> is that engine, and cli and server are two different car bodies: you swap the body (the way you interact), but the engine stays put. The value of this design is a <strong>single source of truth</strong> - the inference logic has exactly one implementation, shared by all tools; to optimize throughput, fix a sampling bug, or add a feature, you touch the engine in one place and the whole family benefits. So do not see cli as "another implementation", it is more like a lightweight front desk for server. Pocket this key, and next lesson we take the engine itself apart. One more word on this design's cost and reward. Extracting the engine into a shared component adds, short term, one more layer of abstraction and one more hop to follow while reading; but long term it buys the huge convenience of "fix once, effective everywhere". Imagine cli and server each minding their own generation loop: every boundary bug in sampling, every new stop condition would have to be changed in two places, while you guard against the two drifting out of sync. The shared engine wipes out that "double maintenance" entirely. This trade of "rather one more abstraction than any duplication" is a recurring motif in mature engineering, worth keeping an eye out for in your own projects.
+</div>
+
+<h2>Interactive mode</h2>
+<p>Add <span class="mono">-i</span> to the command line and cli turns from "one-shot continuation" into "back-and-forth conversation": after you press enter, it encodes your input into the context and keeps generating, taking turns. Interrupting generation is done with the <strong>reverse prompt</strong> (antiprompt) - you set a string (say <span class="mono">"User:"</span>), and the moment the model is about to generate up to it, it stops and hands the microphone back to you. The terminal's coloring, backspace, and UTF-8 input are held up behind the scenes by L26's <span class="mono">console</span>.</p>
+<p>A few of the flags you deal with most are worth noting against the main loop: <span class="mono">-n</span> caps how many tokens to generate (that is <span class="mono">n_predict</span>, governing how many times the loop turns), <span class="mono">-c</span> sets the context window size (<span class="mono">n_ctx</span>, echoing L17/L19), <span class="mono">--temp</span> tunes the sampling temperature (L21, governing the pick-a-word step), and <span class="mono">-i</span> enters interactive. Match each flag to a step in the loop and you can predict exactly what it changes.</p>
+<div class="card spark">
+   <div class="tag">💡 Hands-on</div>
+   The four flags most worth remembering: <span class="mono">-m</span> for the model, <span class="mono">-p</span> for the prompt, <span class="mono">-n</span> to cap length, <span class="mono">-i</span> for interactive. To feel the "shell vs engine" split, take one model and first run <span class="mono">llama-cli -m x.gguf -p "tell a joke" -n 64</span> for a one-shot continuation, then <span class="mono">llama-cli -m x.gguf -i</span> to chat a few turns - you will find the engine underneath is identical, only the way you talk to it changes. Add <span class="mono">-c</span> for context and <span class="mono">--temp</span> for temperature, line them up against this lesson's generation loop, and the "param -&gt; loop behavior" cause and effect becomes plain. Try one more small experiment to cement it: set <span class="mono">--temp</span> to 0 and then to 1.2, running the same prompt each time, and you will see directly how temperature swings the "pick a word" step - at 0 it spits almost the same words every time, at 1.2 it runs wild and varied. Then set <span class="mono">-n</span> very small (say 4) and watch it get cut off mid-sentence - that is the <span class="mono">n_predict</span> gate at work. Turning these flags by hand one by one and watching the effect against the generation loop beats memorizing each definition - what you build is muscle memory of "param to behavior" that carries to any model.
+</div>
+
+<h2>Deep dive: the story of reuse and "when to stop"</h2>
+<p>Finally two folds for two often-asked points: the backstory of cli reusing server's engine, and "when exactly generation counts as finished". The first is about "why the architecture evolved this way", the second about a detail you meet every run yet may not be able to explain. These two questions look trivial, yet each answers one of the two confusions that most often surface while reading source: one is "why is this code shaped this way" (history and trade-offs), the other "when exactly does it stop" (runtime behavior). Make them clear and you will not get lost when you open cli's real source.</p>
+<details class="accordion">
+   <summary><span class="badge-num">1</span> Why does cli reuse server's engine? <span class="hint">click to expand</span></summary>
+   <div class="acc-body">
+     <p>In early llama.cpp, cli (then called <span class="mono">main</span>) and server each had their own generation loop: each calling <span class="mono">llama_decode</span>, each managing the KV, each handling stop conditions. The two bodies of code did highly overlapping things yet were maintained separately - change one piece of sampling logic and you had to remember to change both, easy to miss. Later the project extracted the engine into a shared <span class="mono">server_context</span> (the slot/task machinery) and let cli stand on it too: cli degenerates into a thin client that "opens one slot, feeds one sequence, streams it back". The gain is a <strong>single source of truth</strong> - generation logic has one implementation, a bug fixed once and a feature added once benefit cli and server together.</p>
+     <p>So when you see names like <span class="mono">server_task</span> and <span class="mono">server_slot</span> in cli, do not be surprised: they are not "server-only", they are "the engine's vocabulary". This also explains why cli is taught <strong>before</strong> server (L28) - meet the engine first in the simple command-line setting, and next lesson, seeing it serve many HTTP requests at once follows naturally.</p>
+   </div>
+</details>
+<details class="accordion">
+   <summary><span class="badge-num">2</span> Who decides "generation is done"? <span class="hint">click to expand</span></summary>
+   <div class="acc-body">
+     <p>The loop stops in three cases, each with a different trigger. First, <strong>length cap reached</strong>: the <span class="mono">n_predict</span> you set with <span class="mono">-n</span> counts to zero - "you" call stop. Second, <strong>the model calls stop itself</strong>: it generates an EOG (end-of-generation) token, such as <span class="mono">&lt;/s&gt;</span> or some chat templates' <span class="mono">&lt;|im_end|&gt;</span> - cli tests it with <span class="mono">llama_vocab_is_eog(vocab, id)</span>, echoing L20's "end-of-generation set". Third, <strong>reverse prompt hit</strong>: in interactive mode, the model is cut off just as it is about to generate up to your antiprompt, handing control back to you.</p>
+     <p>The priority and details of these three are the root of "why it sometimes stops early / why it will not stop": forget to set <span class="mono">-n</span> and meet a model unwilling to emit EOG, and it may generate forever; and if some model's EOG token is not correctly marked by the template, it too "cannot hit the brakes". Understand these three gates and you can control generation length to the point.</p>
+   </div>
+</details>
+
+<div class="card key">
+   <div class="tag">✅ Key points</div>
+   <ul>
+     <li><span class="mono">llama-cli</span> = a <strong>command-line/interactive shell</strong> over the shared inference engine: read stdin, drive generation, stream stdout - the most direct way to get started with llama.cpp.</li>
+     <li>Entry <span class="mono">main.cpp</span> (thin) -&gt; <span class="mono">cli.cpp</span>; <span class="mono">common_init</span> + <span class="mono">common_params_parse(..., LLAMA_EXAMPLE_CLI)</span> turns the command line into <span class="mono">common_params</span> (L26).</li>
+     <li>The generation main loop: <span class="mono">decode</span> for logits -&gt; <span class="mono">common_sampler_sample</span> picks a token -&gt; <span class="mono">common_sampler_accept</span> feeds back -&gt; <span class="mono">common_token_to_piece</span> streams print -&gt; append back to context, round and round.</li>
+     <li>Three stop conditions: <span class="mono">n_predict</span> filled, EOG token (<span class="mono">llama_vocab_is_eog</span>), or reverse prompt (antiprompt) hit in interactive mode.</li>
+     <li><strong>Current state</strong>: a modern cli reuses server's engine - <span class="mono">#include "server-context.h"</span> and links <span class="mono">server-context</span>, same engine as server with a different shell (cli=command-line, server=HTTP).</li>
+   </ul>
+</div>
+
+<div class="card spark">
+   <div class="tag">💡 Design insight</div>
+   What this cli lesson really wants to leave you is not the use of some flag, but the architectural instinct of "<strong>separate the shell from the engine</strong>". The same <span class="mono">server_context</span>, wrapped in a command-line shell, is cli; wrapped in an HTTP shell, is server - the way you interact varies endlessly, the inference core stays one and the same. This idea of "make the stable core thick and the changing shell thin" continues the same thread as L25's "stable C ABI plus free interior" and L26's "stable outward plus convenient inward": good systems always work to tell apart "what should be unified and what should differ". Think this through, and you will stop seeing Part 5's remaining tools as isolated programs, and start seeing the one engine reused beneath them all - next lesson, we take it apart head-on. One last question worth chewing on: next time you design a system yourself, how do you decide "which part to make the stable core and which the swappable shell"? cli's answer is plain and strong - sink "the part all entry methods share" (the inference logic) into the core, and leave "the part each entry method differs in" (command line vs HTTP) on the shell. This seemingly simple dividing line fits most software that must support multiple entries: a web framework's routing vs business logic, a database's protocol layer vs storage engine - the same wisdom underneath. Internalize it as your own design instinct and you walk away with not just "how to use llama-cli", but a judgment that transfers to any project.
+</div>
 """,
 }

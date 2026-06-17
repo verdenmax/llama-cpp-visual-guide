@@ -38,4 +38,5 @@ CONTENT = {
     "24-lora-adapters.html": part4.LESSON_24,
     "25-c-api.html": part5.LESSON_25,
     "26-common.html": part5.LESSON_26,
+    "27-llama-cli.html": part5.LESSON_27,
 }
