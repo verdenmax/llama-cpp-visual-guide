@@ -416,7 +416,23 @@ dest = <span class="st">""</span>
   <div class="tag">💡 实战</div>
   这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。
 </div>
-<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。</p>
+<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。拿一组具体消息走一遍就清楚了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪模板拼接</b>：结构化消息怎么被压平成一串带特殊标记的纯文本（送进 tokenize 之前的最后一步；内容为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 消息列表</h5>
+      <div class="cellrow"><span class="vc">system: "You are helpful."</span><span class="vc">user: "Hi"</span></div>
+      <div class="tlab">2 条带角色的结构化消息</div></div>
+    <div class="op">套 ChatML</div>
+    <div class="stn"><h5>② 压平 + 加标记</h5>
+      <div class="cellrow"><span class="vc hot">&lt;|im_start|&gt;system</span><span class="vc">You are helpful.</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;user</span><span class="vc">Hi</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;assistant</span></div>
+      <div class="tlab">标记包住每条正文，结尾把话筒递给 assistant</div></div>
+    <div class="op">→ tokenize</div>
+    <div class="stn"><h5>③ 交给 L20</h5>
+      <div class="cellrow"><span class="vc blue">tokenize</span></div>
+      <div class="tlab">这串纯文本再切成 token id</div></div>
+  </div>
+</div>
 <p>检测这一步其实暗藏玄机。最理想的情况是模型 GGUF 里写明了模板名，一查便知；但现实里常常只给出一段模板<strong>内容</strong>（Jinja 文本），没有名字。这时只能靠"内容里有没有某些特征标记"来反推——看到 <span class="mono">[INST]</span> 就猜 Llama-2、看到 <span class="mono">&lt;|im_start|&gt;</span> 就猜 ChatML。这种基于特征的启发式不是百分百可靠，但覆盖了绝大多数情况。</p>
 <p>套用这一步也比看上去讲究。同一套格式，system 消息有的拼在最前、有的并进第一条 user 消息、有的干脆不支持；多轮对话里，历史消息要不要重复加标记、最后一轮怎么收尾，每种模板都有自己的规矩。<span class="mono">apply_template</span> 把这些细节按模板类型一一处理妥当，你只管递进去一个消息列表，它还你一段格式严丝合缝的提示词。</p>
 <div class="card spark">
@@ -626,7 +642,23 @@ dest = <span class="st">""</span>
   <div class="tag">💡 Tip</div>
   One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.
 </div>
-<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt.</p>
+<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt. Walk a concrete message set through it to see:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing template assembly</b>: how structured messages flatten into one marked-up plain-text string (the last step before tokenize; content illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) message list</h5>
+      <div class="cellrow"><span class="vc">system: "You are helpful."</span><span class="vc">user: "Hi"</span></div>
+      <div class="tlab">2 structured role-tagged messages</div></div>
+    <div class="op">apply ChatML</div>
+    <div class="stn"><h5>(2) flatten + mark</h5>
+      <div class="cellrow"><span class="vc hot">&lt;|im_start|&gt;system</span><span class="vc">You are helpful.</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;user</span><span class="vc">Hi</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;assistant</span></div>
+      <div class="tlab">markers wrap each body; ends handing the mic to assistant</div></div>
+    <div class="op">-&gt; tokenize</div>
+    <div class="stn"><h5>(3) hand to L20</h5>
+      <div class="cellrow"><span class="vc blue">tokenize</span></div>
+      <div class="tlab">this plain text then splits into token ids</div></div>
+  </div>
+</div>
 <p>Detection actually hides subtlety. Ideally the GGUF states the template name and a lookup settles it; but in reality it often gives only a template <strong>body</strong> (Jinja text) with no name. Then one can only infer from "whether certain feature markers appear in the body" - see <span class="mono">[INST]</span> and guess Llama-2, see <span class="mono">&lt;|im_start|&gt;</span> and guess ChatML. This feature-based heuristic is not 100% reliable but covers the vast majority.</p>
 <p>Application is also fussier than it looks. For the same format, the system message may go at the very front, be merged into the first user message, or not be supported at all; in multi-turn dialogue, whether history repeats the markers and how the last turn closes - each template has its own rules. <span class="mono">apply_template</span> handles these details per template type, so you just hand in a message list and it returns a precisely formatted prompt.</p>
 <div class="card spark">
