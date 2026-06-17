@@ -3190,10 +3190,10 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 <rect x="19" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="55" y="66" text-anchor="middle" fill="#1d2129" font-size="12">起始</text>
 <rect x="129" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="165" y="66" text-anchor="middle" fill="#1d2129" font-size="12">进对象</text>
 <rect x="239" y="46" width="72" height="30" rx="14" fill="#c2630e" stroke="#c2630e"/><text x="275" y="66" text-anchor="middle" fill="#fff" font-size="12">得键</text>
-<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">得值</text>
+<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">待值</text>
 <rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">待收尾</text>
 <rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">完成</text>
-<text x="19" y="138" fill="#5b6470" font-size="12">此刻状态 need ':'，候选 token 谁能留下：</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">此刻状态需要 ':'，候选 token 谁能留下：</text>
 <rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
 <text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">放行</text>
 <rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
