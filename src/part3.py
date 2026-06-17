@@ -1575,6 +1575,27 @@ q8_0 的 <span class="mono">qs[QK8_0]</span>=<span class="mono">qs[32]</span>—
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) · d</div></div>
 </div>
+<p>拿一个真实的块走一遍，上面这条链路就具体了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次解量化</b>：一个 q4_0 块的几个字节怎么还原成浮点（d=0.05 为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 字节 qs[j]</h5>
+      <div class="cellrow"><span class="vc">0x96</span><span class="vc">0xC3</span></div>
+      <div class="tlab">两个量化字节</div></div>
+    <div class="op">&amp; 0x0F<br>&gt;&gt;4</div>
+    <div class="stn"><h5>② 拆 nibble</h5>
+      <div class="cellrow"><span class="vc">6</span><span class="vc">9</span><span class="vc">3</span><span class="vc">12</span></div>
+      <div class="tlab">每字节拆出两个 4-bit 码</div></div>
+    <div class="op">q - 8</div>
+    <div class="stn"><h5>③ 减 8</h5>
+      <div class="cellrow"><span class="vc">-2</span><span class="vc">+1</span><span class="vc">-5</span><span class="vc">+4</span></div>
+      <div class="tlab">平移成有符号 -8..7</div></div>
+    <div class="op">× d<br>d=0.05</div>
+    <div class="stn"><h5>④ × d</h5>
+      <div class="cellrow"><span class="vc blue">-.10</span><span class="vc blue">+.05</span><span class="vc blue">-.25</span><span class="vc blue">+.20</span></div>
+      <div class="tlab">还原出近似浮点</div></div>
+  </div>
+</div>
 <p>核心就一行：<span class="mono">x = (q - 8) * d</span>。<span class="mono">q</span> 是那个 0..15 的 4-bit 量化值，<strong>减 8</strong> 把它平移成 -8..7 的有符号数，再乘上这块的 scale <span class="mono">d</span>，
 就还原出近似的原始浮点。q8_0 更直接：<span class="mono">x = q * d</span>，因为 int8 本身就是有符号的，不用减偏移。</p>
 <div class="card detail">
@@ -1775,6 +1796,27 @@ handled by each format's own <span class="mono">dequantize_row_*</span> function
   <div class="node"><div class="nt">x d</div><div class="nd">times this block's scale</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">float x</div><div class="nd">x = (q - 8) * d</div></div>
+</div>
+<p>Run one real block through it and the chain above gets concrete:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one dequant</b>: how a few bytes of a q4_0 block become floats (d=0.05 illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) byte qs[j]</h5>
+      <div class="cellrow"><span class="vc">0x96</span><span class="vc">0xC3</span></div>
+      <div class="tlab">two quantized bytes</div></div>
+    <div class="op">&amp; 0x0F<br>&gt;&gt;4</div>
+    <div class="stn"><h5>(2) split nibble</h5>
+      <div class="cellrow"><span class="vc">6</span><span class="vc">9</span><span class="vc">3</span><span class="vc">12</span></div>
+      <div class="tlab">two 4-bit codes per byte</div></div>
+    <div class="op">q - 8</div>
+    <div class="stn"><h5>(3) minus 8</h5>
+      <div class="cellrow"><span class="vc">-2</span><span class="vc">+1</span><span class="vc">-5</span><span class="vc">+4</span></div>
+      <div class="tlab">shift to signed -8..7</div></div>
+    <div class="op">x d<br>d=0.05</div>
+    <div class="stn"><h5>(4) x d</h5>
+      <div class="cellrow"><span class="vc blue">-.10</span><span class="vc blue">+.05</span><span class="vc blue">-.25</span><span class="vc blue">+.20</span></div>
+      <div class="tlab">restored approximate floats</div></div>
+  </div>
 </div>
 <p>The core is one line: <span class="mono">x = (q - 8) * d</span>. <span class="mono">q</span> is the 0..15 4-bit value; <strong>subtracting 8</strong> shifts it to a signed -8..7, then
 multiplying by this block's scale <span class="mono">d</span> restores the approximate original float. q8_0 is even more direct: <span class="mono">x = q * d</span>, since int8 is already signed and needs no offset.</p>
