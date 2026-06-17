@@ -1703,7 +1703,23 @@ LESSON_19 = {
     <span class="cm">// head(): 滚动写指针</span>
 };</pre>
 <p>注意 <span class="mono">llama_kv_cache</span> 派生自 <span class="mono">llama_memory_i</span>——这个基接口很重要，后面讲变体时会回到它。每个 cell 带 <span class="mono">pos</span>，是因为注意力的 rope（L16）和因果掩码都要知道"这个 K/V 是第几位的"；每个 cell 带 <span class="mono">seq_id</span>，是为了支持多序列（下面讲）。</p>
-<p>每步 decode，<span class="mono">build_attn</span>（L16）算出新 token 的 K/V 后，就写进 <span class="mono">head</span> 指的那个 cell、把 head 往后挪一格；做注意力时，再从所有属于本序列的 cell 里读出历史 K/V。所以 KV cache 不是被动的存储，而是<strong>每步都在增长、每步都被读取</strong>的活动记忆。</p>
+<p>每步 decode，<span class="mono">build_attn</span>（L16）算出新 token 的 K/V 后，就写进 <span class="mono">head</span> 指的那个 cell、把 head 往后挪一格；做注意力时，再从所有属于本序列的 cell 里读出历史 K/V。所以 KV cache 不是被动的存储，而是<strong>每步都在增长、每步都被读取</strong>的活动记忆。把连续几步画出来，"只新算一格"就一目了然：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪 KV cache 增长</b>：每生成一个 token 只新算一格 K/V，前面的原样复用、不重算（K0、K1… 表示各位置的 K/V）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 第 n 步</h5>
+      <div class="cellrow"><span class="vc">K0</span><span class="vc">K1</span><span class="vc">K2</span></div>
+      <div class="tlab">已有 3 格</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>② 第 n+1 步</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc hot">K3</span></div>
+      <div class="tlab">只新算 K3，前 3 格复用</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>③ 第 n+2 步</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc dim">K3</span><span class="vc hot">K4</span></div>
+      <div class="tlab">只新算 K4，前 4 格复用</div></div>
+  </div>
+</div>
 <p>cell 和 token 是<strong>一一对应</strong>的：序列里第 i 个 token，就占缓存里某个 cell，存着它（其实是每一层都有一份）的 K 和 V。所以"缓存有多大"约等于"能记多少个 token 的 K/V"，这也是 <span class="mono">n_ctx</span>（上下文长度，L17）的含义——它就是缓存能容纳的 cell 数上限。</p>
 <div class="card detail">
   <div class="tag">🔬 细节 / 源码对应</div>
@@ -1852,7 +1868,23 @@ how multiple sequences coexist, and the various <strong>variants</strong> for lo
     <span class="cm">// head(): rolling write pointer</span>
 };</pre>
 <p>Note <span class="mono">llama_kv_cache</span> derives from <span class="mono">llama_memory_i</span> - this base interface matters, and we return to it for the variants. Each cell carries <span class="mono">pos</span> because attention's rope (L16) and causal mask both need to know "which position this K/V is"; each cell carries <span class="mono">seq_id</span> to support multiple sequences (below).</p>
-<p>Each decode step, after <span class="mono">build_attn</span> (L16) computes the new token's K/V, it writes them into the cell <span class="mono">head</span> points to and advances head by one; for attention, it reads historical K/V from all cells belonging to this sequence. So the KV cache is not passive storage but an active memory that <strong>grows every step and is read every step</strong>.</p>
+<p>Each decode step, after <span class="mono">build_attn</span> (L16) computes the new token's K/V, it writes them into the cell <span class="mono">head</span> points to and advances head by one; for attention, it reads historical K/V from all cells belonging to this sequence. So the KV cache is not passive storage but an active memory that <strong>grows every step and is read every step</strong>. Draw a few consecutive steps and "only one new cell" becomes obvious:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing KV-cache growth</b>: each token computes just one new K/V cell; earlier cells are reused as-is, not recomputed (K0, K1... are each position's K/V).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) step n</h5>
+      <div class="cellrow"><span class="vc">K0</span><span class="vc">K1</span><span class="vc">K2</span></div>
+      <div class="tlab">3 cells so far</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>(2) step n+1</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc hot">K3</span></div>
+      <div class="tlab">only K3 is new, first 3 reused</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>(3) step n+2</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc dim">K3</span><span class="vc hot">K4</span></div>
+      <div class="tlab">only K4 is new, first 4 reused</div></div>
+  </div>
+</div>
 <p>Cells and tokens are <strong>one-to-one</strong>: the i-th token in a sequence occupies some cell in the cache, storing its (one per layer, actually) K and V. So "how big the cache is" roughly equals "how many tokens' K/V it can remember" - which is the meaning of <span class="mono">n_ctx</span> (context length, L17): the upper bound on cells the cache can hold.</p>
 <div class="card detail">
   <div class="tag">🔬 Details / source</div>
@@ -2045,6 +2077,27 @@ ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, ad
 text = <span class="st">""</span>
 <span class="kw">for</span> id <span class="kw">in</span> ids:
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># 逐 token 还原拼接</span></pre>
+<p>把上面这段 "Hello" 真正走一遍，编码就具体了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次分词</b>：一句话怎么变成 token id；遇到词表里没有的字符（生僻字、emoji）就按 UTF-8 拆成字节（id 为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 输入串</h5>
+      <div class="cellrow"><span class="vc">"Hello!"</span></div>
+      <div class="tlab">一句话</div></div>
+    <div class="op">分词</div>
+    <div class="stn"><h5>② 切成片</h5>
+      <div class="cellrow"><span class="vc">Hello</span><span class="vc">!</span></div>
+      <div class="tlab">命中词表的片段</div></div>
+    <div class="op">查表<br>&rarr; id</div>
+    <div class="stn"><h5>③ token id</h5>
+      <div class="cellrow"><span class="vc blue">9906</span><span class="vc blue">30</span></div>
+      <div class="tlab">每片一个 id</div></div>
+    <div class="op">词表外<br>UTF-8</div>
+    <div class="stn"><h5>④ 字节回退</h5>
+      <div class="cellrow"><span class="vc">&lt;0xF0&gt;</span><span class="vc">&lt;0x9F&gt;</span><span class="vc">&lt;0x8E&gt;</span><span class="vc">&lt;0x89&gt;</span></div>
+      <div class="tlab">生僻 emoji = 4 个字节 token</div></div>
+  </div>
+</div>
 <p><span class="mono">tokenize</span> 时可以让它自动前置 BOS（由前面那个 <span class="mono">get_add_bos()</span> 标志控制）；解码时则逐个 token 调 <span class="mono">token_to_piece</span> 把片段拼回去。注意字节 token 还原时要按 UTF-8 把几个字节<strong>拼起来</strong>才是一个完整字符——这也是为什么解码要逐步累积、而不是"一个 token 一个字"。</p>
 <p>特殊 token 之所以重要，是因为它们承载着"文字之外"的结构信息。一段对话里，谁说的、一轮在哪结束、要不要停下，都靠这些标记界定（后面 L22 的对话模板，正是在大量使用它们）。可以把普通 token 看成"内容"、特殊 token 看成"标点和段落标记"——少了后者，模型就分不清对话的骨架。</p>
 <div class="card detail">
@@ -2202,6 +2255,27 @@ ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, ad
 text = <span class="st">""</span>
 <span class="kw">for</span> id <span class="kw">in</span> ids:
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># rebuild piece by piece</span></pre>
+<p>Walk that "Hello" through it for real and encoding gets concrete:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one tokenization</b>: how a sentence becomes token ids; a char not in the vocab (rare glyph, emoji) splits into UTF-8 bytes (ids illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) input</h5>
+      <div class="cellrow"><span class="vc">"Hello!"</span></div>
+      <div class="tlab">a sentence</div></div>
+    <div class="op">tokenize</div>
+    <div class="stn"><h5>(2) pieces</h5>
+      <div class="cellrow"><span class="vc">Hello</span><span class="vc">!</span></div>
+      <div class="tlab">in-vocab pieces</div></div>
+    <div class="op">look up<br>-&gt; id</div>
+    <div class="stn"><h5>(3) token id</h5>
+      <div class="cellrow"><span class="vc blue">9906</span><span class="vc blue">30</span></div>
+      <div class="tlab">one id per piece</div></div>
+    <div class="op">OOV<br>UTF-8</div>
+    <div class="stn"><h5>(4) byte fallback</h5>
+      <div class="cellrow"><span class="vc">&lt;0xF0&gt;</span><span class="vc">&lt;0x9F&gt;</span><span class="vc">&lt;0x8E&gt;</span><span class="vc">&lt;0x89&gt;</span></div>
+      <div class="tlab">rare emoji = 4 byte tokens</div></div>
+  </div>
+</div>
 <p><span class="mono">tokenize</span> can auto-prepend BOS (controlled by that <span class="mono">get_add_bos()</span> flag); decoding then calls <span class="mono">token_to_piece</span> per token to stitch pieces back. Note that restoring byte tokens means <strong>joining</strong> several bytes by UTF-8 to form one complete character - which is why decoding accumulates step by step, not "one token, one character".</p>
 <p>Special tokens matter because they carry structural information "beyond the text". In a conversation, who spoke, where a turn ends, whether to stop - all are delimited by these markers (L22's chat template, a later lesson, uses them heavily). Think of ordinary tokens as "content" and special tokens as "punctuation and paragraph marks" - without the latter, the model cannot tell the conversation's skeleton.</p>
 <div class="card detail">
@@ -2305,7 +2379,27 @@ LESSON_21 = {
 </div>
 <p>于是管线大致长这样：先用惩罚压低重复，再用 top-k/top-p 砍掉长尾候选，接着用温度调节剩下分布的软硬，最后用 dist 按概率抽一个（或 greedy 直接取最大）。每一步只做一件小事，叠起来就是一套完整的采样策略。</p>
 <p>要强调的是，这套管线只动 logits/概率、<strong>不碰模型本身</strong>。模型每步老老实实算出同一排 logits，至于怎么从中选词，全由采样这层说了算。所以"换个生成风格"根本不用动模型，调调采样参数即可——这也是同一个模型能时而严谨、时而天马行空的原因。</p>
-<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。</p>
+<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。把这条链路用一个具体例子走一遍就清楚了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次采样</b>：5 个候选词，看一排 logits 怎么一步步变成最终选中的一个 token（数字为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① logits</h5>
+      <div class="cellrow"><span class="vc">3.2</span><span class="vc">2.1</span><span class="vc">1.0</span><span class="vc">0.5</span><span class="vc">-0.3</span></div>
+      <div class="tlab">cat / dog / sky / run / blue</div></div>
+    <div class="op">÷T<br>T=0.7</div>
+    <div class="stn"><h5>② 温度缩放</h5>
+      <div class="cellrow"><span class="vc">4.6</span><span class="vc">3.0</span><span class="vc">1.4</span><span class="vc">0.7</span><span class="vc">-.4</span></div>
+      <div class="tlab">T&lt;1 放大差距</div></div>
+    <div class="op">top-k<br>k=3</div>
+    <div class="stn"><h5>③ 截断候选</h5>
+      <div class="cellrow"><span class="vc hot">4.6</span><span class="vc hot">3.0</span><span class="vc hot">1.4</span><span class="vc dim">0.7</span><span class="vc dim">-.4</span></div>
+      <div class="tlab">只留分数最高的 3 个</div></div>
+    <div class="op">softmax<br>top-p .9</div>
+    <div class="stn"><h5>④ 概率 → 采样</h5>
+      <div class="cellrow"><span class="vc blue">.78</span><span class="vc blue">.18</span><span class="vc dim">.04</span></div>
+      <div class="tlab">按概率抽一个 → <strong>cat</strong></div></div>
+  </div>
+</div>
 
 <h2>采样器接口</h2>
 <pre class="code"><span class="cm">// 简化自 include/llama.h</span>
@@ -2466,7 +2560,27 @@ Last lesson the vocab turned text into token ids fed to the model; the model com
 </div>
 <p>So the pipeline looks roughly like this: penalties damp repeats first, top-k/top-p chop the long tail, then temperature tunes the softness of what remains, and finally dist draws one by probability (or greedy takes the max). Each step does one small thing; stacked together they are a complete sampling strategy.</p>
 <p>Worth stressing: this pipeline touches only logits/probabilities, <strong>never the model itself</strong>. The model dutifully computes the same row of logits each step; how a word is chosen from them is entirely up to the sampling layer. So "change the generation style" needs no change to the model, just sampling parameters - which is why one model can be rigorous one moment and wildly imaginative the next.</p>
-<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy.</p>
+<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy. Walking one concrete example through this pipeline makes it click:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one sampling step</b>: 5 candidate words - watch a row of logits become the single chosen token (numbers illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) logits</h5>
+      <div class="cellrow"><span class="vc">3.2</span><span class="vc">2.1</span><span class="vc">1.0</span><span class="vc">0.5</span><span class="vc">-0.3</span></div>
+      <div class="tlab">cat / dog / sky / run / blue</div></div>
+    <div class="op">/T<br>T=0.7</div>
+    <div class="stn"><h5>(2) temperature</h5>
+      <div class="cellrow"><span class="vc">4.6</span><span class="vc">3.0</span><span class="vc">1.4</span><span class="vc">0.7</span><span class="vc">-.4</span></div>
+      <div class="tlab">T&lt;1 widens gaps</div></div>
+    <div class="op">top-k<br>k=3</div>
+    <div class="stn"><h5>(3) truncate</h5>
+      <div class="cellrow"><span class="vc hot">4.6</span><span class="vc hot">3.0</span><span class="vc hot">1.4</span><span class="vc dim">0.7</span><span class="vc dim">-.4</span></div>
+      <div class="tlab">keep the top 3 only</div></div>
+    <div class="op">softmax<br>top-p .9</div>
+    <div class="stn"><h5>(4) probs -&gt; sample</h5>
+      <div class="cellrow"><span class="vc blue">.78</span><span class="vc blue">.18</span><span class="vc dim">.04</span></div>
+      <div class="tlab">draw one by probability -&gt; <strong>cat</strong></div></div>
+  </div>
+</div>
 
 <h2>The sampler interface</h2>
 <pre class="code"><span class="cm">// simplified from include/llama.h</span>
@@ -2687,7 +2801,23 @@ dest = <span class="st">""</span>
   <div class="tag">💡 实战</div>
   这里有个参数值得专门说：<span class="mono">add_ass</span>（add assistant）。为真时，拼完所有消息后，会在末尾再追加 assistant 的<strong>起始标记</strong>（但不含内容）——相当于把话筒递给模型，让它从"该 assistant 说话"的位置开始生成回答。要模型续写回答时打开它；只想补全已有文本时关掉。
 </div>
-<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。</p>
+<p>消息本身的结构很简单：<span class="mono">llama_chat_message</span> 就两个字段，<span class="mono">role</span>（角色字符串，如 "user"）和 <span class="mono">content</span>（内容）。一串这样的消息，就是 <span class="mono">apply_template</span> 的输入；它在内部按选定模板，把每条消息裹上对应标记、首尾拼接，吐出最终那段提示词。拿一组具体消息走一遍就清楚了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪模板拼接</b>：结构化消息怎么被压平成一串带特殊标记的纯文本（送进 tokenize 之前的最后一步；内容为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 消息列表</h5>
+      <div class="cellrow"><span class="vc">system: "You are helpful."</span><span class="vc">user: "Hi"</span></div>
+      <div class="tlab">2 条带角色的结构化消息</div></div>
+    <div class="op">套 ChatML</div>
+    <div class="stn"><h5>② 压平 + 加标记</h5>
+      <div class="cellrow"><span class="vc hot">&lt;|im_start|&gt;system</span><span class="vc">You are helpful.</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;user</span><span class="vc">Hi</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;assistant</span></div>
+      <div class="tlab">标记包住每条正文，结尾把话筒递给 assistant</div></div>
+    <div class="op">→ tokenize</div>
+    <div class="stn"><h5>③ 交给 L20</h5>
+      <div class="cellrow"><span class="vc blue">tokenize</span></div>
+      <div class="tlab">这串纯文本再切成 token id</div></div>
+  </div>
+</div>
 <p>检测这一步其实暗藏玄机。最理想的情况是模型 GGUF 里写明了模板名，一查便知；但现实里常常只给出一段模板<strong>内容</strong>（Jinja 文本），没有名字。这时只能靠"内容里有没有某些特征标记"来反推——看到 <span class="mono">[INST]</span> 就猜 Llama-2、看到 <span class="mono">&lt;|im_start|&gt;</span> 就猜 ChatML。这种基于特征的启发式不是百分百可靠，但覆盖了绝大多数情况。</p>
 <p>套用这一步也比看上去讲究。同一套格式，system 消息有的拼在最前、有的并进第一条 user 消息、有的干脆不支持；多轮对话里，历史消息要不要重复加标记、最后一轮怎么收尾，每种模板都有自己的规矩。<span class="mono">apply_template</span> 把这些细节按模板类型一一处理妥当，你只管递进去一个消息列表，它还你一段格式严丝合缝的提示词。</p>
 <div class="card spark">
@@ -2850,7 +2980,23 @@ dest = <span class="st">""</span>
   <div class="tag">💡 Tip</div>
   One parameter deserves a special mention: <span class="mono">add_ass</span> (add assistant). When true, after all messages are assembled it appends the assistant's <strong>start marker</strong> at the end (but no content) - like handing the mic to the model, letting it start generating the reply from where "the assistant should speak". Turn it on when you want the model to continue a reply; off when you only want to complete existing text.
 </div>
-<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt.</p>
+<p>The message's own structure is simple: <span class="mono">llama_chat_message</span> has just two fields, <span class="mono">role</span> (a role string, e.g. "user") and <span class="mono">content</span> (the content). A list of such messages is the input to <span class="mono">apply_template</span>; internally, per the chosen template, it wraps each message in its markers, concatenates head to tail, and emits that final prompt. Walk a concrete message set through it to see:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing template assembly</b>: how structured messages flatten into one marked-up plain-text string (the last step before tokenize; content illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) message list</h5>
+      <div class="cellrow"><span class="vc">system: "You are helpful."</span><span class="vc">user: "Hi"</span></div>
+      <div class="tlab">2 structured role-tagged messages</div></div>
+    <div class="op">apply ChatML</div>
+    <div class="stn"><h5>(2) flatten + mark</h5>
+      <div class="cellrow"><span class="vc hot">&lt;|im_start|&gt;system</span><span class="vc">You are helpful.</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;user</span><span class="vc">Hi</span><span class="vc hot">&lt;|im_end|&gt;</span><span class="vc hot">&lt;|im_start|&gt;assistant</span></div>
+      <div class="tlab">markers wrap each body; ends handing the mic to assistant</div></div>
+    <div class="op">-&gt; tokenize</div>
+    <div class="stn"><h5>(3) hand to L20</h5>
+      <div class="cellrow"><span class="vc blue">tokenize</span></div>
+      <div class="tlab">this plain text then splits into token ids</div></div>
+  </div>
+</div>
 <p>Detection actually hides subtlety. Ideally the GGUF states the template name and a lookup settles it; but in reality it often gives only a template <strong>body</strong> (Jinja text) with no name. Then one can only infer from "whether certain feature markers appear in the body" - see <span class="mono">[INST]</span> and guess Llama-2, see <span class="mono">&lt;|im_start|&gt;</span> and guess ChatML. This feature-based heuristic is not 100% reliable but covers the vast majority.</p>
 <p>Application is also fussier than it looks. For the same format, the system message may go at the very front, be merged into the first user message, or not be supported at all; in multi-turn dialogue, whether history repeats the markers and how the last turn closes - each template has its own rules. <span class="mono">apply_template</span> handles these details per template type, so you just hand in a message list and it returns a precisely formatted prompt.</p>
 <div class="card spark">
@@ -3021,6 +3167,47 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
   <div class="tag">🔬 细节 / 源码对应</div>
   正因为状态是逐步推进的，<strong>同一个 token 在不同位置合不合法是不同的</strong>。比如在 JSON 里，刚写完 <span class="mono">{</span> 时只允许引号（开始一个键）或 <span class="mono">}</span>（空对象），而写完一个完整键值对后又只允许逗号或 <span class="mono">}</span>。grammar 每一步都根据当前状态算出这个"此刻合法集"，再据此掩码。约束不是一成不变的，而是<strong>随上下文动态变化</strong>的。
 </div>
+<p>拿生成 {"a":1} 这个最小例子走一遍：每到一步，语法只放行合法的那个字符、把其它候选砸成 -inf，选完再推进状态机——逐字符把输出锁在合法的轨道上。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次语法约束</b>：逐字符生成 {"a":1}，每步把非法 token 砸成 -inf、只放行合法的，并推进状态机。</div>
+  <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="语法约束状态机示例">
+<g font-family="ui-monospace,monospace" font-size="13">
+<line x1="91" y1="61" x2="125" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 125 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="110" y="40" text-anchor="middle" fill="#5b6470" font-size="13">{</text>
+<line x1="201" y1="61" x2="235" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 235 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="220" y="40" text-anchor="middle" fill="#5b6470" font-size="13">"a"</text>
+<line x1="311" y1="61" x2="345" y2="61" stroke="#c2630e" stroke-width="2.6"/>
+<path d="M 345 61 l -7 -3.5 v 7 z" fill="#c2630e"/>
+<text x="330" y="40" text-anchor="middle" fill="#c2630e" font-size="13">:</text>
+<line x1="421" y1="61" x2="455" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 455 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="440" y="40" text-anchor="middle" fill="#5b6470" font-size="13">1</text>
+<line x1="531" y1="61" x2="565" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 565 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="550" y="40" text-anchor="middle" fill="#5b6470" font-size="13">}</text>
+<rect x="19" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="55" y="66" text-anchor="middle" fill="#1d2129" font-size="12">起始</text>
+<rect x="129" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="165" y="66" text-anchor="middle" fill="#1d2129" font-size="12">进对象</text>
+<rect x="239" y="46" width="72" height="30" rx="14" fill="#c2630e" stroke="#c2630e"/><text x="275" y="66" text-anchor="middle" fill="#fff" font-size="12">得键</text>
+<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">待值</text>
+<rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">待收尾</text>
+<rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">完成</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">此刻状态需要 ':'，候选 token 谁能留下：</text>
+<rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
+<text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">放行</text>
+<rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
+<line x1="99" y1="168" x2="137" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="118" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="159" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="188" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">}</text>
+<line x1="169" y1="168" x2="207" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="188" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="229" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="258" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">5</text>
+<line x1="239" y1="168" x2="277" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="258" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<text x="313" y="174" fill="#5b6470" font-size="12">&#8594; 推进状态</text>
+</g></svg>
+</div>
 <p>有人会问：每步都遍历几万个候选去判断合不合法，不会很慢吗？实现上做了不少优化——把文法预编译成高效结构、对候选按规则栈快速筛、缓存中间结果等等。多数情况下这点开销相对模型的一次前向（L17）几乎可忽略。所以你尽管放心用语法约束，它换来的可靠性，远大于那一点点代价。</p>
 <p>举个落地的例子：很多"让大模型当后端"的应用，都靠语法约束保证它返回能被程序直接吃下的 JSON。你定义好返回结构的文法、挂上 grammar 采样器，模型这一头就成了一个"永远输出合法结构"的可靠组件。没有它，你得在模型和程序之间塞一层解析、纠错、重试的胶水；有了它，那层胶水基本可以省掉。这就是约束带来的实打实的工程价值。</p>
 
@@ -3180,6 +3367,47 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
   <div class="tag">🔬 Details / source</div>
   Because the state advances step by step, <strong>the same token can be legal or not at different positions</strong>. In JSON, for instance, right after <span class="mono">{</span> only a quote (starting a key) or <span class="mono">}</span> (empty object) is allowed, while after a complete key-value pair only a comma or <span class="mono">}</span> is. The grammar computes this "legal set right now" from the current state each step and masks accordingly. The constraint is not fixed but <strong>changes dynamically with context</strong>.
 </div>
+<p>Walk the smallest example, generating {"a":1}, step by step: at each step the grammar lets through only the legal next character, slams every other candidate to -inf, then advances the state machine - locking the output onto the legal track character by character.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one grammar constraint</b>: generating {"a":1} char by char - each step masks illegal tokens to -inf, allows only the legal one, and advances the state machine.</div>
+  <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="grammar constraint state machine">
+<g font-family="ui-monospace,monospace" font-size="13">
+<line x1="91" y1="61" x2="125" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 125 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="110" y="40" text-anchor="middle" fill="#5b6470" font-size="13">{</text>
+<line x1="201" y1="61" x2="235" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 235 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="220" y="40" text-anchor="middle" fill="#5b6470" font-size="13">"a"</text>
+<line x1="311" y1="61" x2="345" y2="61" stroke="#c2630e" stroke-width="2.6"/>
+<path d="M 345 61 l -7 -3.5 v 7 z" fill="#c2630e"/>
+<text x="330" y="40" text-anchor="middle" fill="#c2630e" font-size="13">:</text>
+<line x1="421" y1="61" x2="455" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 455 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="440" y="40" text-anchor="middle" fill="#5b6470" font-size="13">1</text>
+<line x1="531" y1="61" x2="565" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 565 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="550" y="40" text-anchor="middle" fill="#5b6470" font-size="13">}</text>
+<rect x="19" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="55" y="66" text-anchor="middle" fill="#1d2129" font-size="12">start</text>
+<rect x="129" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="165" y="66" text-anchor="middle" fill="#1d2129" font-size="12">obj</text>
+<rect x="239" y="46" width="72" height="30" rx="14" fill="#c2630e" stroke="#c2630e"/><text x="275" y="66" text-anchor="middle" fill="#fff" font-size="12">key</text>
+<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">val</text>
+<rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">end</text>
+<rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">done</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">state need ':' - which candidate tokens survive:</text>
+<rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
+<text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">keep</text>
+<rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
+<line x1="99" y1="168" x2="137" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="118" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="159" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="188" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">}</text>
+<line x1="169" y1="168" x2="207" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="188" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="229" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="258" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">5</text>
+<line x1="239" y1="168" x2="277" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="258" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<text x="313" y="174" fill="#5b6470" font-size="12">&#8594; advance</text>
+</g></svg>
+</div>
 <p>One might ask: scanning tens of thousands of candidates each step to judge legality, is that not slow? The implementation does plenty of optimization - precompiling the grammar into efficient structures, quickly filtering candidates by the rule stacks, caching intermediate results, and so on. In most cases this cost is nearly negligible against the model's one forward pass (L17). So use grammar constraints freely; the reliability they buy far outweighs the small price.</p>
 <p>A concrete grounded example: many "let the large model be a backend" applications rely on grammar constraints to guarantee it returns JSON a program can consume directly. Define the grammar for the return structure, attach the grammar sampler, and the model end becomes a reliable component that "always outputs a legal structure". Without it, you must stuff a layer of parse, correct, and retry glue between the model and the program; with it, that glue layer can largely be dropped. This is the concrete engineering value a constraint brings.</p>
 
@@ -3289,6 +3517,34 @@ LESSON_24 = {
   <div class="node"><div class="nt">+ W·x</div><div class="nd">加到基础输出</div></div>
 </div>
 <p>具体怎么算？设原权重是 W、输入是 x。基础输出就是 W·x（一次普通的矩阵乘）。LoRA 在它旁边加一条<strong>低秩支路</strong>：先用 A 把 x 降到一个很低的维度（秩 r），再用 B 升回原来的维度，得到 B·(A·x)；乘上一个缩放系数 scale，加到 W·x 上。最终输出 = W·x + scale·B·A·x。</p>
+<p>把这条公式按"维度"画出来，低秩瓶颈就一目了然：主干 W·x 维度不变；旁路先被 A 压到很窄的秩 r，再被 B 升回来，乘 scale 加回主干。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次 LoRA 前向</b>：主干 W·x 不动，旁路把 x 压到低秩 r 再升回来、乘 scale 加回去（维度为示意）。</div>
+  <svg viewBox="0 0 660 226" width="100%" role="img" aria-label="LoRA 前向示例：低秩旁路">
+<g font-family="ui-monospace,monospace">
+<text x="150" y="20" fill="#5b6470" font-size="11">主干 W&#183;x（冻结，不更新）</text>
+<text x="150" y="206" fill="#5b6470" font-size="11">旁路：把 x 压到低秩 r 再升回来</text>
+<rect x="20" y="82" width="46" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="117" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="43" y="155" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="100" x2="147" y2="67" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 150 66 L 144 73 L 141 65 z" fill="#9aa6b2"/>
+<rect x="150" y="46" width="60" height="40" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="180" y="71" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W</text><text x="180" y="99" text-anchor="middle" fill="#5b6470" font-size="10">冻结</text>
+<line x1="210" y1="66" x2="247" y2="72" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 250 72 L 241 75 L 243 67 z" fill="#9aa6b2"/>
+<rect x="250" y="46" width="58" height="60" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="279" y="81" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W&#183;x</text><text x="279" y="119" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="124" x2="123" y2="149" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 126 150 L 117 150 L 120 143 z" fill="#9aa6b2"/>
+<rect x="126" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="149" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">A</text><text x="149" y="197" text-anchor="middle" fill="#5b6470" font-size="10">4-&gt;r</text>
+<line x1="172" y1="167" x2="203" y2="175" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 206 176 L 197 178 L 199 170 z" fill="#9aa6b2"/>
+<rect x="206" y="168" width="44" height="18" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="228" y="182" text-anchor="middle" fill="#fff" font-weight="700" font-size="12">r=1</text>
+<line x1="250" y1="176" x2="283" y2="168" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 286 167 L 279 173 L 277 165 z" fill="#9aa6b2"/>
+<rect x="286" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="309" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">B</text><text x="309" y="197" text-anchor="middle" fill="#5b6470" font-size="10">r-&gt;4</text>
+<line x1="332" y1="160" x2="370" y2="134" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 372 132 L 368 140 L 363 133 z" fill="#9aa6b2"/>
+<rect x="372" y="102" width="56" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="400" y="137" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">[4]</text>
+<line x1="308" y1="76" x2="467" y2="98" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 98 L 462 101 L 463 93 z" fill="#9aa6b2"/>
+<line x1="428" y1="132" x2="467" y2="109" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 108 L 465 115 L 461 108 z" fill="#9aa6b2"/>
+<text x="452" y="150" text-anchor="middle" fill="#c2630e" font-size="10">&#215;scale</text>
+<rect x="470" y="84" width="40" height="40" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="490" y="109" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="18">+</text>
+<line x1="510" y1="104" x2="553" y2="104" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 556 104 L 548 108 L 548 100 z" fill="#9aa6b2"/>
+<rect x="556" y="74" width="58" height="60" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="585" y="109" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y</text><text x="585" y="147" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+</g></svg>
+</div>
 <pre class="code"><span class="cm">// 简化自 src/llama-graph.cpp build_lora_mm</span>
 res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// 基础权重输出 W·x</span>
 <span class="kw">for</span> (lora : active_adapters) {
@@ -3435,6 +3691,34 @@ All through Part 4, you can now load, infer, tokenize, sample, apply chat format
   <div class="node"><div class="nt">+ W*x</div><div class="nd">add to base output</div></div>
 </div>
 <p>How exactly is it computed? Let the original weight be W and the input x. The base output is W*x (an ordinary matmul). LoRA adds a <strong>low-rank branch</strong> alongside it: first A drops x to a very low dimension (rank r), then B lifts it back to the original dimension, giving B*(A*x); multiply by a scale factor and add onto W*x. The final output = W*x + scale*B*A*x.</p>
+<p>Draw this formula by "dimension" and the low-rank bottleneck pops out: the base W*x keeps its width; the bypass is first squeezed by A to a narrow rank r, lifted back by B, scaled, and added to the base.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one LoRA forward</b>: the frozen W*x stays; the bypass squeezes x to low rank r, lifts it back, scales it, and adds it in (dims illustrative).</div>
+  <svg viewBox="0 0 660 226" width="100%" role="img" aria-label="LoRA forward worked example">
+<g font-family="ui-monospace,monospace">
+<text x="150" y="20" fill="#5b6470" font-size="11">base W*x  (frozen, not trained)</text>
+<text x="150" y="206" fill="#5b6470" font-size="11">bypass: squeeze x to low rank r, lift back</text>
+<rect x="20" y="82" width="46" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="117" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="43" y="155" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="100" x2="147" y2="67" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 150 66 L 144 73 L 141 65 z" fill="#9aa6b2"/>
+<rect x="150" y="46" width="60" height="40" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="180" y="71" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W</text><text x="180" y="99" text-anchor="middle" fill="#5b6470" font-size="10">frozen</text>
+<line x1="210" y1="66" x2="247" y2="72" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 250 72 L 241 75 L 243 67 z" fill="#9aa6b2"/>
+<rect x="250" y="46" width="58" height="60" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="279" y="81" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W*x</text><text x="279" y="119" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="124" x2="123" y2="149" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 126 150 L 117 150 L 120 143 z" fill="#9aa6b2"/>
+<rect x="126" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="149" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">A</text><text x="149" y="197" text-anchor="middle" fill="#5b6470" font-size="10">4-&gt;r</text>
+<line x1="172" y1="167" x2="203" y2="175" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 206 176 L 197 178 L 199 170 z" fill="#9aa6b2"/>
+<rect x="206" y="168" width="44" height="18" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="228" y="182" text-anchor="middle" fill="#fff" font-weight="700" font-size="12">r=1</text>
+<line x1="250" y1="176" x2="283" y2="168" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 286 167 L 279 173 L 277 165 z" fill="#9aa6b2"/>
+<rect x="286" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="309" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">B</text><text x="309" y="197" text-anchor="middle" fill="#5b6470" font-size="10">r-&gt;4</text>
+<line x1="332" y1="160" x2="370" y2="134" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 372 132 L 368 140 L 363 133 z" fill="#9aa6b2"/>
+<rect x="372" y="102" width="56" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="400" y="137" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">[4]</text>
+<line x1="308" y1="76" x2="467" y2="98" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 98 L 462 101 L 463 93 z" fill="#9aa6b2"/>
+<line x1="428" y1="132" x2="467" y2="109" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 108 L 465 115 L 461 108 z" fill="#9aa6b2"/>
+<text x="452" y="150" text-anchor="middle" fill="#c2630e" font-size="10">*scale</text>
+<rect x="470" y="84" width="40" height="40" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="490" y="109" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="18">+</text>
+<line x1="510" y1="104" x2="553" y2="104" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 556 104 L 548 108 L 548 100 z" fill="#9aa6b2"/>
+<rect x="556" y="74" width="58" height="60" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="585" y="109" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y</text><text x="585" y="147" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+</g></svg>
+</div>
 <pre class="code"><span class="cm">// simplified from src/llama-graph.cpp build_lora_mm</span>
 res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// base weight output W*x</span>
 <span class="kw">for</span> (lora : active_adapters) {

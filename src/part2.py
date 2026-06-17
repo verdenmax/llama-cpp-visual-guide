@@ -58,6 +58,40 @@ LESSON_04 = {
   <div class="tag">🔌 生活类比</div>
   再把<strong>注意力到底在干嘛</strong>说透一点：它像在做一次"<strong>带权重的检索</strong>"。当前 token 拿着自己的 Query（一个"我想找什么"的提问），去和每个历史 token 的 Key（一个"我是什么"的标签）逐一匹配，越像就给越高的注意力权重；然后按这些权重，把各历史 token 的 Value（"我能提供的内容"）<strong>加权求和</strong>，汇成当前 token 的新表示。于是"<strong>理解上下文</strong>"被落实成了"<strong>该重点参考前文哪几个词</strong>"。这也再次说明：为什么注意力是 token 之间唯一的交流通道——只有在这里，一个 token 的输出才真正取决于<strong>别的</strong> token。
 </div>
+<p>把这套"检索"用一个具体例子走一遍：当前 token 给 3 个历史 token 打分，分数越高、softmax 之后的权重越大，最后按权重把它们的 Value 加权汇总成一个向量。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次注意力</b>：当前 token 拿 Q 给 3 个历史 token 打分 → softmax 成权重 → 按权重汇总它们的 V（数字为示意）。</div>
+  <svg viewBox="0 0 580 236" width="100%" role="img" aria-label="注意力计算示例">
+<g font-family="ui-monospace,monospace" font-size="13">
+<text x="20" y="24" fill="#5b6470" font-size="12">打分：Q &#183; K  (越像分越高)</text>
+<text x="322" y="24" fill="#5b6470" font-size="12">softmax 权重 (和=1)</text>
+<rect x="20" y="46" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="68" text-anchor="middle" fill="#1d2129">k1</text>
+<rect x="78" y="53" width="120" height="20" rx="3" fill="#2563eb"/>
+<text x="206" y="68" fill="#2563eb">4.0</text>
+<rect x="20" y="94" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="116" text-anchor="middle" fill="#1d2129">k2</text>
+<rect x="78" y="101" width="30" height="20" rx="3" fill="#2563eb"/>
+<text x="116" y="116" fill="#2563eb">1.0</text>
+<rect x="20" y="142" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="164" text-anchor="middle" fill="#1d2129">k3</text>
+<rect x="78" y="149" width="60" height="20" rx="3" fill="#2563eb"/>
+<text x="146" y="164" fill="#2563eb">2.0</text>
+<text x="266" y="112" fill="#c2630e" font-size="12">softmax</text>
+<text x="290" y="132" text-anchor="middle" fill="#c2630e" font-size="15">&#8595;</text>
+<rect x="322" y="46" width="58" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="351" y="68" text-anchor="middle" fill="#fff" font-weight="700">0.84</text>
+<rect x="322" y="94" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="116" text-anchor="middle" fill="#1d2129" font-weight="700">0.04</text>
+<rect x="322" y="142" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="164" text-anchor="middle" fill="#1d2129" font-weight="700">0.11</text>
+<rect x="494" y="70" width="72" height="98" rx="6" fill="#7c3aed" stroke="#7c3aed"/>
+<text x="530" y="115" text-anchor="middle" fill="#fff" font-size="12">上下文</text>
+<text x="530" y="133" text-anchor="middle" fill="#fff" font-size="12">向量</text>
+<line x1="384" y1="63" x2="492" y2="119" stroke="#c2630e" stroke-width="8.6" opacity="0.85"/>
+<text x="432" y="59" fill="#5b6470" font-size="10">&#183;v1</text>
+<line x1="384" y1="111" x2="492" y2="119" stroke="#c2630e" stroke-width="1.4" opacity="0.85"/>
+<text x="432" y="124" fill="#5b6470" font-size="10">&#183;v2</text>
+<line x1="384" y1="159" x2="492" y2="119" stroke="#c2630e" stroke-width="2.0" opacity="0.85"/>
+<text x="432" y="171" fill="#5b6470" font-size="10">&#183;v3</text>
+</g>
+<text x="20" y="228" font-size="12" fill="#7c3aed" font-family="ui-monospace,monospace">out = 0.84&#183;v1 + 0.04&#183;v2 + 0.11&#183;v3</text>
+</svg>
+</div>
 <p>还有个常被忽略的点：注意力本身<strong>并不知道词的先后顺序</strong>——它只是在做"按相似度加权汇总"，把同样几个词打乱顺序喂进去，
 纯注意力算出的结果竟然一样。可语言显然讲究语序（"狗咬人"和"人咬狗"天差地别）。<strong>位置信息</strong>就是为此补进来的：llama 系普遍用
 <strong>RoPE（旋转位置编码）</strong>，它不是简单地给每个位置加一个"序号向量"，而是<strong>按位置给 Query / Key 做一次旋转</strong>，
@@ -265,6 +299,40 @@ into a token's vector; by the top, the last position's vector has distilled ever
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
   To make <strong>what attention does</strong> concrete: it is a kind of <strong>weighted retrieval</strong>. The current token holds a Query (a "what am I looking for" question), matches it against every historical token's Key (a "what am I" tag) - the better the match, the higher the attention weight - then takes a <strong>weighted sum</strong> of those tokens' Values (the "content I can offer") into its new representation. So "understanding context" becomes "which earlier words to lean on". This is also why attention is the only channel between tokens: only here does a token's output truly depend on <strong>other</strong> tokens.
+</div>
+<p>Walk this "retrieval" through one concrete example: the current token scores 3 history tokens; a higher score means a higher weight after softmax, and the Values get summed by those weights into one vector.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one attention step</b>: the current token's Q scores 3 history tokens -&gt; softmax to weights -&gt; weighted sum of their V (numbers illustrative).</div>
+  <svg viewBox="0 0 580 236" width="100%" role="img" aria-label="attention worked example">
+<g font-family="ui-monospace,monospace" font-size="13">
+<text x="20" y="24" fill="#5b6470" font-size="12">score: Q . K  (more similar = higher)</text>
+<text x="322" y="24" fill="#5b6470" font-size="12">softmax weights (sum=1)</text>
+<rect x="20" y="46" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="68" text-anchor="middle" fill="#1d2129">k1</text>
+<rect x="78" y="53" width="120" height="20" rx="3" fill="#2563eb"/>
+<text x="206" y="68" fill="#2563eb">4.0</text>
+<rect x="20" y="94" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="116" text-anchor="middle" fill="#1d2129">k2</text>
+<rect x="78" y="101" width="30" height="20" rx="3" fill="#2563eb"/>
+<text x="116" y="116" fill="#2563eb">1.0</text>
+<rect x="20" y="142" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="164" text-anchor="middle" fill="#1d2129">k3</text>
+<rect x="78" y="149" width="60" height="20" rx="3" fill="#2563eb"/>
+<text x="146" y="164" fill="#2563eb">2.0</text>
+<text x="266" y="112" fill="#c2630e" font-size="12">softmax</text>
+<text x="290" y="132" text-anchor="middle" fill="#c2630e" font-size="15">&#8595;</text>
+<rect x="322" y="46" width="58" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="351" y="68" text-anchor="middle" fill="#fff" font-weight="700">0.84</text>
+<rect x="322" y="94" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="116" text-anchor="middle" fill="#1d2129" font-weight="700">0.04</text>
+<rect x="322" y="142" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="164" text-anchor="middle" fill="#1d2129" font-weight="700">0.11</text>
+<rect x="494" y="70" width="72" height="98" rx="6" fill="#7c3aed" stroke="#7c3aed"/>
+<text x="530" y="115" text-anchor="middle" fill="#fff" font-size="12">context</text>
+<text x="530" y="133" text-anchor="middle" fill="#fff" font-size="12">vector</text>
+<line x1="384" y1="63" x2="492" y2="119" stroke="#c2630e" stroke-width="8.6" opacity="0.85"/>
+<text x="432" y="59" fill="#5b6470" font-size="10">*v1</text>
+<line x1="384" y1="111" x2="492" y2="119" stroke="#c2630e" stroke-width="1.4" opacity="0.85"/>
+<text x="432" y="124" fill="#5b6470" font-size="10">*v2</text>
+<line x1="384" y1="159" x2="492" y2="119" stroke="#c2630e" stroke-width="2.0" opacity="0.85"/>
+<text x="432" y="171" fill="#5b6470" font-size="10">*v3</text>
+</g>
+<text x="20" y="228" font-size="12" fill="#7c3aed" font-family="ui-monospace,monospace">out = 0.84*v1 + 0.04*v2 + 0.11*v3</text>
+</svg>
 </div>
 <p>An easily missed point: attention itself <strong>does not know word order</strong> - it only does similarity-weighted summing, so shuffling the same
 words and feeding them in gives the same result from pure attention. But language clearly cares about order ("dog bites man" vs "man bites dog").
@@ -555,6 +623,44 @@ ptr    = (<span class="kw">char</span>*)tensor-&gt;data + offset   <span class="
 ggml 允许某些维度上"<strong>一个元素当很多元素用</strong>"——靠的还是 stride 的小把戏：把那一维的 <span class="mono">nb</span> 设成 0，下标怎么变、
 地址都不动，于是同一个值被反复读取，看起来就像"复制"了一遍，实际上<strong>一个字节都没多占</strong>。这又是一次"改 nb 而不搬 data"的典型，
 和 view、转置一脉相承。</p>
+<p>就拿转置来说，把它摊开看最清楚：同一排内存，原张量横着读、转置竖着读，6 个值一个都没动。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次转置</b>：[3,2] 变 [2,3] 只是换了 ne/nb 怎么读这块内存，底层 6 个字节一个都没搬。</div>
+  <svg viewBox="0 0 560 268" width="100%" role="img" aria-label="转置示例：ne/nb 互换，内存不动">
+<g font-family="ui-monospace,monospace" font-size="14">
+<line x1="87" y1="60" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<line x1="381" y1="94" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<text x="20" y="20" fill="#5b6470" font-size="12">原始 ne=[3,2] nb=[4,12]</text>
+<text x="360" y="20" fill="#5b6470" font-size="12">转置 ne=[2,3] nb=[12,4]</text>
+<rect x="20" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="66" y="30" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="87" y="50" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="112" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="20" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="66" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="87" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="112" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="360" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="406" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="360" y="64" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="381" y="84" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="406" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="360" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="406" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="40" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="76" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<text x="76" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+0</text>
+<rect x="118" y="180" width="72" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="154" y="200" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<text x="154" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+4</text>
+<rect x="196" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="232" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<text x="232" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+8</text>
+<rect x="274" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="310" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<text x="310" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+12</text>
+<rect x="352" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="388" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<text x="388" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+16</text>
+<rect x="430" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="466" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<text x="466" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+20</text>
+<text x="40" y="170" fill="#5b6470" font-size="12">底层内存：6 个值一个都没搬（offset 单位：字节）</text>
+</g>
+<text x="40" y="262" fill="#c2630e" font-size="12" font-family="ui-monospace,monospace">同一个 b：在两种网格里位置不同，指向的却是同一块内存</text>
+</svg>
+</div>
 <p>一个最常见的 reshape 例子：把形状 <span class="mono">[n_embd, n_tokens]</span> 的激活，按多头注意力的需要"摊"成
 <span class="mono">[head_dim, n_head, n_tokens]</span>——元素总数没变（<span class="mono">n_embd = head_dim × n_head</span>），数据也没搬，
 只是<strong>重新解释了 ne/nb</strong>，就把"一个大向量"看成了"若干个头各自的小向量"。课 04 说的多头注意力里，大量这种"同一块数据、换个形状看"的操作，
@@ -762,6 +868,44 @@ big stride each time and misses the cache more often. Many operator implementati
 every row), ggml lets some dimension use "<strong>one element as many</strong>" - again via a stride trick: set that dim's <span class="mono">nb</span> to 0, so no
 matter how the index changes the address does not, and the same value is re-read, looking "copied" while taking <strong>not one extra byte</strong>. Another
 "change nb, don't move data" classic, of a piece with views and transpose.</p>
+<p>Take transpose itself, laid out in full: the same row of memory, read across as the original and down as the transpose - none of the 6 values moved.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one transpose</b>: [3,2] -&gt; [2,3] just changes how ne/nb read this memory; the 6 underlying bytes never move.</div>
+  <svg viewBox="0 0 560 268" width="100%" role="img" aria-label="transpose worked example">
+<g font-family="ui-monospace,monospace" font-size="14">
+<line x1="87" y1="60" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<line x1="381" y1="94" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<text x="20" y="20" fill="#5b6470" font-size="12">original ne=[3,2] nb=[4,12]</text>
+<text x="360" y="20" fill="#5b6470" font-size="12">transposed ne=[2,3] nb=[12,4]</text>
+<rect x="20" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="66" y="30" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="87" y="50" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="112" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="20" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="66" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="87" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="112" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="360" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="406" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="360" y="64" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="381" y="84" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="406" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="360" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="406" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="40" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="76" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<text x="76" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+0</text>
+<rect x="118" y="180" width="72" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="154" y="200" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<text x="154" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+4</text>
+<rect x="196" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="232" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<text x="232" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+8</text>
+<rect x="274" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="310" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<text x="310" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+12</text>
+<rect x="352" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="388" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<text x="388" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+16</text>
+<rect x="430" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="466" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<text x="466" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+20</text>
+<text x="40" y="170" fill="#5b6470" font-size="12">underlying memory: 6 values never move (offset in bytes)</text>
+</g>
+<text x="40" y="262" fill="#c2630e" font-size="12" font-family="ui-monospace,monospace">same b: different grid position, same memory cell</text>
+</svg>
+</div>
 <p>A very common reshape: take activations of shape <span class="mono">[n_embd, n_tokens]</span> and "fan them out" for multi-head attention into
 <span class="mono">[head_dim, n_head, n_tokens]</span> - the element count is unchanged (<span class="mono">n_embd = head_dim x n_head</span>) and no data moves; only
 ne/nb are <strong>reinterpreted</strong>, turning "one big vector" into "several heads' small vectors". The multi-head attention from lesson 04 is full of these
@@ -932,6 +1076,27 @@ for i in range(32):
 <p>顺带一问：块大小为什么常取 <strong>32</strong>？这又是一处权衡——块越小，scale 越贴合局部、精度越高，但要存的 scale 越多、压缩率下降；块越大则相反。
 32 是精度和体积之间一个经过实践检验的折中，也正好契合硬件上常见的并行宽度，算起来顺手。K-quant 用 256 的超块再细分，则是想"<strong>既要大块的高压缩率、又要小块的高精度</strong>"，
 试图鱼和熊掌兼得。</p>
+<p>把一组真实权重压一遍再还原，"有损但损得很小"就看得见了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次量化往返</b>：4 个权重压成 4-bit 再还原，看误差有多小（数字为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 原始权重</h5>
+      <div class="cellrow"><span class="vc">0.46</span><span class="vc">-0.12</span><span class="vc">0.31</span><span class="vc">-0.40</span></div>
+      <div class="tlab">块内 4 个 fp16</div></div>
+    <div class="op">找最大<br>定 scale</div>
+    <div class="stn"><h5>② scale d</h5>
+      <div class="cellrow"><span class="vc hot">-0.058</span></div>
+      <div class="tlab">d = max/-8 = 0.46/-8</div></div>
+    <div class="op">量化<br>round(x/d)+8</div>
+    <div class="stn"><h5>③ 4-bit 码</h5>
+      <div class="cellrow"><span class="vc">0</span><span class="vc">10</span><span class="vc">3</span><span class="vc">15</span></div>
+      <div class="tlab">存进 0..15</div></div>
+    <div class="op">反量化<br>(q-8)×d</div>
+    <div class="stn"><h5>④ 还原值</h5>
+      <div class="cellrow"><span class="vc blue">0.46</span><span class="vc blue">-0.12</span><span class="vc blue">0.29</span><span class="vc blue">-0.40</span></div>
+      <div class="tlab">误差 ≤ 0.02</div></div>
+  </div>
+</div>
 
 <h2>Q8_0 / K-quant：精度与压缩的取舍</h2>
 <p>Q4_0 只是量化大家庭里的一个。同样的"块 + scale"思路，换一换参数，就是不同档位：</p>
@@ -1130,6 +1295,27 @@ quantization error comes from.</p>
 scales, lowering the compression ratio; larger blocks do the reverse. 32 is a practice-tested compromise between accuracy and size, and it also matches common hardware
 parallel widths, so it computes nicely. K-quant's 256-weight super-block with sub-division then tries to get "<strong>both the high compression of big blocks and the
 high accuracy of small ones</strong>".</p>
+<p>Push a few real weights through and back, and "lossy but barely" becomes visible:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one quantization round-trip</b>: 4 weights squeezed to 4-bit and restored - see how small the error is (numbers illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) original weights</h5>
+      <div class="cellrow"><span class="vc">0.46</span><span class="vc">-0.12</span><span class="vc">0.31</span><span class="vc">-0.40</span></div>
+      <div class="tlab">4 fp16 in a block</div></div>
+    <div class="op">find max<br>set scale</div>
+    <div class="stn"><h5>(2) scale d</h5>
+      <div class="cellrow"><span class="vc hot">-0.058</span></div>
+      <div class="tlab">d = max/-8 = 0.46/-8</div></div>
+    <div class="op">quantize<br>round(x/d)+8</div>
+    <div class="stn"><h5>(3) 4-bit codes</h5>
+      <div class="cellrow"><span class="vc">0</span><span class="vc">10</span><span class="vc">3</span><span class="vc">15</span></div>
+      <div class="tlab">stored in 0..15</div></div>
+    <div class="op">dequant<br>(q-8)*d</div>
+    <div class="stn"><h5>(4) restored</h5>
+      <div class="cellrow"><span class="vc blue">0.46</span><span class="vc blue">-0.12</span><span class="vc blue">0.29</span><span class="vc blue">-0.40</span></div>
+      <div class="tlab">error &lt;= 0.02</div></div>
+  </div>
+</div>
 
 <h2>Q8_0 / K-quant: trading accuracy against compression</h2>
 <p>Q4_0 is just one member of the quantization family. The same "block + scale" idea, with different parameters, gives different tiers:</p>

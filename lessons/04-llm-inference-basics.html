@@ -291,6 +291,27 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 .timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
   color: var(--blue); font-weight: 700; }
 .timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
 </style>
 </head><body>
 <div class="topbar">
@@ -363,6 +384,40 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <div class="card analogy">
   <div class="tag">🔌 生活类比</div>
   再把<strong>注意力到底在干嘛</strong>说透一点：它像在做一次"<strong>带权重的检索</strong>"。当前 token 拿着自己的 Query（一个"我想找什么"的提问），去和每个历史 token 的 Key（一个"我是什么"的标签）逐一匹配，越像就给越高的注意力权重；然后按这些权重，把各历史 token 的 Value（"我能提供的内容"）<strong>加权求和</strong>，汇成当前 token 的新表示。于是"<strong>理解上下文</strong>"被落实成了"<strong>该重点参考前文哪几个词</strong>"。这也再次说明：为什么注意力是 token 之间唯一的交流通道——只有在这里，一个 token 的输出才真正取决于<strong>别的</strong> token。
+</div>
+<p>把这套"检索"用一个具体例子走一遍：当前 token 给 3 个历史 token 打分，分数越高、softmax 之后的权重越大，最后按权重把它们的 Value 加权汇总成一个向量。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次注意力</b>：当前 token 拿 Q 给 3 个历史 token 打分 → softmax 成权重 → 按权重汇总它们的 V（数字为示意）。</div>
+  <svg viewBox="0 0 580 236" width="100%" role="img" aria-label="注意力计算示例">
+<g font-family="ui-monospace,monospace" font-size="13">
+<text x="20" y="24" fill="#5b6470" font-size="12">打分：Q &#183; K  (越像分越高)</text>
+<text x="322" y="24" fill="#5b6470" font-size="12">softmax 权重 (和=1)</text>
+<rect x="20" y="46" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="68" text-anchor="middle" fill="#1d2129">k1</text>
+<rect x="78" y="53" width="120" height="20" rx="3" fill="#2563eb"/>
+<text x="206" y="68" fill="#2563eb">4.0</text>
+<rect x="20" y="94" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="116" text-anchor="middle" fill="#1d2129">k2</text>
+<rect x="78" y="101" width="30" height="20" rx="3" fill="#2563eb"/>
+<text x="116" y="116" fill="#2563eb">1.0</text>
+<rect x="20" y="142" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="164" text-anchor="middle" fill="#1d2129">k3</text>
+<rect x="78" y="149" width="60" height="20" rx="3" fill="#2563eb"/>
+<text x="146" y="164" fill="#2563eb">2.0</text>
+<text x="266" y="112" fill="#c2630e" font-size="12">softmax</text>
+<text x="290" y="132" text-anchor="middle" fill="#c2630e" font-size="15">&#8595;</text>
+<rect x="322" y="46" width="58" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="351" y="68" text-anchor="middle" fill="#fff" font-weight="700">0.84</text>
+<rect x="322" y="94" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="116" text-anchor="middle" fill="#1d2129" font-weight="700">0.04</text>
+<rect x="322" y="142" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="164" text-anchor="middle" fill="#1d2129" font-weight="700">0.11</text>
+<rect x="494" y="70" width="72" height="98" rx="6" fill="#7c3aed" stroke="#7c3aed"/>
+<text x="530" y="115" text-anchor="middle" fill="#fff" font-size="12">上下文</text>
+<text x="530" y="133" text-anchor="middle" fill="#fff" font-size="12">向量</text>
+<line x1="384" y1="63" x2="492" y2="119" stroke="#c2630e" stroke-width="8.6" opacity="0.85"/>
+<text x="432" y="59" fill="#5b6470" font-size="10">&#183;v1</text>
+<line x1="384" y1="111" x2="492" y2="119" stroke="#c2630e" stroke-width="1.4" opacity="0.85"/>
+<text x="432" y="124" fill="#5b6470" font-size="10">&#183;v2</text>
+<line x1="384" y1="159" x2="492" y2="119" stroke="#c2630e" stroke-width="2.0" opacity="0.85"/>
+<text x="432" y="171" fill="#5b6470" font-size="10">&#183;v3</text>
+</g>
+<text x="20" y="228" font-size="12" fill="#7c3aed" font-family="ui-monospace,monospace">out = 0.84&#183;v1 + 0.04&#183;v2 + 0.11&#183;v3</text>
+</svg>
 </div>
 <p>还有个常被忽略的点：注意力本身<strong>并不知道词的先后顺序</strong>——它只是在做"按相似度加权汇总"，把同样几个词打乱顺序喂进去，
 纯注意力算出的结果竟然一样。可语言显然讲究语序（"狗咬人"和"人咬狗"天差地别）。<strong>位置信息</strong>就是为此补进来的：llama 系普遍用
@@ -618,6 +673,40 @@ into a token's vector; by the top, the last position's vector has distilled ever
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
   To make <strong>what attention does</strong> concrete: it is a kind of <strong>weighted retrieval</strong>. The current token holds a Query (a "what am I looking for" question), matches it against every historical token's Key (a "what am I" tag) - the better the match, the higher the attention weight - then takes a <strong>weighted sum</strong> of those tokens' Values (the "content I can offer") into its new representation. So "understanding context" becomes "which earlier words to lean on". This is also why attention is the only channel between tokens: only here does a token's output truly depend on <strong>other</strong> tokens.
+</div>
+<p>Walk this "retrieval" through one concrete example: the current token scores 3 history tokens; a higher score means a higher weight after softmax, and the Values get summed by those weights into one vector.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one attention step</b>: the current token's Q scores 3 history tokens -&gt; softmax to weights -&gt; weighted sum of their V (numbers illustrative).</div>
+  <svg viewBox="0 0 580 236" width="100%" role="img" aria-label="attention worked example">
+<g font-family="ui-monospace,monospace" font-size="13">
+<text x="20" y="24" fill="#5b6470" font-size="12">score: Q . K  (more similar = higher)</text>
+<text x="322" y="24" fill="#5b6470" font-size="12">softmax weights (sum=1)</text>
+<rect x="20" y="46" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="68" text-anchor="middle" fill="#1d2129">k1</text>
+<rect x="78" y="53" width="120" height="20" rx="3" fill="#2563eb"/>
+<text x="206" y="68" fill="#2563eb">4.0</text>
+<rect x="20" y="94" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="116" text-anchor="middle" fill="#1d2129">k2</text>
+<rect x="78" y="101" width="30" height="20" rx="3" fill="#2563eb"/>
+<text x="116" y="116" fill="#2563eb">1.0</text>
+<rect x="20" y="142" width="46" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="164" text-anchor="middle" fill="#1d2129">k3</text>
+<rect x="78" y="149" width="60" height="20" rx="3" fill="#2563eb"/>
+<text x="146" y="164" fill="#2563eb">2.0</text>
+<text x="266" y="112" fill="#c2630e" font-size="12">softmax</text>
+<text x="290" y="132" text-anchor="middle" fill="#c2630e" font-size="15">&#8595;</text>
+<rect x="322" y="46" width="58" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="351" y="68" text-anchor="middle" fill="#fff" font-weight="700">0.84</text>
+<rect x="322" y="94" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="116" text-anchor="middle" fill="#1d2129" font-weight="700">0.04</text>
+<rect x="322" y="142" width="58" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="351" y="164" text-anchor="middle" fill="#1d2129" font-weight="700">0.11</text>
+<rect x="494" y="70" width="72" height="98" rx="6" fill="#7c3aed" stroke="#7c3aed"/>
+<text x="530" y="115" text-anchor="middle" fill="#fff" font-size="12">context</text>
+<text x="530" y="133" text-anchor="middle" fill="#fff" font-size="12">vector</text>
+<line x1="384" y1="63" x2="492" y2="119" stroke="#c2630e" stroke-width="8.6" opacity="0.85"/>
+<text x="432" y="59" fill="#5b6470" font-size="10">*v1</text>
+<line x1="384" y1="111" x2="492" y2="119" stroke="#c2630e" stroke-width="1.4" opacity="0.85"/>
+<text x="432" y="124" fill="#5b6470" font-size="10">*v2</text>
+<line x1="384" y1="159" x2="492" y2="119" stroke="#c2630e" stroke-width="2.0" opacity="0.85"/>
+<text x="432" y="171" fill="#5b6470" font-size="10">*v3</text>
+</g>
+<text x="20" y="228" font-size="12" fill="#7c3aed" font-family="ui-monospace,monospace">out = 0.84*v1 + 0.04*v2 + 0.11*v3</text>
+</svg>
 </div>
 <p>An easily missed point: attention itself <strong>does not know word order</strong> - it only does similarity-weighted summing, so shuffling the same
 words and feeding them in gives the same result from pure attention. But language clearly cares about order ("dog bites man" vs "man bites dog").
