@@ -421,6 +421,47 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
   <div class="tag">🔬 细节 / 源码对应</div>
   正因为状态是逐步推进的，<strong>同一个 token 在不同位置合不合法是不同的</strong>。比如在 JSON 里，刚写完 <span class="mono">{</span> 时只允许引号（开始一个键）或 <span class="mono">}</span>（空对象），而写完一个完整键值对后又只允许逗号或 <span class="mono">}</span>。grammar 每一步都根据当前状态算出这个"此刻合法集"，再据此掩码。约束不是一成不变的，而是<strong>随上下文动态变化</strong>的。
 </div>
+<p>拿生成 {"a":1} 这个最小例子走一遍：每到一步，语法只放行合法的那个字符、把其它候选砸成 -inf，选完再推进状态机——逐字符把输出锁在合法的轨道上。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次语法约束</b>：逐字符生成 {"a":1}，每步把非法 token 砸成 -inf、只放行合法的，并推进状态机。</div>
+  <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="语法约束状态机示例">
+<g font-family="ui-monospace,monospace" font-size="13">
+<line x1="91" y1="61" x2="125" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 125 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="110" y="40" text-anchor="middle" fill="#5b6470" font-size="13">{</text>
+<line x1="201" y1="61" x2="235" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 235 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="220" y="40" text-anchor="middle" fill="#5b6470" font-size="13">"a"</text>
+<line x1="311" y1="61" x2="345" y2="61" stroke="#c2630e" stroke-width="2.6"/>
+<path d="M 345 61 l -7 -3.5 v 7 z" fill="#c2630e"/>
+<text x="330" y="40" text-anchor="middle" fill="#c2630e" font-size="13">:</text>
+<line x1="421" y1="61" x2="455" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 455 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="440" y="40" text-anchor="middle" fill="#5b6470" font-size="13">1</text>
+<line x1="531" y1="61" x2="565" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 565 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="550" y="40" text-anchor="middle" fill="#5b6470" font-size="13">}</text>
+<rect x="19" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="55" y="66" text-anchor="middle" fill="#1d2129" font-size="12">起始</text>
+<rect x="129" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="165" y="66" text-anchor="middle" fill="#1d2129" font-size="12">进对象</text>
+<rect x="239" y="46" width="72" height="30" rx="14" fill="#c2630e" stroke="#c2630e"/><text x="275" y="66" text-anchor="middle" fill="#fff" font-size="12">得键</text>
+<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">得值</text>
+<rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">待收尾</text>
+<rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">完成</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">此刻状态 need ':'，候选 token 谁能留下：</text>
+<rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
+<text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">放行</text>
+<rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
+<line x1="99" y1="168" x2="137" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="118" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="159" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="188" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">}</text>
+<line x1="169" y1="168" x2="207" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="188" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="229" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="258" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">5</text>
+<line x1="239" y1="168" x2="277" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="258" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<text x="313" y="174" fill="#5b6470" font-size="12">&#8594; 推进状态</text>
+</g></svg>
+</div>
 <p>有人会问：每步都遍历几万个候选去判断合不合法，不会很慢吗？实现上做了不少优化——把文法预编译成高效结构、对候选按规则栈快速筛、缓存中间结果等等。多数情况下这点开销相对模型的一次前向（L17）几乎可忽略。所以你尽管放心用语法约束，它换来的可靠性，远大于那一点点代价。</p>
 <p>举个落地的例子：很多"让大模型当后端"的应用，都靠语法约束保证它返回能被程序直接吃下的 JSON。你定义好返回结构的文法、挂上 grammar 采样器，模型这一头就成了一个"永远输出合法结构"的可靠组件。没有它，你得在模型和程序之间塞一层解析、纠错、重试的胶水；有了它，那层胶水基本可以省掉。这就是约束带来的实打实的工程价值。</p>
 
@@ -626,6 +667,47 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 <div class="card detail">
   <div class="tag">🔬 Details / source</div>
   Because the state advances step by step, <strong>the same token can be legal or not at different positions</strong>. In JSON, for instance, right after <span class="mono">{</span> only a quote (starting a key) or <span class="mono">}</span> (empty object) is allowed, while after a complete key-value pair only a comma or <span class="mono">}</span> is. The grammar computes this "legal set right now" from the current state each step and masks accordingly. The constraint is not fixed but <strong>changes dynamically with context</strong>.
+</div>
+<p>Walk the smallest example, generating {"a":1}, step by step: at each step the grammar lets through only the legal next character, slams every other candidate to -inf, then advances the state machine - locking the output onto the legal track character by character.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one grammar constraint</b>: generating {"a":1} char by char - each step masks illegal tokens to -inf, allows only the legal one, and advances the state machine.</div>
+  <svg viewBox="0 0 660 250" width="100%" role="img" aria-label="grammar constraint state machine">
+<g font-family="ui-monospace,monospace" font-size="13">
+<line x1="91" y1="61" x2="125" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 125 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="110" y="40" text-anchor="middle" fill="#5b6470" font-size="13">{</text>
+<line x1="201" y1="61" x2="235" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 235 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="220" y="40" text-anchor="middle" fill="#5b6470" font-size="13">"a"</text>
+<line x1="311" y1="61" x2="345" y2="61" stroke="#c2630e" stroke-width="2.6"/>
+<path d="M 345 61 l -7 -3.5 v 7 z" fill="#c2630e"/>
+<text x="330" y="40" text-anchor="middle" fill="#c2630e" font-size="13">:</text>
+<line x1="421" y1="61" x2="455" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 455 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="440" y="40" text-anchor="middle" fill="#5b6470" font-size="13">1</text>
+<line x1="531" y1="61" x2="565" y2="61" stroke="#9aa6b2" stroke-width="1.4"/>
+<path d="M 565 61 l -7 -3.5 v 7 z" fill="#9aa6b2"/>
+<text x="550" y="40" text-anchor="middle" fill="#5b6470" font-size="13">}</text>
+<rect x="19" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="55" y="66" text-anchor="middle" fill="#1d2129" font-size="12">start</text>
+<rect x="129" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="165" y="66" text-anchor="middle" fill="#1d2129" font-size="12">obj</text>
+<rect x="239" y="46" width="72" height="30" rx="14" fill="#c2630e" stroke="#c2630e"/><text x="275" y="66" text-anchor="middle" fill="#fff" font-size="12">key</text>
+<rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">val</text>
+<rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">end</text>
+<rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">done</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">state need ':' - which candidate tokens survive:</text>
+<rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
+<text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">keep</text>
+<rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
+<line x1="99" y1="168" x2="137" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="118" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="159" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="188" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">}</text>
+<line x1="169" y1="168" x2="207" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="188" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<rect x="229" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="258" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">5</text>
+<line x1="239" y1="168" x2="277" y2="168" stroke="#9aa6b2" stroke-width="2"/>
+<text x="258" y="202" text-anchor="middle" fill="#9aa6b2" font-size="11">-inf</text>
+<text x="313" y="174" fill="#5b6470" font-size="12">&#8594; advance</text>
+</g></svg>
 </div>
 <p>One might ask: scanning tens of thousands of candidates each step to judge legality, is that not slow? The implementation does plenty of optimization - precompiling the grammar into efficient structures, quickly filtering candidates by the rule stacks, caching intermediate results, and so on. In most cases this cost is nearly negligible against the model's one forward pass (L17). So use grammar constraints freely; the reliability they buy far outweighs the small price.</p>
 <p>A concrete grounded example: many "let the large model be a backend" applications rely on grammar constraints to guarantee it returns JSON a program can consume directly. Define the grammar for the return structure, attach the grammar sampler, and the model end becomes a reliable component that "always outputs a legal structure". Without it, you must stuff a layer of parse, correct, and retry glue between the model and the program; with it, that glue layer can largely be dropped. This is the concrete engineering value a constraint brings.</p>
