@@ -375,7 +375,23 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     <span class="cm">// head(): 滚动写指针</span>
 };</pre>
 <p>注意 <span class="mono">llama_kv_cache</span> 派生自 <span class="mono">llama_memory_i</span>——这个基接口很重要，后面讲变体时会回到它。每个 cell 带 <span class="mono">pos</span>，是因为注意力的 rope（L16）和因果掩码都要知道"这个 K/V 是第几位的"；每个 cell 带 <span class="mono">seq_id</span>，是为了支持多序列（下面讲）。</p>
-<p>每步 decode，<span class="mono">build_attn</span>（L16）算出新 token 的 K/V 后，就写进 <span class="mono">head</span> 指的那个 cell、把 head 往后挪一格；做注意力时，再从所有属于本序列的 cell 里读出历史 K/V。所以 KV cache 不是被动的存储，而是<strong>每步都在增长、每步都被读取</strong>的活动记忆。</p>
+<p>每步 decode，<span class="mono">build_attn</span>（L16）算出新 token 的 K/V 后，就写进 <span class="mono">head</span> 指的那个 cell、把 head 往后挪一格；做注意力时，再从所有属于本序列的 cell 里读出历史 K/V。所以 KV cache 不是被动的存储，而是<strong>每步都在增长、每步都被读取</strong>的活动记忆。把连续几步画出来，"只新算一格"就一目了然：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪 KV cache 增长</b>：每生成一个 token 只新算一格 K/V，前面的原样复用、不重算（K0、K1… 表示各位置的 K/V）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 第 n 步</h5>
+      <div class="cellrow"><span class="vc">K0</span><span class="vc">K1</span><span class="vc">K2</span></div>
+      <div class="tlab">已有 3 格</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>② 第 n+1 步</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc hot">K3</span></div>
+      <div class="tlab">只新算 K3，前 3 格复用</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>③ 第 n+2 步</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc dim">K3</span><span class="vc hot">K4</span></div>
+      <div class="tlab">只新算 K4，前 4 格复用</div></div>
+  </div>
+</div>
 <p>cell 和 token 是<strong>一一对应</strong>的：序列里第 i 个 token，就占缓存里某个 cell，存着它（其实是每一层都有一份）的 K 和 V。所以"缓存有多大"约等于"能记多少个 token 的 K/V"，这也是 <span class="mono">n_ctx</span>（上下文长度，L17）的含义——它就是缓存能容纳的 cell 数上限。</p>
 <div class="card detail">
   <div class="tag">🔬 细节 / 源码对应</div>
@@ -571,7 +587,23 @@ how multiple sequences coexist, and the various <strong>variants</strong> for lo
     <span class="cm">// head(): rolling write pointer</span>
 };</pre>
 <p>Note <span class="mono">llama_kv_cache</span> derives from <span class="mono">llama_memory_i</span> - this base interface matters, and we return to it for the variants. Each cell carries <span class="mono">pos</span> because attention's rope (L16) and causal mask both need to know "which position this K/V is"; each cell carries <span class="mono">seq_id</span> to support multiple sequences (below).</p>
-<p>Each decode step, after <span class="mono">build_attn</span> (L16) computes the new token's K/V, it writes them into the cell <span class="mono">head</span> points to and advances head by one; for attention, it reads historical K/V from all cells belonging to this sequence. So the KV cache is not passive storage but an active memory that <strong>grows every step and is read every step</strong>.</p>
+<p>Each decode step, after <span class="mono">build_attn</span> (L16) computes the new token's K/V, it writes them into the cell <span class="mono">head</span> points to and advances head by one; for attention, it reads historical K/V from all cells belonging to this sequence. So the KV cache is not passive storage but an active memory that <strong>grows every step and is read every step</strong>. Draw a few consecutive steps and "only one new cell" becomes obvious:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing KV-cache growth</b>: each token computes just one new K/V cell; earlier cells are reused as-is, not recomputed (K0, K1... are each position's K/V).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) step n</h5>
+      <div class="cellrow"><span class="vc">K0</span><span class="vc">K1</span><span class="vc">K2</span></div>
+      <div class="tlab">3 cells so far</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>(2) step n+1</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc hot">K3</span></div>
+      <div class="tlab">only K3 is new, first 3 reused</div></div>
+    <div class="op">+1 token</div>
+    <div class="stn"><h5>(3) step n+2</h5>
+      <div class="cellrow"><span class="vc dim">K0</span><span class="vc dim">K1</span><span class="vc dim">K2</span><span class="vc dim">K3</span><span class="vc hot">K4</span></div>
+      <div class="tlab">only K4 is new, first 4 reused</div></div>
+  </div>
+</div>
 <p>Cells and tokens are <strong>one-to-one</strong>: the i-th token in a sequence occupies some cell in the cache, storing its (one per layer, actually) K and V. So "how big the cache is" roughly equals "how many tokens' K/V it can remember" - which is the meaning of <span class="mono">n_ctx</span> (context length, L17): the upper bound on cells the cache can hold.</p>
 <div class="card detail">
   <div class="tag">🔬 Details / source</div>
