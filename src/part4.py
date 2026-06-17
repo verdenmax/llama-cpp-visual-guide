@@ -3517,6 +3517,34 @@ LESSON_24 = {
   <div class="node"><div class="nt">+ W·x</div><div class="nd">加到基础输出</div></div>
 </div>
 <p>具体怎么算？设原权重是 W、输入是 x。基础输出就是 W·x（一次普通的矩阵乘）。LoRA 在它旁边加一条<strong>低秩支路</strong>：先用 A 把 x 降到一个很低的维度（秩 r），再用 B 升回原来的维度，得到 B·(A·x)；乘上一个缩放系数 scale，加到 W·x 上。最终输出 = W·x + scale·B·A·x。</p>
+<p>把这条公式按"维度"画出来，低秩瓶颈就一目了然：主干 W·x 维度不变；旁路先被 A 压到很窄的秩 r，再被 B 升回来，乘 scale 加回主干。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次 LoRA 前向</b>：主干 W·x 不动，旁路把 x 压到低秩 r 再升回来、乘 scale 加回去（维度为示意）。</div>
+  <svg viewBox="0 0 660 226" width="100%" role="img" aria-label="LoRA 前向示例：低秩旁路">
+<g font-family="ui-monospace,monospace">
+<text x="150" y="20" fill="#5b6470" font-size="11">主干 W&#183;x（冻结，不更新）</text>
+<text x="150" y="206" fill="#5b6470" font-size="11">旁路：把 x 压到低秩 r 再升回来</text>
+<rect x="20" y="82" width="46" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="117" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="43" y="155" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="100" x2="147" y2="67" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 150 66 L 144 73 L 141 65 z" fill="#9aa6b2"/>
+<rect x="150" y="46" width="60" height="40" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="180" y="71" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W</text><text x="180" y="99" text-anchor="middle" fill="#5b6470" font-size="10">冻结</text>
+<line x1="210" y1="66" x2="247" y2="72" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 250 72 L 241 75 L 243 67 z" fill="#9aa6b2"/>
+<rect x="250" y="46" width="58" height="60" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="279" y="81" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W&#183;x</text><text x="279" y="119" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="124" x2="123" y2="149" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 126 150 L 117 150 L 120 143 z" fill="#9aa6b2"/>
+<rect x="126" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="149" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">A</text><text x="149" y="197" text-anchor="middle" fill="#5b6470" font-size="10">4-&gt;r</text>
+<line x1="172" y1="167" x2="203" y2="175" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 206 176 L 197 178 L 199 170 z" fill="#9aa6b2"/>
+<rect x="206" y="168" width="44" height="18" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="228" y="182" text-anchor="middle" fill="#fff" font-weight="700" font-size="12">r=1</text>
+<line x1="250" y1="176" x2="283" y2="168" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 286 167 L 279 173 L 277 165 z" fill="#9aa6b2"/>
+<rect x="286" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="309" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">B</text><text x="309" y="197" text-anchor="middle" fill="#5b6470" font-size="10">r-&gt;4</text>
+<line x1="332" y1="160" x2="370" y2="134" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 372 132 L 368 140 L 363 133 z" fill="#9aa6b2"/>
+<rect x="372" y="102" width="56" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="400" y="137" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">[4]</text>
+<line x1="308" y1="76" x2="467" y2="98" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 98 L 462 101 L 463 93 z" fill="#9aa6b2"/>
+<line x1="428" y1="132" x2="467" y2="109" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 108 L 465 115 L 461 108 z" fill="#9aa6b2"/>
+<text x="452" y="150" text-anchor="middle" fill="#c2630e" font-size="10">&#215;scale</text>
+<rect x="470" y="84" width="40" height="40" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="490" y="109" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="18">+</text>
+<line x1="510" y1="104" x2="553" y2="104" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 556 104 L 548 108 L 548 100 z" fill="#9aa6b2"/>
+<rect x="556" y="74" width="58" height="60" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="585" y="109" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y</text><text x="585" y="147" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+</g></svg>
+</div>
 <pre class="code"><span class="cm">// 简化自 src/llama-graph.cpp build_lora_mm</span>
 res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// 基础权重输出 W·x</span>
 <span class="kw">for</span> (lora : active_adapters) {
@@ -3663,6 +3691,34 @@ All through Part 4, you can now load, infer, tokenize, sample, apply chat format
   <div class="node"><div class="nt">+ W*x</div><div class="nd">add to base output</div></div>
 </div>
 <p>How exactly is it computed? Let the original weight be W and the input x. The base output is W*x (an ordinary matmul). LoRA adds a <strong>low-rank branch</strong> alongside it: first A drops x to a very low dimension (rank r), then B lifts it back to the original dimension, giving B*(A*x); multiply by a scale factor and add onto W*x. The final output = W*x + scale*B*A*x.</p>
+<p>Draw this formula by "dimension" and the low-rank bottleneck pops out: the base W*x keeps its width; the bypass is first squeezed by A to a narrow rank r, lifted back by B, scaled, and added to the base.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one LoRA forward</b>: the frozen W*x stays; the bypass squeezes x to low rank r, lifts it back, scales it, and adds it in (dims illustrative).</div>
+  <svg viewBox="0 0 660 226" width="100%" role="img" aria-label="LoRA forward worked example">
+<g font-family="ui-monospace,monospace">
+<text x="150" y="20" fill="#5b6470" font-size="11">base W*x  (frozen, not trained)</text>
+<text x="150" y="206" fill="#5b6470" font-size="11">bypass: squeeze x to low rank r, lift back</text>
+<rect x="20" y="82" width="46" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="43" y="117" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="43" y="155" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="100" x2="147" y2="67" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 150 66 L 144 73 L 141 65 z" fill="#9aa6b2"/>
+<rect x="150" y="46" width="60" height="40" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="180" y="71" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W</text><text x="180" y="99" text-anchor="middle" fill="#5b6470" font-size="10">frozen</text>
+<line x1="210" y1="66" x2="247" y2="72" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 250 72 L 241 75 L 243 67 z" fill="#9aa6b2"/>
+<rect x="250" y="46" width="58" height="60" rx="5" fill="#e7edf5" stroke="#2563eb"/><text x="279" y="81" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W*x</text><text x="279" y="119" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+<line x1="66" y1="124" x2="123" y2="149" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 126 150 L 117 150 L 120 143 z" fill="#9aa6b2"/>
+<rect x="126" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="149" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">A</text><text x="149" y="197" text-anchor="middle" fill="#5b6470" font-size="10">4-&gt;r</text>
+<line x1="172" y1="167" x2="203" y2="175" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 206 176 L 197 178 L 199 170 z" fill="#9aa6b2"/>
+<rect x="206" y="168" width="44" height="18" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="228" y="182" text-anchor="middle" fill="#fff" font-weight="700" font-size="12">r=1</text>
+<line x1="250" y1="176" x2="283" y2="168" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 286 167 L 279 173 L 277 165 z" fill="#9aa6b2"/>
+<rect x="286" y="150" width="46" height="34" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="309" y="172" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">B</text><text x="309" y="197" text-anchor="middle" fill="#5b6470" font-size="10">r-&gt;4</text>
+<line x1="332" y1="160" x2="370" y2="134" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 372 132 L 368 140 L 363 133 z" fill="#9aa6b2"/>
+<rect x="372" y="102" width="56" height="60" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="400" y="137" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">[4]</text>
+<line x1="308" y1="76" x2="467" y2="98" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 98 L 462 101 L 463 93 z" fill="#9aa6b2"/>
+<line x1="428" y1="132" x2="467" y2="109" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 470 108 L 465 115 L 461 108 z" fill="#9aa6b2"/>
+<text x="452" y="150" text-anchor="middle" fill="#c2630e" font-size="10">*scale</text>
+<rect x="470" y="84" width="40" height="40" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="490" y="109" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="18">+</text>
+<line x1="510" y1="104" x2="553" y2="104" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 556 104 L 548 108 L 548 100 z" fill="#9aa6b2"/>
+<rect x="556" y="74" width="58" height="60" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="585" y="109" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y</text><text x="585" y="147" text-anchor="middle" fill="#5b6470" font-size="10">[4]</text>
+</g></svg>
+</div>
 <pre class="code"><span class="cm">// simplified from src/llama-graph.cpp build_lora_mm</span>
 res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class="cm">// base weight output W*x</span>
 <span class="kw">for</span> (lora : active_adapters) {
