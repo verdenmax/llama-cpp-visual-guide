@@ -416,6 +416,27 @@ ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, ad
 text = <span class="st">""</span>
 <span class="kw">for</span> id <span class="kw">in</span> ids:
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># 逐 token 还原拼接</span></pre>
+<p>把上面这段 "Hello" 真正走一遍，编码就具体了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次分词</b>：一句话怎么变成 token id；遇到词表里没有的字符（生僻字、emoji）就按 UTF-8 拆成字节（id 为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 输入串</h5>
+      <div class="cellrow"><span class="vc">"Hello!"</span></div>
+      <div class="tlab">一句话</div></div>
+    <div class="op">分词</div>
+    <div class="stn"><h5>② 切成片</h5>
+      <div class="cellrow"><span class="vc">Hello</span><span class="vc">!</span></div>
+      <div class="tlab">命中词表的片段</div></div>
+    <div class="op">查表<br>&rarr; id</div>
+    <div class="stn"><h5>③ token id</h5>
+      <div class="cellrow"><span class="vc blue">9906</span><span class="vc blue">30</span></div>
+      <div class="tlab">每片一个 id</div></div>
+    <div class="op">词表外<br>UTF-8</div>
+    <div class="stn"><h5>④ 字节回退</h5>
+      <div class="cellrow"><span class="vc">&lt;0xF0&gt;</span><span class="vc">&lt;0x9F&gt;</span><span class="vc">&lt;0x8E&gt;</span><span class="vc">&lt;0x89&gt;</span></div>
+      <div class="tlab">生僻 emoji = 4 个字节 token</div></div>
+  </div>
+</div>
 <p><span class="mono">tokenize</span> 时可以让它自动前置 BOS（由前面那个 <span class="mono">get_add_bos()</span> 标志控制）；解码时则逐个 token 调 <span class="mono">token_to_piece</span> 把片段拼回去。注意字节 token 还原时要按 UTF-8 把几个字节<strong>拼起来</strong>才是一个完整字符——这也是为什么解码要逐步累积、而不是"一个 token 一个字"。</p>
 <p>特殊 token 之所以重要，是因为它们承载着"文字之外"的结构信息。一段对话里，谁说的、一轮在哪结束、要不要停下，都靠这些标记界定（后面 L22 的对话模板，正是在大量使用它们）。可以把普通 token 看成"内容"、特殊 token 看成"标点和段落标记"——少了后者，模型就分不清对话的骨架。</p>
 <div class="card detail">
@@ -620,6 +641,27 @@ ids = vocab.<span class="fn">tokenize</span>(<span class="st">"Hello"</span>, ad
 text = <span class="st">""</span>
 <span class="kw">for</span> id <span class="kw">in</span> ids:
     text += vocab.<span class="fn">token_to_piece</span>(id)               <span class="cm"># rebuild piece by piece</span></pre>
+<p>Walk that "Hello" through it for real and encoding gets concrete:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one tokenization</b>: how a sentence becomes token ids; a char not in the vocab (rare glyph, emoji) splits into UTF-8 bytes (ids illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) input</h5>
+      <div class="cellrow"><span class="vc">"Hello!"</span></div>
+      <div class="tlab">a sentence</div></div>
+    <div class="op">tokenize</div>
+    <div class="stn"><h5>(2) pieces</h5>
+      <div class="cellrow"><span class="vc">Hello</span><span class="vc">!</span></div>
+      <div class="tlab">in-vocab pieces</div></div>
+    <div class="op">look up<br>-&gt; id</div>
+    <div class="stn"><h5>(3) token id</h5>
+      <div class="cellrow"><span class="vc blue">9906</span><span class="vc blue">30</span></div>
+      <div class="tlab">one id per piece</div></div>
+    <div class="op">OOV<br>UTF-8</div>
+    <div class="stn"><h5>(4) byte fallback</h5>
+      <div class="cellrow"><span class="vc">&lt;0xF0&gt;</span><span class="vc">&lt;0x9F&gt;</span><span class="vc">&lt;0x8E&gt;</span><span class="vc">&lt;0x89&gt;</span></div>
+      <div class="tlab">rare emoji = 4 byte tokens</div></div>
+  </div>
+</div>
 <p><span class="mono">tokenize</span> can auto-prepend BOS (controlled by that <span class="mono">get_add_bos()</span> flag); decoding then calls <span class="mono">token_to_piece</span> per token to stitch pieces back. Note that restoring byte tokens means <strong>joining</strong> several bytes by UTF-8 to form one complete character - which is why decoding accumulates step by step, not "one token, one character".</p>
 <p>Special tokens matter because they carry structural information "beyond the text". In a conversation, who spoke, where a turn ends, whether to stop - all are delimited by these markers (L22's chat template, a later lesson, uses them heavily). Think of ordinary tokens as "content" and special tokens as "punctuation and paragraph marks" - without the latter, the model cannot tell the conversation's skeleton.</p>
 <div class="card detail">
