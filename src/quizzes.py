@@ -1931,6 +1931,67 @@ QUIZZES = {
             },
         ],
     },
+    "30-eval-bench.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "困惑度（perplexity）怎么算，越高好还是越低好？",
+                    "en": "How is perplexity computed, and is higher or lower better?",
+                },
+                "opts": [
+                    {"zh": "PPL = exp(平均负 log 概率)，越低越好（模型对真实文本越不“惊讶”）", "en": "PPL = exp(mean negative log probability), lower is better (the model is less 'surprised' by real text)"},
+                    {"zh": "PPL = 平均 token 数，越高越好", "en": "PPL = average token count, higher is better"},
+                    {"zh": "PPL = 每秒生成 token 数，越高越好", "en": "PPL = tokens generated per second, higher is better"},
+                    {"zh": "PPL = 模型参数量，越低越好", "en": "PPL = the model's parameter count, lower is better"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "困惑度对每步取模型给“真实下一词”的负 log 概率（惊讶度），求平均再取 exp：PPL = exp(平均负 log 概率)。越低表示模型对真实文本越自信、预测越准，所以越低越好。它量的是质量，不是速度（速度由 llama-bench 量）。",
+                    "en": "Perplexity takes, per step, the model's negative log probability of the 'real next word' (surprise), averages it, then exp's: PPL = exp(mean negative log prob). Lower means the model is more confident and accurate on real text, so lower is better. It measures quality, not speed (speed is llama-bench).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-bench 的 pp 和 tg 分别量什么？",
+                    "en": "What do llama-bench's pp and tg each measure?",
+                },
+                "opts": [
+                    {"zh": "pp = prefill（读 prompt）吞吐；tg = decode（逐字生成）吞吐", "en": "pp = prefill (reading the prompt) throughput; tg = decode (token-by-token generation) throughput"},
+                    {"zh": "pp = 困惑度；tg = 准确率", "en": "pp = perplexity; tg = accuracy"},
+                    {"zh": "pp = 参数量；tg = 模型体积", "en": "pp = parameter count; tg = model size"},
+                    {"zh": "pp 和 tg 是同一个数的两种叫法", "en": "pp and tg are two names for the same number"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "pp（prompt processing，n_prompt）测一次性喂入 prompt 的 prefill 吞吐，并行度高、通常很快；tg（token generation，n_gen）测逐字 decode 的吞吐，每步依赖上一步、通常慢一截。两者性能特征不同（prefill 算力密集、decode 访存密集），所以要分开测。",
+                    "en": "pp (prompt processing, n_prompt) measures the prefill throughput of feeding the prompt at once - highly parallel, usually fast; tg (token generation, n_gen) measures token-by-token decode throughput - each step waits on the last, usually slower. Their performance characteristics differ (prefill compute-bound, decode memory-bound), so they are measured separately.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "选量化档为什么要同时看 ppl 和 bench？",
+                    "en": "Why look at both ppl and bench when choosing a quant level?",
+                },
+                "opts": [
+                    {"zh": "因为这是“质量 vs 速度”的取舍——只看一头会被误导", "en": "because it is a 'quality vs speed' trade-off - looking at only one misleads"},
+                    {"zh": "因为 ppl 和 bench 其实是同一个指标", "en": "because ppl and bench are actually the same metric"},
+                    {"zh": "因为 bench 能算出准确的困惑度", "en": "because bench can compute exact perplexity"},
+                    {"zh": "因为只有两个都看才能下载模型", "en": "because you can only download a model if you look at both"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "量化是一笔交易：换来更小体积和更快速度（bench 量到），代价是质量略降（ppl 量到）。只看速度会一路压到模型变笨，只看质量又享受不到量化的好处。把质量（ppl，越低越好）和速度（bench，越高越好）并排看，才能判断这笔交易划不划算。",
+                    "en": "Quantization is a trade: you gain smaller size and more speed (measured by bench) at the cost of slightly lower quality (measured by ppl). Speed only leads you to compress until the model is dumb; quality only and you miss quantization's gains. Reading quality (ppl, lower better) and speed (bench, higher better) side by side is the only way to judge whether the trade is worth it.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "你把一个模型从 fp16 量化到 Q4_K_M，发现 PPL 从 6.0 涨到 6.2、tg 吞吐翻倍。结合“两把尺子”和上一课的量化知识，说说你会不会采用这个量化档？还需要哪些信息才能更好地决定？",
+                "en": "You quantize a model from fp16 to Q4_K_M and find PPL rises from 6.0 to 6.2 while tg throughput doubles. Using the 'two rulers' and last lesson's quantization knowledge, would you adopt this quant level? What more information would help you decide better?",
+            },
+        ],
+    },
 }
 
 

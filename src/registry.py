@@ -41,4 +41,5 @@ CONTENT = {
     "27-llama-cli.html": part5.LESSON_27,
     "28-llama-server.html": part5.LESSON_28,
     "29-quantize-tool.html": part5.LESSON_29,
+    "30-eval-bench.html": part5.LESSON_30,
 }

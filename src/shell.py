@@ -104,6 +104,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("29-quantize-tool.html", "quantize 工具", "The quantize tool",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("30-eval-bench.html", "评测与基准", "Evaluation & benchmarks",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -596,6 +598,8 @@ SUBTITLES = {
                              "HTTP + OpenAI-compatible + slot continuous batching: the engine as a service"),
     "29-quantize-tool.html": ("llama-quantize + imatrix：把模型压小，并用重要性矩阵保质量",
                               "llama-quantize + imatrix: shrink the model, keep quality via an importance matrix"),
+    "30-eval-bench.html": ("perplexity 量质量、llama-bench 量速度：选模型/量化档的两把尺子",
+                           "perplexity for quality, llama-bench for speed: the two rulers for choosing models/quants"),
 }
 
 

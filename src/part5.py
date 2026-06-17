@@ -1558,3 +1558,246 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
 </div>
 """,
 }
+
+LESSON_30 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+模型跑起来了（L25-L28），也压小了（L29）——可你怎么知道一个量化档位、一套配置到底"好不好"？光靠感觉是不够的，你需要两把<strong>尺子</strong>：一把量<strong>质量</strong>（困惑度 perplexity），一把量<strong>速度</strong>（llama-bench）。这一课讲它们各量什么、怎么读，并给整个第五部分收个尾。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这两把尺子正好对上量化那笔"交易"：L29 里你用一点质量换来了体积和速度，而这一课就是教你怎么把"换走的质量"和"换来的速度"都量化出来，从而做出明智的选择。没有度量，所谓"优化"就只是凭感觉瞎猜；有了度量，你才能拿数字说话。</p>
+<p style="color:var(--muted)">两把尺子对应两个工具：<span class="mono">tools/perplexity</span>（算困惑度，量质量）和 <span class="mono">tools/llama-bench</span>（测吞吐，量速度）。我们先看 perplexity 怎么把"模型好不好"变成一个可比的数字，再看 llama-bench 怎么把"快不快"拆成两类基准，最后把两把尺子合起来，看它们如何指导你选模型、选量化档。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这一课的核心，是"<strong>把模糊的好坏，变成可比的数字</strong>"。在做任何工程优化时，最危险的就是"我觉得这样更好"——没有数字，你既说不清好了多少，也不知道代价是什么。perplexity 和 llama-bench 就是给"语言模型好不好用"这件事立的两根标尺：一根量它<strong>有多准</strong>，一根量它<strong>有多快</strong>。有了这两个数，"该选哪个量化档""加几个线程划算""换个后端值不值"这些问题，就从争论变成了测量。这也是整个第五部分的落脚点：前面讲了怎么调用、怎么跑、怎么压，这一课讲怎么<strong>衡量</strong>——能衡量，才能持续改进。再强调一遍这件事的分量：没有度量的优化，本质上是一种自我欺骗——你改了点东西、感觉好像快了或好了，却说不清快了多少、好了多少，更不知道有没有在别处悄悄变差。度量把"感觉"换成了"证据"，让优化变得可累积、可复现、可争辩。这也是为什么严肃的工程团队都极其看重 benchmark：不是为了好看的数字，而是为了在每一次改动后，都能确切地回答一句"这到底是变好了还是变坏了"。把"先度量"刻进习惯，你做的每一个优化才算站得住脚。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把评测想成给一辆车做<strong>两项测试</strong>：一项测"开得稳不稳、油耗低不低"（质量，对应 perplexity），一项测"百公里加速几秒、极速多少"（速度，对应 llama-bench）。只看一项会被误导：一辆车再快，要是开起来发飘、特别费油，也不是好车；反过来再省油，要是慢得让人着急，也不实用。选车要两项一起看，选量化模型也一样——光看"跑得快"不够，还得看"质量掉了多少"。这一课就是教你怎么把这两项测试亲手做出来、把两个数读明白。其实这个"两项一起看"的道理，远不止用在选量化模型上：你买手机会同时看跑分和续航，挑数据库会同时看吞吐和延迟——任何一个需要权衡的工程选择，都得有多个维度的度量一起看，才不会被单一指标带偏。perplexity 和 llama-bench 给的，正是大模型这件事上最基础的两个维度。
+</div>
+
+<h2>perplexity 量质量</h2>
+<p>困惑度（perplexity，简称 PPL）量的是"<strong>模型对真实文本有多自信</strong>"。做法是：拿一段真实的文本，让模型逐字预测下一个词，看它给"<strong>真实的那个下一词</strong>"打了多高的概率。模型越自信、预测得越准，PPL 就越低。一句话：<strong>PPL 越低越好</strong>，低意味着模型看到这段文本时"不惊讶"。</p>
+<p>公式其实很简洁：<span class="mono">PPL = exp(平均负 log 概率)</span>。对序列里每一步，取模型给真实下一词的概率、求 log、取负号（这就是"惊讶度"，概率越低越惊讶、负 log 越大）；把所有步的惊讶度平均一下，再取 <span class="mono">exp</span> 还原，就得到 PPL。源码在 <span class="mono">tools/perplexity/perplexity.cpp</span>，核心是 <span class="mono">log_softmax(n_vocab, logits, tok)</span> 取真实词 <span class="mono">tok</span> 的 log 概率，结果存进 <span class="mono">results_perplexity</span> 的 <span class="mono">ppl_value</span>。</p>
+<pre class="code"><span class="cm"># 困惑度的本质 (精简自 tools/perplexity/perplexity.cpp)</span>
+total = 0
+<span class="kw">for</span> i <span class="kw">in</span> range(len(tokens) - 1):
+    logits = model.forward(tokens[:i+1])          <span class="cm"># 到第 i 个词为止</span>
+    logp   = <span class="fn">log_softmax</span>(logits, tokens[i+1])    <span class="cm"># 真实下一词的 log 概率</span>
+    total += -logp                                <span class="cm"># 累加"惊讶度"(负 log)</span>
+ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span class="cm"># exp(平均负 log) = 困惑度</span></pre>
+<p>下面用一个最小例子把这条公式走一遍：拿 "The cat sat" 这三个词，看模型每步对真实下一词有多"惊讶"，再算出最终的 PPL：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次困惑度计算</b>：每步取模型对"真实下一词"的负 log 概率（惊讶度），平均后取 exp 得到 PPL（数值为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 序列</h5>
+      <div class="cellrow"><span class="vc">The</span><span class="vc">cat</span><span class="vc">sat</span></div>
+      <div class="tlab">一段真实文本</div></div>
+    <div class="op">每步真实<br>下一词 logP</div>
+    <div class="stn"><h5>② -logP</h5>
+      <div class="cellrow"><span class="vc blue">1.2</span><span class="vc blue">0.5</span></div>
+      <div class="tlab">对真实下一词的惊讶度</div></div>
+    <div class="op">求<br>平均</div>
+    <div class="stn"><h5>③ 平均</h5>
+      <div class="cellrow"><span class="vc">0.85</span></div>
+      <div class="tlab">(1.2 + 0.5) / 2</div></div>
+    <div class="op">取<br>exp</div>
+    <div class="stn"><h5>④ PPL</h5>
+      <div class="cellrow"><span class="vc hot">~=2.34</span></div>
+      <div class="tlab">exp(0.85), 越低越好</div></div>
+  </div>
+</div>
+<p>所以 PPL 本质上就是把"模型对一整段真实文本的平均惊讶程度"压缩成一个数。同一段文本，你拿 fp16 原模型和它的 Q4 量化版各算一次 PPL，两个数一比，就知道量化到底让模型"变笨"了多少——这正是 L29 档位表里那些"+0.xx ppl"的来历。除了这种语言建模困惑度，perplexity 工具还支持 HellaSwag、Winogrande 等任务级评测（按 <span class="mono">n_chunk</span> 切块、算多选准确率），从另一个角度看模型好坏。这里还藏着一个常被忽略的前提：算 PPL 必须用模型<strong>训练时没见过</strong>的文本才有意义——拿训练数据来算，模型"背过答案"，PPL 会假性偏低，量不出真实的泛化能力。</p>
+
+<h2>llama-bench 量速度</h2>
+<p>质量之外，你还关心<strong>快不快</strong>。<span class="mono">tools/llama-bench</span> 就是专门测吞吐（每秒处理多少 token，t/s）的工具。它把"快"拆成两类很不一样的基准，对应推理的两个阶段：<strong>pp</strong>（prompt processing，读 prompt 的 prefill 阶段）和 <strong>tg</strong>（token generation，逐字生成的 decode 阶段）。源码里它们是 <span class="mono">cmd_params</span> 的 <span class="mono">n_prompt</span>（默认 512）和 <span class="mono">n_gen</span>（默认 128）。</p>
+<div class="cols">
+  <div class="col"><h4>pp（prompt 处理）</h4><p>把 n_prompt 个 token 一次性喂进去（prefill）。这一步天然并行度高，吞吐通常很高——它量的是"读得有多快"。</p></div>
+  <div class="col"><h4>tg（token 生成）</h4><p>把 n_gen 个 token 一个一个生成（decode）。每步都要等上一步，没法并行，吞吐通常低一截——它量的是"吐字有多快"。</p></div>
+</div>
+<p>为什么要分开测？因为 pp 和 tg 的性能特征天差地别：prefill 是"算力密集"（一大批 token 并行算，吃满 GPU），decode 是"访存密集"（一次一个 token，瓶颈常在把权重从显存搬出来）。一个量化档可能让 decode 快很多、prefill 却没怎么变；只有把两个数分开看，你才知道优化到底动了哪一头。llama-bench 跑完会报每个基准的 t/s，还带上 <span class="mono">avg() +/- stddev</span>（多次测量的均值和标准差），并且能在一张表里横向对比不同量化档、不同线程数、不同后端的结果。正因为能横向对比，bench 最实用的玩法就是"控制变量"：固定模型和硬件、只改一个量化档跑一遍，就能干净地看出这一改动到底带来多少速度变化。下面是一段 bench 输出的示意——同一个模型对比两个量化档，你能一眼看出 Q4_K_M 在 tg（逐字生成）上快了不少、在 pp（读 prompt）上几乎没差别：</p>
+<pre class="code"><span class="cm"># llama-bench 输出示意 (节选): 同一模型, 对比两个量化档</span>
+| model  | size    | test  |          t/s |
+| Q8_0   | 7.2 GiB | pp512 | 2500 +/- 30  |
+| Q8_0   | 7.2 GiB | tg128 |   45 +/- 1   |
+| Q4_K_M | 4.1 GiB | pp512 | 2600 +/- 25  |
+| Q4_K_M | 4.1 GiB | tg128 |   78 +/- 2   |</pre>
+<div class="card spark">
+  <div class="tag">💡 动手试试</div>
+  最简单的一条命令：<span class="mono">llama-bench -m model.gguf -p 512 -n 128</span>——它会分别测 pp512（读 512 个 token 的吞吐）和 tg128（生成 128 个 token 的吞吐），各跑几遍报均值和标准差。想对比量化档？把同一个模型的几个档位（Q8_0、Q4_K_M、IQ2）分别 bench 一遍，你会直观看到"越压越快"是怎么发生的，以及快在 pp 还是 tg。再配合上一节的 perplexity，你就同时握住了"质量代价"和"速度收益"两个数——这正是做量化选择时最该看的两个指标。
+</div>
+
+<h2>两把尺子一起看</h2>
+<p>现在把两把尺子合起来用，回头看 L29 那笔交易就清楚了：量化（比如从 fp16 压到 Q4_K_M）让模型小一半、<span class="mono">tg</span> 快不少（llama-bench 量到），同时困惑度涨了一点点（perplexity 量到）。<strong>只有同时看 ppl（质量）和 bench（速度），你才能判断这笔交易划不划算</strong>——单看任何一头都会误导：只看速度会让你一路压到模型变笨，只看质量又享受不到量化的好处。一个实用的看法是：在质量可接受的前提下追求最快，或者在速度够用的前提下追求最好的质量——具体偏哪头，取决于你的场景是更怕慢还是更怕错。把 ppl 和 bench 两个数并排放进一张表，这个权衡就一目了然，选择也不再是拍脑袋，而是看着数字做决定。</p>
+<div class="cols">
+  <div class="col"><h4>perplexity（质量尺）</h4><p>量"模型对真实文本有多自信"，越低越好。用它判断量化/配置损失了多少质量。</p></div>
+  <div class="col"><h4>llama-bench（速度尺）</h4><p>量"每秒处理多少 token"（pp/tg），越高越好。用它判断换来了多少速度。</p></div>
+</div>
+<p>到这里，第五部分就走完了一条完整的线。我们从对外的接口出发，一路看到了 llama.cpp 怎么被使用、怎么被服务、怎么被压缩、又怎么被衡量——这正是从"内部原理"转向"对外应用"的全过程。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  回顾第五部分这条线：<strong>L25 C API</strong>（怎么调用这台引擎）-&gt; <strong>L26 common</strong>（各工具共享的胶水层）-&gt; <strong>L27 cli / L28 server</strong>（怎么把它跑成命令行和服务）-&gt; <strong>L29 quantize</strong>（怎么把它压小）-&gt; <strong>L30 评测</strong>（怎么衡量好坏）。从"内部怎么算"到"对外怎么用、怎么压、怎么评"，一条线串了下来。前四部分你学的是"引擎的内部机件"，这一部分你学的是"怎么把这台引擎真正用起来、用到最好"。下一站（第六、七部分）会再往深处走，但你现在已经能独立地调用、部署、量化并评测一个模型了——这本身就是一个完整的闭环。更重要的是，这条线给了你一套<strong>可迁移的心智模型</strong>：换任何一个推理框架，你都可以照着"它的对外接口是什么、怎么跑起来、怎么压缩省资源、怎么衡量好坏"这四个问题去拆解。换了 vLLM、换了 TensorRT，要问的还是这几个问题，只是答案不同。学会问对问题，比记住某一个框架的某一个 API 重要得多。
+</div>
+
+<h2>评测时的几个常见误区</h2>
+<p>评测这事看着简单，其实有不少容易踩的坑。最常见的一个：<strong>跨数据集比 PPL 没有意义</strong>。困惑度严重依赖你用哪段文本来算——同一个模型，在维基百科上算出来的 PPL 和在代码上算出来的可能差好几倍。所以"模型 A 的 PPL 是 5、模型 B 是 8，A 更好"这种话，只有在<strong>同一段文本</strong>上算才成立；比较时务必固定数据集，否则就是在比苹果和橘子。</p>
+<p>第二个坑是<strong>拿 bench 数字跨硬件比</strong>。llama-bench 报的 t/s 是你这台机器、这个后端、这组线程下的结果，换一张显卡、换一套编译选项，数字就变了。所以别拿别人贴的 bench 数直接和自己的比；要比，就在同一台机器上、只变你关心的那一个变量（比如只换量化档），其余全部固定——这才是"控制变量"的正确姿势。</p>
+<p>第三个坑更隐蔽：<strong>PPL 低不完全等于"用起来好"</strong>。困惑度量的是"语言建模"层面的准确度，它对量化损失敏感、适合做相对比较；但一个 PPL 略高的模型，在具体任务（写代码、推理）上未必就差。所以调量化时盯着 PPL 没问题，最终选模型却还得结合任务级评测、甚至你自己的实际试用。数字是向导，不是圣旨。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节</div>
+  最后一个提醒：<strong>评测本身也要花算力和时间</strong>。在完整数据集上算 PPL、跑多遍 bench 求稳定均值，都不是一瞬间的事。实践中常见的折中是：先用一小段文本、少量重复快速摸个大概，锁定几个候选，再对候选做更充分的评测。把评测的成本也纳入考量，你才不会在"测得准"和"测得起"之间走极端——这本身，也是一种工程判断力。
+</div>
+
+<h2>深入：PPL 的直觉与任务级评测</h2>
+<p>最后两个折叠，补两个常被追问的点：困惑度那个数到底"凭感觉"该怎么理解，以及除了 ppl 还有哪些评测方式、何时该用哪种。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 困惑度到底是什么"感觉"？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>困惑度有个很形象的直觉：<strong>有效分支因子</strong>。PPL = N 大致意味着，模型在预测每个词时，平均像是在 N 个"等可能"的选项之间犹豫。PPL=1 表示模型每一步都笃定地猜对（完美预测）；PPL=10 表示它平均像在 10 个候选里挑；PPL 越高，说明它越"困惑"、越没把握。这也解释了为什么用 <span class="mono">exp</span> 还原——把"平均负 log 概率"指数化，正好把它变回这个"等效候选数"的尺度，读起来比一串小数更有直觉。所以当你看到一个量化把 PPL 从 6.0 抬到 6.3，你可以理解成：模型平均犹豫的候选数略微变多了一点，但没本质恶化。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> ppl 之外还有哪些评测，何时用哪种？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>perplexity 是<strong>语言建模</strong>层面的评测——它量的是"模型对文本的预测有多准"，便宜、稳定、对量化损失特别敏感，所以最适合用来对比"同一个模型的不同量化档"。但它不直接等于"任务做得好不好"。要看具体能力，就得用<strong>任务级评测</strong>：perplexity 工具也支持 HellaSwag（常识推理）、Winogrande（指代消解）等多选题基准，做法是给模型几个选项、看它给哪个打的概率最高、算多选准确率（按 <span class="mono">n_chunk</span> 切块跑）。经验法则：<strong>调量化、比配置，用 ppl（快又敏感）；评模型真实能力，用任务级准确率</strong>。两者各看一面，配合着用最稳妥。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>评测要两把尺子：<strong>质量</strong>（perplexity）和<strong>速度</strong>（llama-bench），缺一不可。</li>
+    <li><span class="mono">perplexity</span>：PPL = <span class="mono">exp(平均负 log 概率)</span>，量模型对真实下一词的自信程度，<strong>越低越好</strong>；核心是 <span class="mono">log_softmax</span> 取真实词的 log 概率。</li>
+    <li><span class="mono">llama-bench</span>：测吞吐 t/s，分 <strong>pp</strong>（<span class="mono">n_prompt</span>，prefill 读 prompt）和 <strong>tg</strong>（<span class="mono">n_gen</span>，decode 逐字生成）两类，报 <span class="mono">avg +/- stddev</span>。</li>
+    <li>两把尺子配合：量化（L29）换来速度、加了一点 ppl；只有同时看质量和速度才能选对档。</li>
+    <li>第五部分闭环：L25 调用 -&gt; L26 共享 -&gt; L27/L28 跑 -&gt; L29 压 -&gt; L30 评——从内部原理走到对外应用。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  这一课，也是整个第五部分，想留给你的是一种<strong>工程素养</strong>：<strong>先度量，再优化；用数字说话，而不是凭感觉</strong>。perplexity 和 llama-bench 看似只是两个小工具，背后却是一条贯穿始终的纪律——任何"优化"都该先问"怎么衡量它好了没有、代价是什么"。这条纪律和 L29 的 imatrix（先测量重要性再分配精度）、L28 的连续批处理（先认清 GPU 特性再设计调度）一脉相承：好的工程，总是建立在"看得见的度量"之上。学完这一部分，你不仅会用 llama.cpp，更重要的是，你有了一套"调用、部署、压缩、评测"的完整方法论——这套方法论，换到任何一个推理框架上都用得上。回过头看，第五部分一直在教一件事：<strong>怎么把一个强大但复杂的系统，真正变成自己手里趁手的工具</strong>。会调用（L25/26）、能跑起来（L27/28）、压得动（L29）、量得准（L30）——这四样凑齐，你就从"听说过 llama.cpp"变成了"能用它解决真实问题"。而这背后那套"先理解、再动手、用数字验证"的工作方式，不会随某个 API 的改版而过时，反而会在你往后的职业生涯里一次次派上用场。愿你带着这套方法走出第五部分——往后无论面对 llama.cpp 的哪个新特性、还是另一套全新的推理框架，你都能不慌不忙地把它拆解、用起来、并衡量它到底好在哪里。这，就是这一整部分最想送给你的礼物。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The model runs (L25-L28) and is shrunk (L29) - but how do you know a quant level or a config is actually "good"? Feel is not enough; you need two <strong>rulers</strong>: one for <strong>quality</strong> (perplexity) and one for <strong>speed</strong> (llama-bench). This lesson covers what each measures and how to read them, and rounds off all of Part 5.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">These two rulers line up exactly with quantization's "trade": in L29 you spent a little quality for size and speed, and this lesson teaches you to measure both "the quality given up" and "the speed gained", so you can choose wisely. Without measurement, "optimization" is just guessing by feel; with it, you can argue with numbers.</p>
+<p style="color:var(--muted)">Two rulers, two tools: <span class="mono">tools/perplexity</span> (computes perplexity, measures quality) and <span class="mono">tools/llama-bench</span> (measures throughput, measures speed). We first see how perplexity turns "is the model good" into a comparable number, then how llama-bench splits "is it fast" into two kinds of benchmark, and finally put both rulers together to see how they guide picking a model and a quant level.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  the heart of this lesson is "<strong>turn fuzzy good-or-bad into comparable numbers</strong>". In any engineering optimization, the most dangerous thing is "I feel this is better" - without numbers you can neither say how much better nor know the cost. perplexity and llama-bench are the two yardsticks for "how good a language model is to use": one measures <strong>how accurate</strong> it is, one <strong>how fast</strong>. With these two numbers, "which quant level to pick", "is adding threads worth it", "is switching backends worthwhile" turn from arguments into measurements. This is also where Part 5 lands: earlier we covered how to call, run, and compress; this lesson covers how to <strong>measure</strong> - and only what you can measure can you keep improving. Let me stress how much this matters: optimization without measurement is essentially self-deception - you change something, it feels faster or better, yet you cannot say how much, nor whether it quietly got worse elsewhere. Measurement swaps "feel" for "evidence", making optimization cumulative, reproducible, and arguable. That is why serious engineering teams prize benchmarks so highly: not for pretty numbers, but so that after every change they can precisely answer "did this actually get better or worse". Carve "measure first" into habit, and every optimization you make finally stands on solid ground.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of evaluation as <strong>two tests</strong> on a car: one tests "how stable and fuel-efficient it drives" (quality, like perplexity), one tests "0-60 time and top speed" (speed, like llama-bench). Looking at only one misleads you: however fast a car is, if it feels floaty and guzzles fuel it is not good; conversely however thrifty, if it is frustratingly slow it is impractical. Picking a car takes both, and so does picking a quant model - "runs fast" alone is not enough, you also need "how much quality dropped". This lesson teaches you to run both tests by hand and read both numbers clearly. This "read both together" principle reaches far beyond picking a quant model: buying a phone you watch both benchmark score and battery, choosing a database you watch both throughput and latency - any engineering choice with a trade-off needs measurements on several dimensions read together, so a single metric does not lead you astray. perplexity and llama-bench give exactly the two most basic dimensions for large models.
+</div>
+
+<h2>perplexity measures quality</h2>
+<p>Perplexity (PPL) measures "<strong>how confident the model is about real text</strong>". The method: take a piece of real text, have the model predict each next word, and see how high a probability it gave the <strong>actual next word</strong>. The more confident and accurate the model, the lower the PPL. In a line: <strong>lower PPL is better</strong>, low meaning the model is "unsurprised" by this text.</p>
+<p>The formula is compact: <span class="mono">PPL = exp(mean negative log probability)</span>. For each step in the sequence, take the probability the model gave the real next word, take its log, and negate it (this is "surprise" - lower probability means more surprise, larger negative log); average the surprise over all steps, then take <span class="mono">exp</span> to restore, and you get PPL. The source is <span class="mono">tools/perplexity/perplexity.cpp</span>, with the core being <span class="mono">log_softmax(n_vocab, logits, tok)</span> taking the log probability of the real word <span class="mono">tok</span>, the result stored in <span class="mono">results_perplexity</span>'s <span class="mono">ppl_value</span>.</p>
+<pre class="code"><span class="cm"># the essence of perplexity (condensed from tools/perplexity/perplexity.cpp)</span>
+total = 0
+<span class="kw">for</span> i <span class="kw">in</span> range(len(tokens) - 1):
+    logits = model.forward(tokens[:i+1])          <span class="cm"># up to the i-th word</span>
+    logp   = <span class="fn">log_softmax</span>(logits, tokens[i+1])    <span class="cm"># log prob of the real next word</span>
+    total += -logp                                <span class="cm"># accumulate "surprise" (negative log)</span>
+ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span class="cm"># exp(mean negative log) = perplexity</span></pre>
+<p>Below a minimal example walks the formula: take the three words "The cat sat", see how "surprised" the model is at each real next word, then compute the final PPL:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one perplexity calc</b>: each step takes the model's negative log probability (surprise) of the "real next word"; averaged then exp'd gives PPL (values are illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) sequence</h5>
+      <div class="cellrow"><span class="vc">The</span><span class="vc">cat</span><span class="vc">sat</span></div>
+      <div class="tlab">a piece of real text</div></div>
+    <div class="op">real next-word<br>logP each step</div>
+    <div class="stn"><h5>(2) -logP</h5>
+      <div class="cellrow"><span class="vc blue">1.2</span><span class="vc blue">0.5</span></div>
+      <div class="tlab">surprise at the real next word</div></div>
+    <div class="op">take<br>mean</div>
+    <div class="stn"><h5>(3) mean</h5>
+      <div class="cellrow"><span class="vc">0.85</span></div>
+      <div class="tlab">(1.2 + 0.5) / 2</div></div>
+    <div class="op">take<br>exp</div>
+    <div class="stn"><h5>(4) PPL</h5>
+      <div class="cellrow"><span class="vc hot">~=2.34</span></div>
+      <div class="tlab">exp(0.85), lower is better</div></div>
+  </div>
+</div>
+<p>So PPL essentially compresses "the model's average surprise over a whole piece of real text" into one number. On the same text, compute PPL once for the fp16 original and once for its Q4 quant, and comparing the two numbers tells you exactly how much quantization "dumbed down" the model - this is where those "+0.xx ppl" deltas in L29's level table come from. Besides this language-modeling perplexity, the tool also supports task-level evals like HellaSwag and Winogrande (chunked by <span class="mono">n_chunk</span>, scoring multiple-choice accuracy), viewing quality from another angle. There is also an often-overlooked premise: computing PPL only makes sense on text the model <strong>did not see during training</strong> - compute it on training data and the model "memorized the answers", so PPL is falsely low and fails to measure real generalization.</p>
+
+<h2>llama-bench measures speed</h2>
+<p>Beyond quality, you also care about <strong>speed</strong>. <span class="mono">tools/llama-bench</span> is the tool for measuring throughput (tokens per second, t/s). It splits "fast" into two very different benchmarks, matching inference's two phases: <strong>pp</strong> (prompt processing, the prefill phase of reading the prompt) and <strong>tg</strong> (token generation, the decode phase of emitting word by word). In the source they are <span class="mono">cmd_params</span>'s <span class="mono">n_prompt</span> (default 512) and <span class="mono">n_gen</span> (default 128).</p>
+<div class="cols">
+  <div class="col"><h4>pp (prompt processing)</h4><p>feed n_prompt tokens all at once (prefill). This step is naturally highly parallel, so throughput is usually high - it measures "how fast it reads".</p></div>
+  <div class="col"><h4>tg (token generation)</h4><p>generate n_gen tokens one by one (decode). Each step waits on the last, no parallelism, so throughput is usually a notch lower - it measures "how fast it emits".</p></div>
+</div>
+<p>Why measure them separately? Because pp and tg have wildly different performance characteristics: prefill is "compute-bound" (a big batch of tokens computed in parallel, saturating the GPU), decode is "memory-bound" (one token at a time, the bottleneck often being moving weights out of VRAM). A quant level may speed up decode a lot while barely changing prefill; only by reading the two numbers separately do you know which half the optimization moved. After a run llama-bench reports each benchmark's t/s with <span class="mono">avg() +/- stddev</span> (mean and standard deviation over repeats), and can compare quant levels, thread counts, and backends side by side in one table. Precisely because it compares side by side, bench's most useful trick is "control variables": fix the model and hardware, change only one quant level, run once, and you cleanly see how much speed that one change brought. Below is a sample bench output - the same model compared at two quant levels, where you can tell at a glance that Q4_K_M is much faster on tg (token generation) and barely different on pp (reading the prompt):</p>
+<pre class="code"><span class="cm"># sample llama-bench output (excerpt): same model, two quant levels</span>
+| model  | size    | test  |          t/s |
+| Q8_0   | 7.2 GiB | pp512 | 2500 +/- 30  |
+| Q8_0   | 7.2 GiB | tg128 |   45 +/- 1   |
+| Q4_K_M | 4.1 GiB | pp512 | 2600 +/- 25  |
+| Q4_K_M | 4.1 GiB | tg128 |   78 +/- 2   |</pre>
+<div class="card spark">
+  <div class="tag">💡 Hands-on</div>
+  The simplest command: <span class="mono">llama-bench -m model.gguf -p 512 -n 128</span> - it measures pp512 (throughput reading 512 tokens) and tg128 (throughput generating 128 tokens) separately, each over a few runs reporting mean and stddev. Want to compare quant levels? Bench a few levels of the same model (Q8_0, Q4_K_M, IQ2) and you will directly see how "smaller is faster" happens, and whether the speedup is in pp or tg. Pair it with the previous section's perplexity and you hold both numbers - the "quality cost" and the "speed gain" - exactly the two metrics most worth looking at when making a quant choice.
+</div>
+
+<h2>Reading both rulers together</h2>
+<p>Now use both rulers together and L29's trade becomes clear: quantization (say from fp16 to Q4_K_M) halves the model size and speeds up <span class="mono">tg</span> a fair bit (measured by llama-bench), while perplexity rises a touch (measured by perplexity). <strong>Only by reading ppl (quality) and bench (speed) together can you judge whether the trade is worth it</strong> - either alone misleads: speed only leads you to compress until the model is dumb; quality only and you never enjoy quantization's gains. A practical view: chase the fastest given acceptable quality, or the best quality given sufficient speed - which way you lean depends on whether your scenario fears slowness or fears errors more. Put the two numbers, ppl and bench, side by side in one table and the trade-off is obvious, the choice no longer a guess but a decision made looking at numbers.</p>
+<div class="cols">
+  <div class="col"><h4>perplexity (quality ruler)</h4><p>measures "how confident the model is about real text", lower is better. Use it to judge how much quality a quant/config lost.</p></div>
+  <div class="col"><h4>llama-bench (speed ruler)</h4><p>measures "tokens per second" (pp/tg), higher is better. Use it to judge how much speed you gained.</p></div>
+</div>
+<p>And here Part 5 completes a full arc. Starting from the outward interface, we have watched how llama.cpp is used, served, compressed, and measured - the whole turn from "internal principle" to "outward application".</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Recall Part 5's arc: <strong>L25 C API</strong> (how to call the engine) -&gt; <strong>L26 common</strong> (the glue shared by tools) -&gt; <strong>L27 cli / L28 server</strong> (how to run it as a command line and a service) -&gt; <strong>L29 quantize</strong> (how to shrink it) -&gt; <strong>L30 evaluation</strong> (how to measure good or bad). From "how it computes inside" to "how to use, compress, and evaluate it outside", one thread runs through. The first four parts taught the engine's inner machinery; this part taught how to actually put that engine to work, and to its best. The next stops (Parts 6 and 7) go deeper, but you can already call, deploy, quantize, and evaluate a model on your own - a complete loop in itself. More importantly, this arc gives you a <strong>transferable mental model</strong>: for any inference framework you can dissect it by four questions - "what is its outward interface, how to run it, how to compress and save resources, how to measure good or bad". Swap in vLLM or TensorRT and the questions stay the same, only the answers differ. Learning to ask the right questions matters far more than memorizing one framework's one API.
+</div>
+
+<h2>Common pitfalls in evaluation</h2>
+<p>Evaluation looks simple but has several easy traps. The most common: <strong>comparing PPL across datasets is meaningless</strong>. Perplexity depends heavily on which text you compute it on - the same model can give PPL several times apart on Wikipedia versus on code. So "model A's PPL is 5, model B's is 8, A is better" only holds when computed on the <strong>same text</strong>; always fix the dataset when comparing, or you are comparing apples and oranges.</p>
+<p>The second trap is <strong>comparing bench numbers across hardware</strong>. llama-bench's t/s is the result on your machine, this backend, this thread set; swap a GPU or a build option and the numbers change. So do not directly compare someone else's posted bench numbers with yours; to compare, do it on the same machine, varying only the one variable you care about (say only the quant level), with everything else fixed - that is the right way to "control variables".</p>
+<p>The third trap is subtler: <strong>low PPL does not fully equal "good to use"</strong>. Perplexity measures "language-modeling" accuracy, sensitive to quantization loss and good for relative comparison; but a model with slightly higher PPL is not necessarily worse on a concrete task (coding, reasoning). So watching PPL while tuning quants is fine, but the final model choice should also draw on task-level evals, even your own real trial. Numbers are a guide, not gospel.</p>
+<div class="card detail">
+  <div class="tag">🔬 Detail</div>
+  One last reminder: <strong>evaluation itself costs compute and time</strong>. Computing PPL on a full dataset, or running bench many times for a stable mean, is not instant. A common practical compromise: first get a rough read with a small text and a few repeats, lock in a few candidates, then evaluate those candidates more thoroughly. Factor in the cost of evaluation too, and you will not swing to extremes between "measuring accurately" and "being able to afford it" - that, too, is a kind of engineering judgment.
+</div>
+
+<h2>Deep dive: PPL intuition and task-level evals</h2>
+<p>Two final folds for two often-asked points: how to grasp that perplexity number "by feel", and what evals exist besides ppl and when to use which.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What does perplexity "feel" like? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Perplexity has a vivid intuition: <strong>effective branching factor</strong>. PPL = N roughly means that, predicting each word, the model is on average wavering among N "equally likely" options. PPL=1 means it confidently guesses right every step (perfect prediction); PPL=10 means it is on average choosing among about 10 candidates; the higher the PPL, the more "perplexed" and unsure it is. This also explains the <span class="mono">exp</span> restore - exponentiating the "mean negative log probability" turns it back onto this "equivalent candidate count" scale, far more intuitive to read than a string of decimals. So when you see a quant lift PPL from 6.0 to 6.3, read it as: the average number of candidates the model wavers among grew a touch, but nothing fundamentally worsened.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What evals exist besides ppl, and when to use which? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>perplexity is a <strong>language-modeling</strong> eval - it measures "how accurate the model's text prediction is", cheap, stable, and especially sensitive to quantization loss, so it is best for comparing "different quant levels of the same model". But it does not directly equal "doing tasks well". For specific abilities you need <strong>task-level evals</strong>: the perplexity tool also supports multiple-choice benchmarks like HellaSwag (commonsense reasoning) and Winogrande (coreference), by giving the model the options, seeing which it scores highest, and computing multiple-choice accuracy (run chunked by <span class="mono">n_chunk</span>). Rule of thumb: <strong>for tuning quants and comparing configs, use ppl (fast and sensitive); for a model's real ability, use task-level accuracy</strong>. Each shows one side; using both together is safest.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Evaluation needs two rulers: <strong>quality</strong> (perplexity) and <strong>speed</strong> (llama-bench), neither optional.</li>
+    <li><span class="mono">perplexity</span>: PPL = <span class="mono">exp(mean negative log probability)</span>, measuring the model's confidence in the real next word, <strong>lower is better</strong>; the core is <span class="mono">log_softmax</span> taking the real word's log probability.</li>
+    <li><span class="mono">llama-bench</span>: measures throughput t/s, split into <strong>pp</strong> (<span class="mono">n_prompt</span>, prefill reading the prompt) and <strong>tg</strong> (<span class="mono">n_gen</span>, decode emitting word by word), reporting <span class="mono">avg +/- stddev</span>.</li>
+    <li>Both rulers together: quantization (L29) buys speed and adds a little ppl; only reading quality and speed together picks the right level.</li>
+    <li>Part 5 loop: L25 call -&gt; L26 share -&gt; L27/L28 run -&gt; L29 compress -&gt; L30 evaluate - from internal principle to outward application.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  this lesson, and all of Part 5, wants to leave you an <strong>engineering instinct</strong>: <strong>measure first, then optimize; argue with numbers, not feel</strong>. perplexity and llama-bench look like just two small tools, but behind them is a discipline running throughout - any "optimization" should first ask "how do I measure that it improved, and what is the cost". This discipline is of a piece with L29's imatrix (measure importance first, then allocate precision) and L28's continuous batching (see the GPU's nature first, then design scheduling): good engineering always stands on "visible measurement". Finishing this part, you can not only use llama.cpp - more importantly, you have a full methodology of "call, deploy, compress, evaluate", one that carries over to any inference framework. Looking back, Part 5 has been teaching one thing all along: <strong>how to turn a powerful but complex system into a tool that sits handy in your own grasp</strong>. Able to call (L25/26), to run (L27/28), to compress (L29), to measure (L30) - put these four together and you go from "having heard of llama.cpp" to "able to solve real problems with it". And the underlying way of working - "understand first, then act, then verify with numbers" - will not go stale with some API revision; instead it will serve you again and again across your career. May you carry this way out of Part 5 - so that whatever new llama.cpp feature, or whatever brand-new inference framework you next face, you can calmly take it apart, put it to use, and measure exactly where it is good. That, in the end, is the gift this whole part most wants to give you.
+</div>
+""",
+}
