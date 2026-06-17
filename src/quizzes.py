@@ -1687,6 +1687,67 @@ QUIZZES = {
             },
         ],
     },
+    "26-common.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "common 是 llama.cpp 公共 API 的一部分吗？",
+                    "en": "Is common part of llama.cpp's public API?",
+                },
+                "opts": [
+                    {"zh": "不是：它是给自家工具用的内部共享库，没有 ABI 稳定承诺", "en": "No: it is an internal shared library for the project's own tools, with no ABI-stability promise"},
+                    {"zh": "是：它和 include/llama.h 一样是对外稳定契约", "en": "Yes: like include/llama.h, it is a stable outward contract"},
+                    {"zh": "是：第三方语言绑定都应该直接依赖 common", "en": "Yes: third-party language bindings should all depend on common directly"},
+                    {"zh": "算半个：取决于编译时是否开启某个开关", "en": "Half: it depends on a compile-time switch"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "common 是工具共享的内部便利库，结构体布局与签名会随项目需要改动，没有 ABI 稳定承诺；对外稳定契约是 include/llama.h，第三方绑定应直接对着它写。",
+                    "en": "common is a tool-shared internal convenience library; its layouts and signatures change as the project needs, with no ABI-stability promise. The stable outward contract is include/llama.h, which third-party bindings should target directly.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "谁负责把命令行 argv 变成填好的 common_params？",
+                    "en": "Who turns the command-line argv into a filled common_params?",
+                },
+                "opts": [
+                    {"zh": "common_params_parse：按 enum llama_example 选定选项集，逐个调用 common_arg 的回调写入字段", "en": "common_params_parse: it picks the option set by enum llama_example and calls each common_arg callback to write fields"},
+                    {"zh": "common_init()：它在全局初始化时顺便解析命令行", "en": "common_init(): it parses the command line as part of global init"},
+                    {"zh": "common_sampler_init：它解析所有采样相关的参数", "en": "common_sampler_init: it parses all sampling-related arguments"},
+                    {"zh": "没有谁，main() 里手写一大堆 if-else 分支", "en": "Nobody; main() hand-writes a big pile of if-else branches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "common_params_parse(argc, argv, params, ex) 遍历 argv、按名字匹配 common_arg、调用回调写进 common_params；第 4 个参数 ex（enum llama_example）决定这次认哪套选项。common_init() 只做全局初始化（日志、build 信息）。",
+                    "en": "common_params_parse(argc, argv, params, ex) walks argv, matches a common_arg by name, and calls callbacks to write into common_params; the 4th arg ex (enum llama_example) decides which option set applies. common_init() only does global init (logging, build info).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli / llama-server 做采样时，用的是哪一层？",
+                    "en": "When llama-cli / llama-server sample, which layer do they use?",
+                },
+                "opts": [
+                    {"zh": "common_sampler：它把 L21 的 llama_sampler 链和 L23 的 GBNF 语法裹成一个对象", "en": "common_sampler: it wraps L21's llama_sampler chain and L23's GBNF grammar into one object"},
+                    {"zh": "直接用裸 llama_sampler_*，完全不经过 common", "en": "the raw llama_sampler_* directly, bypassing common entirely"},
+                    {"zh": "每个工具各自手写一条独立的采样链", "en": "each tool hand-writes its own separate sampler chain"},
+                    {"zh": "Python 绑定里实现的采样器", "en": "the sampler implemented in the Python bindings"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "cli/server 用的是 common_sampler 这层：common_sampler_init 按 params.sampling.samplers 的顺序建链，common_sampler_sample 一步完成取分、过语法、采样。需要时还能用 common_sampler_get 取回底层裸 llama_sampler 链。",
+                    "en": "cli/server use the common_sampler layer: common_sampler_init builds the chain in params.sampling.samplers order, and common_sampler_sample does logits, grammar, and sampling in one step. You can still recover the raw llama_sampler chain via common_sampler_get when needed.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "假设你要为 llama.cpp 写一个 Rust 绑定：你会依赖 common，还是只用 include/llama.h？结合 common“对内不对外”、没有 ABI 稳定承诺这两点，说说你的理由。",
+                "en": "Say you are writing a Rust binding for llama.cpp: would you depend on common, or use include/llama.h only? Argue from common being inward-facing and carrying no ABI-stability promise.",
+            },
+        ],
+    },
 }
 
 

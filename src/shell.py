@@ -96,6 +96,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("25-c-api.html", "C API 总览", "The C API",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("26-common.html", "common 工具层", "The common layer",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -580,6 +582,8 @@ SUBTITLES = {
                               "LoRA low-rank delta scale*B*A; llama_set_adapters_lora; control vectors"),
     "25-c-api.html": ("include/llama.h：句柄、调用序列、C++ RAII 包装",
                       "include/llama.h: handles, call sequence, the C++ RAII wrappers"),
+    "26-common.html": ("common：参数解析、采样包装、下载缓存——各 tool 的共享胶水",
+                       "common: arg parsing, sampler wrapper, downloads - the shared glue for every tool"),
 }
 
 
