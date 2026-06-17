@@ -1313,3 +1313,248 @@ curl http://localhost:8080/v1/chat/completions \
 </div>
 """,
 }
+
+LESSON_29 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+前面的 L6 和 L12 已经讲透了量化的"原理"——为什么几个比特就能近似一个浮点数、各种格式的字节又是怎么排布的。这一课换个角度，讲"<strong>怎么用工具真把模型压小</strong>"：一行 <span class="mono">llama-quantize</span> 命令，就能把一个十几 GB 的 fp16 模型变成三五 GB 的 Q4_K_M；再配上 imatrix（重要性矩阵），同样的比特数还能把掉下去的质量再拉回来一截。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">换句话说，L6/L12 是"懂原理"，这一课是"会操作"：知道每个旗标在调什么、不同档位是怎么取舍体积与质量的、以及 imatrix 这把"质量回血"的钥匙到底怎么用。量化是让大模型能在普通显卡、甚至纯 CPU 上跑起来的关键一步，而这一课就是教你亲手把它完成。</p>
+<p style="color:var(--muted)">这一课的两个主角是 <span class="mono">tools/quantize</span>（压缩工具本体）和 <span class="mono">tools/imatrix</span>（生成重要性矩阵的配套工具）。我们先看怎么用 quantize 一键压缩、它背后调的是哪个公共 API，再看 imatrix 凭什么能在不加比特的前提下把质量做得更好。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  量化工具干的事，本质上是一次"<strong>有损压缩</strong>"：把每个权重从 16 位浮点，换成 4 位、5 位这种更省地方的表示。省下来的是实打实的显存和带宽——模型小一半，加载快一倍，能塞进的显卡也更便宜。代价是精度的损失，但这个损失是可控的：档位（ftype）让你在"压多狠"和"留多少质量"之间自由选点，而 imatrix 则像一个聪明的预算分配器，把有限的比特优先花在最重要的权重上。读懂这一课，你就握住了"把模型搬到自己机器上"最常用的那把工具——绝大多数你在网上下到的 GGUF 量化模型，都是这一步的产物。换个角度说，这一课把 L6/L12 学到的"原理"真正变成了你手上能用的"手艺"。而且这门手艺门槛很低：你不必懂量化算法内部的数学，只要会调几个旗标、知道各档位的取舍，就能压出一个能用的模型——真正的复杂度都被 llama-quantize 这个工具和它背后的公共 API 包圆了，你站在现成的肩膀上即可。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把量化想成<strong>压缩一张照片</strong>：原图（fp16）清晰但很大，存成 JPEG（量化）会小很多，但画质有损。"档位"就像 JPEG 的质量滑块——拉到 90% 几乎看不出区别、文件中等，拉到 30% 就很小但开始糊。而 imatrix 更像一种"<strong>智能压缩</strong>"：它先分析这张图哪里是人脸、哪里是空白背景，然后把字节预算多留给人脸、少留给背景。同样的文件大小，重点区域更清楚——这正是 imatrix 在权重世界里做的事：把精度优先留给"被用得最多"的那些权重，把误差更多地丢给那些"无关紧要"的角落。这个类比还能再推一步：JPEG 之所以能在画质损失很小的情况下大幅压缩，靠的是"人眼对某些细节不敏感"这一先验；imatrix 异曲同工，它靠的是"模型对某些权重不敏感"这一在真实数据上测出来的先验。两者都说明一个道理：<strong>压缩从来不是均匀地砍，而是知道哪里能砍、哪里不能砍</strong>。你越懂数据里"哪些重要"，就越能在同样的体积里留住更多质量——好的量化方案，往往不是算法更花哨，而是"测得更准"。
+</div>
+
+<h2>量化工具怎么用</h2>
+<p>最常见的用法只有一行：<span class="mono">llama-quantize in.gguf out.gguf Q4_K_M</span>——输入一个 fp16/fp32 的 GGUF，指定一个目标档位（这里是 Q4_K_M），它就吐出一个压缩好的小 GGUF。入口在 <span class="mono">tools/quantize/main.cpp</span>（很薄），主体逻辑在 <span class="mono">quantize.cpp</span>，而真正干活的是它调用的<strong>公共 API</strong> <span class="mono">llama_model_quantize(in, out, &amp;params)</span>——注意这是 L25 那套 <span class="mono">llama.h</span> 里的函数，所以量化能力对外也是开放的，并不只有命令行能用，你完全可以在自己的程序里调它。</p>
+<pre class="code"><span class="cm">// 量化工具的核心: 一行命令背后调的公共 API (简化自 tools/quantize/quantize.cpp)</span>
+llama_model_quantize_params params = <span class="fn">llama_model_quantize_default_params</span>();
+params.ftype   = LLAMA_FTYPE_MOSTLY_Q4_K_M;  <span class="cm">// 目标档位</span>
+params.imatrix = imatrix_data;               <span class="cm">// 可选: 喂入重要性矩阵</span>
+params.dry_run = false;                       <span class="cm">// true 则只算体积, 不真压</span>
+<span class="fn">llama_model_quantize</span>(<span class="st">"in.gguf"</span>, <span class="st">"out.gguf"</span>, &amp;params);</pre>
+<p>那个 <span class="mono">params</span>（<span class="mono">llama_model_quantize_params</span>）藏着不少实用旋钮：<span class="mono">ftype</span> 选目标档位；<span class="mono">dry_run</span> 设成 true 就只<strong>试算</strong>压缩后多大、并不真的压（选档位时特别省事）；<span class="mono">output_tensor_type</span> / <span class="mono">token_embedding_type</span> 能给个别关键张量单独定一个更高的精度；<span class="mono">keep_split</span> 保持分片结构。换句话说，量化不是"一刀切到底"，而是可以精细到每一类张量、甚至每一层的。</p>
+<p>那么"档位"到底是什么？它就是一个 <span class="mono">llama_ftype</span> 枚举值，对应一种"平均每个权重用几个比特"（bpw）的方案。<span class="mono">quantize.cpp</span> 里有一张表，把每个档位的名字、bpw、以及实测的体积/困惑度代价列在一起。下面挑几个有代表性的档位，看它们在"体积"和"质量"之间各站在哪：</p>
+<div class="cols">
+  <div class="col"><h4>Q8_0（约 8.5 bpw）</h4><p>几乎无损，体积大；适合对质量极敏感、显存又够的场景。</p></div>
+  <div class="col"><h4>Q4_K_M（约 4.8 bpw）</h4><p>社区最常用的"甜点档"：体积小一大半，质量损失很小，日常首选。</p></div>
+  <div class="col"><h4>IQ2_XS（约 2.3 bpw）</h4><p>超低比特、极致省显存；靠 imatrix 撑质量，否则会明显变差。</p></div>
+</div>
+<p>挑档位的直觉和 L06 一脉相承：bpw 越低，模型越小、跑得越省，但精度损失越大，困惑度（ppl，下一课讲）越高。大多数人会落在 Q4_K_M 这类"甜点档"上——体积已经小到能塞进消费级显卡，质量却几乎看不出退步。只有当显存特别紧张时，才会往 IQ2 这种超低比特走，而那时 imatrix 就成了救命稻草。所以"挑档位"从来不是挑最小的，而是在你的显存预算下，挑那个质量还撑得住的最小档。</p>
+
+<h2>imatrix 重要性矩阵</h2>
+<p>这里有个朴素但关键的观察：<strong>不是所有权重都一样重要</strong>。有些权重在模型干活时几乎总被强烈激活、对输出影响很大；有些则常年"打酱油"。如果量化时一视同仁地给所有权重同样的精度，就太浪费了——重要的权重精度不够会明显伤质量，而给不重要的权重留高精度又是白费比特。imatrix（importance matrix，重要性矩阵）就是来解决这个"<strong>比特预算怎么分</strong>"的问题的。打个比方，这就像考试时间有限：与其每道题都花同样多时间，不如把时间多花在分值高的大题上、小题快速带过——总分自然更高。imatrix 干的就是给权重"按分值分配精度"的活儿：先搞清楚哪些权重是"大题"，再把宝贵的比特预算重点投给它们。没有这份"分值表"，量化就只能盲目地一视同仁，难免把精度浪费在无关紧要的地方。</p>
+<div class="flow">
+  <div class="node"><div class="nt">校准文本</div><div class="nd">几百段代表性文本</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">跑模型 + collect_imatrix</div><div class="nd">累计每列激活幅度</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">imatrix.gguf</div><div class="nd">每个权重列的重要性</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">quantize --imatrix</div><div class="nd">按重要性分配精度</div></div>
+</div>
+<p>怎么知道哪些权重重要？办法很直接：拿一批<strong>校准文本</strong>（calibration text，几百段有代表性的语料）真的跑一遍模型，在前向过程中用一个 eval-callback 钩子 <span class="mono">collect_imatrix</span> 把每个权重张量<strong>每一列的激活幅度</strong>累加起来（源码里存成 <span class="mono">Stats</span> 的 values / counts）。被激活得越多越强的列，就越"重要"。跑完后，这些统计被存成一个 <span class="mono">imatrix.gguf</span> 文件，等量化时再喂回去。</p>
+<pre class="code"><span class="cm"># 第一步: 用校准文本生成重要性矩阵 (tools/imatrix)</span>
+llama-imatrix -m model.gguf -f calib.txt -o imatrix.gguf
+<span class="cm"># 内部: 前向时 collect_imatrix(t, ...) 累计每个权重张量每列的激活幅度</span>
+
+<span class="cm"># 第二步: 量化时把它喂进去, 精度优先留给重要的列</span>
+llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
+<p>有了这份重要性清单，量化时就能<strong>因材施教</strong>：在同样的比特预算下，给重要的权重列分配更准的量化（让它们舍入误差更小），把不可避免的误差更多地推给那些"无关紧要"的列。下面用一个最小例子，看一行权重在 imatrix 加权下是怎么被量化的：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次 imatrix 加权量化</b>：同一行权重，重要的列（imatrix 判定）量化得更准，误差被推给不重要的列（数值为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 一行权重</h5>
+      <div class="cellrow"><span class="vc">0.50</span><span class="vc">0.02</span><span class="vc">0.48</span><span class="vc">-0.03</span></div>
+      <div class="tlab">原始 fp16 值</div></div>
+    <div class="op">imatrix<br>重要性</div>
+    <div class="stn"><h5>② 重要性</h5>
+      <div class="cellrow"><span class="vc hot">高</span><span class="vc dim">低</span><span class="vc hot">高</span><span class="vc dim">低</span></div>
+      <div class="tlab">哪些列被激活得多</div></div>
+    <div class="op">按重要性<br>量化</div>
+    <div class="stn"><h5>③ 4-bit 码</h5>
+      <div class="cellrow"><span class="vc hot">0.50</span><span class="vc">0.06</span><span class="vc hot">0.48</span><span class="vc">-0.07</span></div>
+      <div class="tlab">重要列舍入更准</div></div>
+    <div class="op">还原<br>看误差</div>
+    <div class="stn"><h5>④ 误差</h5>
+      <div class="cellrow"><span class="vc blue">~=0</span><span class="vc">0.04</span><span class="vc blue">~=0</span><span class="vc">0.04</span></div>
+      <div class="tlab">误差被推给不重要的列</div></div>
+  </div>
+</div>
+
+<h2>为什么这样更好</h2>
+<p>道理其实一句话就能说清：<strong>同样的比特，花在刀刃上</strong>。普通量化把误差均匀摊给所有权重；imatrix 量化则让重要的权重几乎不损失精度，把误差集中倒给那些本来就影响不大的权重。结果就是：在完全相同的体积（比特数）下，模型整体的困惑度（ppl）更低、表现更接近原始的 fp16。比特数没变，质量却回来了一截——这就是 imatrix 的魔力，也是"测量一下再优化"这种笨功夫换来的实在好处。更妙的是，这一切对使用者完全透明：你下载一个带 imatrix 的量化模型，加载、推理的代码一行都不用改，质量却凭空好了一截——所有的聪明都发生在"压缩那一刻"，用的时候只管享受成果。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  这正是社区里那些"<strong>imatrix 量化</strong>"（尤其是 IQ 系列，如 IQ2_XS、IQ3_M）质量出奇好的原因。在 2-3 bpw 这种超低比特下，不用 imatrix 的模型往往已经明显变笨，而带 imatrix 的同档位却还能保持相当可用——差别就在于"误差倒给谁"。所以你在 Hugging Face 上看到标着 imatrix 或 "IQ" 的量化版本，背后都跑过一遍校准文本、生成过一份重要性矩阵。理解了这一层，你下次挑量化模型时就有了判断：同样的档位，带 imatrix 的通常更值得选；而越往超低比特走，有没有 imatrix 的差距就越大。值得提醒的是，imatrix 的质量也取决于<strong>校准文本选得好不好</strong>：如果校准语料和你实际的用途差很远（比如拿纯英文语料校准、却主要用来写中文代码），测出来的"重要性"就可能不贴合，效果打折扣。所以社区里讲究的量化作者，会用覆盖多种语言、多种任务的混合语料来生成 imatrix。这也提醒你：imatrix 不是魔法，它只是把"用代表性数据测出来的重要性"如实地用上了——数据有多代表，它就有多准。
+</div>
+
+<h2>怎么给自己选档位</h2>
+<p>讲了这么多档位，到底该给自己选哪个？一个实用的决策顺序是：<strong>先看显存</strong>。把"模型大小"粗略估成"参数量 × bpw / 8"，再对照你显卡的显存——能宽裕放下的，就尽量选高一点的档位（质量更好）；放不下的，才往下压。比如一个 8B 模型，Q8_0 约 8GB、Q4_K_M 约 4.5GB、IQ2 约 2.5GB，你的卡有多大，基本就框定了可选的范围。</p>
+<p>在显存允许的范围内，<strong>再看用途</strong>。要它写代码、做推理这种"差一点就错"的任务，质量优先，尽量别低于 Q4_K_M；只是闲聊、续写这种容错高的场景，往低压一两档通常也无伤大雅。还有个常被忽略的点：<strong>同样大小，宁可选更大模型的低档量化，也别选小模型的高档</strong>——一个 13B 的 Q4 往往比一个 7B 的 Q8 更聪明，哪怕它俩体积差不多。这是社区反复验证过的经验法则。</p>
+<p>最后，只要往超低比特（IQ2、IQ3）走，就<strong>一定优先选带 imatrix</strong> 的版本；普通 Q4/Q5 这类中高档，带不带 imatrix 差别没那么大，但带上通常也只赚不亏。把"显存框范围、用途定底线、超低比特认 imatrix"这三步记住，你就能在满屏的量化文件名里快速锁定最适合自己的那一个。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节</div>
+  顺带说一句，量化通常是<strong>一次性</strong>的：你压好一个 GGUF，之后每次加载都直接用这个小文件，不必每次重压。所以为一次压缩多花点心思（试几个档位、生成一份 imatrix）很值——这点前期成本，会被之后无数次的快速加载和省下的显存反复摊薄。这也是为什么社区愿意为热门模型精心制作各档位的量化版本，供大家按需取用：辛苦一次，方便众人。
+</div>
+
+<h2>深入：档位命名与实用旗标</h2>
+<p>最后两个折叠，补两个动手时一定会撞上的实际问题：那些古怪的档位名到底怎么读，以及除了选档位还有哪些实用旗标。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Q4_K_M、IQ2_XS……这些名字怎么读？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>档位名是有规律的。<span class="mono">Q4_0</span> 里的 <span class="mono">Q</span> 是 quantize、<span class="mono">4</span> 是每权重约 4 比特、<span class="mono">0</span> 是早期的简单方案。<span class="mono">Q4_K_M</span> 里多出的 <span class="mono">K</span> 表示这是"<strong>K-quant</strong>"（一种更聪明的分块量化，质量更好），<span class="mono">M</span> 是 medium（中等档，另有 S=small、L=large 微调体积）。而 <span class="mono">IQ2_XS</span> 里的 <span class="mono">IQ</span> 表示"<strong>带 imatrix 的超低比特</strong>"方案，<span class="mono">2</span> 是约 2 比特，<span class="mono">XS</span> 是 extra small。一句话速记：<strong>Q=基础、K=更聪明的分块、IQ=超低比特靠 imatrix、后缀 S/M/L=同档里的大小微调</strong>。看懂命名，你就能从一长串文件名里一眼挑出想要的那个，不必每个都去试。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 除了选档位，还有哪些实用旗标？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>最常用的是 <span class="mono">--dry-run</span>（对应 <span class="mono">params.dry_run</span>）：它只<strong>计算并打印</strong>量化后的最终体积，并不真的压——在你纠结"选哪个档位才塞得进显存"时，先 dry-run 几个档位对比体积，比真压一遍快太多了。<span class="mono">--keep-split</span> 让输出保持和输入一样的分片结构（大模型常被切成多个 <span class="mono">.gguf</span> 分卷）。还有 <span class="mono">--output-tensor-type</span> / <span class="mono">--token-embedding-type</span> 能单独给输出层、词嵌入这两个对质量影响大的张量定更高的精度——很多高质量量化就是靠"主体压狠一点、关键张量留高一点"这种混合策略做出来的。这些旗标背后，正是前面 <span class="mono">llama_model_quantize_params</span> 里那些字段，命令行只是把它们暴露出来而已。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">llama-quantize in.gguf out.gguf &lt;ftype&gt;</span> 一键压缩，背后调公共 API <span class="mono">llama_model_quantize</span> + <span class="mono">llama_model_quantize_params</span>。</li>
+    <li>档位（<span class="mono">ftype</span>）= 每权重几比特（bpw）的方案；bpw 越低越小越省、但 ppl 越高。Q4_K_M 是常用"甜点档"。</li>
+    <li>imatrix：用校准文本跑模型、<span class="mono">collect_imatrix</span> 累计每列激活幅度 -&gt; <span class="mono">imatrix.gguf</span>；量化时 <span class="mono">--imatrix</span> 喂入，精度优先留给重要列。</li>
+    <li>同样比特下，imatrix 让"重要权重少丢精度、不重要的多担误差"，整体 ppl 更低——这是 IQ 系列质量好的原因。</li>
+    <li>实用旗标：<span class="mono">--dry-run</span>（只试算体积）、<span class="mono">--keep-split</span>（保持分片）、<span class="mono">--output-tensor-type</span> 等（按张量定精度）。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  量化工具这一课，藏着一个反复出现的工程智慧：<strong>面对有限的预算，与其平均分配，不如按重要性分配</strong>。imatrix 不增加一个比特，只是把同样的比特花得更聪明——这和缓存把热数据放近、调度器把算力给关键任务，是同一种思路。它也提醒我们：很多"免费的午餐"其实来自"先花点力气测量、再据此优化"。生成 imatrix 要先跑一遍校准文本（花点时间），换来的却是同等体积下更好的质量（长期受益）。从 L6/L12 的"原理"到这一课的"工具"，你现在不仅知道量化是什么，还知道怎么把它用到最好——下一课，我们就用困惑度这把尺子，亲手量一量量化到底损失了多少。再往大里说，这种"先测量、再按重要性分配"的思路，在计算机科学里到处都是：JIT 编译器先看哪些代码热、再重点优化它；数据库先统计哪些查询频繁、再为它们建索引。它们和 imatrix 共享同一条信念——<strong>与其凭空猜，不如用真实运行数据说话</strong>。把这条信念带在身上，你以后遇到任何"资源有限、又想要最好效果"的问题，都会本能地先问一句：能不能先测一测，看看力气该往哪儿使？这，比记住任何一个量化档位的名字都更有用。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+L6 and L12 already covered quantization's "principle" - why a few bits can approximate a float, and how each format lays out its bytes. This lesson takes a different angle: <strong>how to actually shrink a model with the tool</strong>. One <span class="mono">llama-quantize</span> command turns a dozen-GB fp16 model into a 3-5 GB Q4_K_M; add imatrix (the importance matrix) and the same bit width claws back a chunk of the lost quality.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">In other words, L6/L12 is "understand the principle", this lesson is "operate the tool": knowing what each flag tunes, how different levels trade size against quality, and how to use imatrix, that "quality-restoring" key. Quantization is the crucial step that lets big models run on ordinary GPUs or even pure CPU, and this lesson teaches you to do it by hand.</p>
+<p style="color:var(--muted)">The two stars here are <span class="mono">tools/quantize</span> (the compressor itself) and <span class="mono">tools/imatrix</span> (the companion that builds the importance matrix). We first see how quantize compresses in one command and which public API it calls underneath, then why imatrix can raise quality without adding any bits.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  what the quantize tool does is essentially one <strong>lossy compression</strong>: turn each weight from 16-bit float into a thriftier 4-bit or 5-bit representation. What you save is real VRAM and bandwidth - half the model size, twice the load speed, a cheaper GPU it fits on. The price is lost precision, but that loss is controllable: the level (ftype) lets you pick any point between "how hard to compress" and "how much quality to keep", and imatrix acts like a smart budget allocator, spending the limited bits first on the most important weights. Understand this lesson and you hold the most-used tool for "moving a model onto your own machine" - the vast majority of GGUF quantized models you download are the product of this step. Put differently, this lesson turns the "principle" of L6/L12 into a craft you can actually use. And the bar is low: you need not understand the inner math of quantization algorithms - just tune a few flags and know each level's trade-off, and you can compress a usable model; the real complexity is all packaged up by the llama-quantize tool and the public API behind it, so you stand on ready-made shoulders.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of quantization as <strong>compressing a photo</strong>: the original (fp16) is sharp but large; saved as JPEG (quantized) it is much smaller, but lossy. The "level" is like JPEG's quality slider - at 90% you can barely tell the difference and the file is medium; at 30% it is tiny but starts to smear. imatrix is more like <strong>smart compression</strong>: it first analyzes which parts of the image are the face and which are blank background, then gives more byte budget to the face and less to the background. At the same file size, the important region is clearer - exactly what imatrix does in the world of weights: keep precision first for the "most-used" weights, and dump more error into the "irrelevant" corners. The analogy stretches one step further: JPEG can compress hugely with little visible loss because of the prior that "the human eye is insensitive to certain detail"; imatrix does the same, leaning on the prior, measured on real data, that "the model is insensitive to certain weights". Both say one thing: <strong>compression is never an even cut, but knowing where you can cut and where you cannot</strong>. The better you understand "what matters" in the data, the more quality you keep at the same size - a good quant scheme is often not a fancier algorithm but "a truer measurement".
+</div>
+
+<h2>How the quantize tool is used</h2>
+<p>The most common use is one line: <span class="mono">llama-quantize in.gguf out.gguf Q4_K_M</span> - feed an fp16/fp32 GGUF, name a target level (here Q4_K_M), and it emits a compressed small GGUF. The entry is <span class="mono">tools/quantize/main.cpp</span> (thin), the body logic is in <span class="mono">quantize.cpp</span>, and the real work is the <strong>public API</strong> it calls, <span class="mono">llama_model_quantize(in, out, &amp;params)</span> - note this is a function from L25's <span class="mono">llama.h</span>, so the quantization capability is public too, not only the command line; you can call it from your own program.</p>
+<pre class="code"><span class="cm">// the quantize tool's heart: the public API behind one command (simplified from tools/quantize/quantize.cpp)</span>
+llama_model_quantize_params params = <span class="fn">llama_model_quantize_default_params</span>();
+params.ftype   = LLAMA_FTYPE_MOSTLY_Q4_K_M;  <span class="cm">// target level</span>
+params.imatrix = imatrix_data;               <span class="cm">// optional: feed in the importance matrix</span>
+params.dry_run = false;                       <span class="cm">// true = only compute size, do not really compress</span>
+<span class="fn">llama_model_quantize</span>(<span class="st">"in.gguf"</span>, <span class="st">"out.gguf"</span>, &amp;params);</pre>
+<p>That <span class="mono">params</span> (<span class="mono">llama_model_quantize_params</span>) hides several practical knobs: <span class="mono">ftype</span> picks the target level; <span class="mono">dry_run</span> set to true only <strong>trial-computes</strong> how big the result would be without really compressing (very handy when picking a level); <span class="mono">output_tensor_type</span> / <span class="mono">token_embedding_type</span> can give a few key tensors their own higher precision; <span class="mono">keep_split</span> keeps the shard structure. In other words, quantization is not "one blunt cut", but can be tuned per tensor class, even per layer.</p>
+<p>So what is a "level"? It is a <span class="mono">llama_ftype</span> enum value, mapping to a scheme of "how many bits per weight on average" (bpw). <span class="mono">quantize.cpp</span> has a table listing each level's name, bpw, and measured size/perplexity cost. Below are a few representative levels and where they stand between "size" and "quality":</p>
+<div class="cols">
+  <div class="col"><h4>Q8_0 (~8.5 bpw)</h4><p>nearly lossless, large; for quality-critical cases with enough VRAM.</p></div>
+  <div class="col"><h4>Q4_K_M (~4.8 bpw)</h4><p>the community's favorite "sweet spot": much smaller, tiny quality loss, the everyday default.</p></div>
+  <div class="col"><h4>IQ2_XS (~2.3 bpw)</h4><p>ultra-low-bit, extreme VRAM thrift; leans on imatrix for quality, else clearly worse.</p></div>
+</div>
+<p>The intuition for picking a level follows L06: the lower the bpw, the smaller and thriftier the model, but the greater the precision loss and the higher the perplexity (ppl, next lesson). Most people land on a "sweet spot" like Q4_K_M - small enough for consumer GPUs, yet barely any visible regression. Only when VRAM is very tight do you go toward ultra-low-bit IQ2, and there imatrix becomes the lifeline. So "picking a level" is never picking the smallest, but picking the smallest level whose quality still holds up under your VRAM budget.</p>
+
+<h2>The imatrix importance matrix</h2>
+<p>Here is a plain but crucial observation: <strong>not all weights matter equally</strong>. Some are almost always strongly activated and heavily affect the output; others mostly "sit around". Quantizing them all to the same precision is wasteful - too little precision on important weights clearly hurts quality, while high precision on unimportant ones wastes bits. imatrix (importance matrix) exists to solve this "<strong>how to split the bit budget</strong>" problem. By analogy, it is like a timed exam: rather than spend equal time on every question, spend more on the high-mark big questions and breeze through the small ones - the total score is naturally higher. imatrix does exactly this "allocate precision by marks" job for weights: first figure out which weights are the "big questions", then pour the precious bit budget mainly into them. Without this "mark sheet", quantization can only blindly treat all alike, inevitably wasting precision on places that hardly matter.</p>
+<div class="flow">
+  <div class="node"><div class="nt">calibration text</div><div class="nd">a few hundred passages</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">run + collect_imatrix</div><div class="nd">accumulate per-column activation</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">imatrix.gguf</div><div class="nd">importance of each column</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">quantize --imatrix</div><div class="nd">allocate precision by importance</div></div>
+</div>
+<p>How do we know which weights are important? Directly: take a batch of <strong>calibration text</strong> (a few hundred representative passages) and actually run the model, and during the forward pass an eval-callback hook <span class="mono">collect_imatrix</span> accumulates <strong>each column's activation magnitude</strong> for every weight tensor (stored in the source as <span class="mono">Stats</span> values / counts). The more strongly a column is activated, the more "important" it is. When done, these stats are saved into an <span class="mono">imatrix.gguf</span> file, to be fed back at quantize time.</p>
+<pre class="code"><span class="cm"># step 1: build the importance matrix from calibration text (tools/imatrix)</span>
+llama-imatrix -m model.gguf -f calib.txt -o imatrix.gguf
+<span class="cm"># inside: during the forward pass collect_imatrix(t, ...) accumulates each weight tensor's per-column activation</span>
+
+<span class="cm"># step 2: feed it at quantize time, precision goes first to important columns</span>
+llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
+<p>With this importance list, quantization can <strong>teach to each according to its aptitude</strong>: under the same bit budget, give important weight columns a more accurate quantization (smaller rounding error), and push the unavoidable error more onto the "irrelevant" columns. Below a minimal example shows how one row of weights is quantized under imatrix weighting:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one imatrix-weighted quantize</b>: the same row of weights, important columns (per imatrix) quantized more accurately, error pushed onto unimportant ones (values are illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) a row of weights</h5>
+      <div class="cellrow"><span class="vc">0.50</span><span class="vc">0.02</span><span class="vc">0.48</span><span class="vc">-0.03</span></div>
+      <div class="tlab">original fp16 values</div></div>
+    <div class="op">imatrix<br>importance</div>
+    <div class="stn"><h5>(2) importance</h5>
+      <div class="cellrow"><span class="vc hot">hi</span><span class="vc dim">lo</span><span class="vc hot">hi</span><span class="vc dim">lo</span></div>
+      <div class="tlab">which columns activate a lot</div></div>
+    <div class="op">quantize by<br>importance</div>
+    <div class="stn"><h5>(3) 4-bit codes</h5>
+      <div class="cellrow"><span class="vc hot">0.50</span><span class="vc">0.06</span><span class="vc hot">0.48</span><span class="vc">-0.07</span></div>
+      <div class="tlab">important columns round truer</div></div>
+    <div class="op">dequant<br>see error</div>
+    <div class="stn"><h5>(4) error</h5>
+      <div class="cellrow"><span class="vc blue">~=0</span><span class="vc">0.04</span><span class="vc blue">~=0</span><span class="vc">0.04</span></div>
+      <div class="tlab">error pushed onto unimportant columns</div></div>
+  </div>
+</div>
+
+<h2>Why this is better</h2>
+<p>The reason fits in a line: <strong>the same bits, spent where they count</strong>. Plain quantization spreads error evenly across all weights; imatrix quantization lets important weights lose almost no precision and dumps the error onto weights that hardly mattered anyway. The result: at exactly the same size (bit count), the model's overall perplexity (ppl) is lower and its behavior closer to the original fp16. Same bits, yet quality comes back a notch - that is imatrix's magic, and the real payoff of the plain effort of "measure first, then optimize". Better still, all of this is transparent to the user: you download an imatrix quant, change not a line of your load-and-infer code, yet quality is better out of nowhere - all the cleverness happens "at the moment of compression", and when you use it you simply enjoy the result.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  this is exactly why the community's "<strong>imatrix quants</strong>" (especially the IQ series, like IQ2_XS, IQ3_M) are surprisingly good. At ultra-low 2-3 bpw, a model without imatrix is often clearly dumber, while the same level with imatrix stays quite usable - the difference is "who the error is dumped on". So when you see a quant on Hugging Face marked imatrix or "IQ", a calibration-text run and an importance matrix lie behind it. Understand this and next time you pick a quant you have a rule: at the same level, the imatrix one is usually the better choice; and the lower the bit width, the bigger the gap between having imatrix and not. Worth a reminder: imatrix's quality also depends on <strong>how well the calibration text is chosen</strong> - if the calibration corpus is far from your actual use (say, calibrating on pure English but mainly writing Chinese code), the measured "importance" may not fit and the effect is diluted. So careful quant authors in the community build the imatrix from a mixed corpus covering many languages and tasks. It also reminds you: imatrix is no magic, it merely faithfully applies "importance measured on representative data" - as representative as the data is, that accurate it is.
+</div>
+
+<h2>Choosing a level for yourself</h2>
+<p>After all this talk of levels, which should you actually pick? A practical decision order is: <strong>look at VRAM first</strong>. Roughly estimate "model size" as "parameter count x bpw / 8", compare it with your GPU's VRAM - if it fits with room to spare, pick a higher level (better quality); only when it does not fit do you compress further down. For example, an 8B model is about 8GB at Q8_0, 4.5GB at Q4_K_M, 2.5GB at IQ2 - how big your card is roughly frames the range of choices.</p>
+<p>Within what VRAM allows, <strong>then look at the use</strong>. For "a small slip is a real error" tasks like coding or reasoning, prioritize quality and try not to go below Q4_K_M; for high-tolerance scenes like casual chat or continuation, dropping a level or two is usually harmless. One often-overlooked point: <strong>at the same size, prefer a low level of a bigger model over a high level of a smaller one</strong> - a 13B Q4 is often smarter than a 7B Q8 even if they are about the same size. This is a rule of thumb the community has verified again and again.</p>
+<p>Finally, whenever you go to ultra-low bits (IQ2, IQ3), <strong>always prefer the imatrix version</strong>; for mid-to-high levels like plain Q4/Q5 the difference with or without imatrix is smaller, though having it is usually only a gain. Remember these three steps - "VRAM frames the range, use sets the floor, ultra-low-bit demands imatrix" - and you can quickly lock onto the one best suited to you from a screen full of quant file names.</p>
+<div class="card detail">
+  <div class="tag">🔬 Detail</div>
+  By the way, quantization is usually <strong>one-time</strong>: you compress a GGUF once, and every later load just uses that small file, no re-compressing each time. So spending a bit more care on one compression (trying a few levels, building an imatrix) pays off - that upfront cost is amortized again and again by countless later fast loads and the VRAM saved. That is also why the community happily crafts each level's quant for popular models for everyone to grab as needed: toil once, ease for many.
+</div>
+
+<h2>Deep dive: level naming and practical flags</h2>
+<p>Two final folds for two practical issues you will surely hit hands-on: how to read those odd level names, and what useful flags exist besides picking a level.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Q4_K_M, IQ2_XS... how do you read these names? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The names follow a pattern. In <span class="mono">Q4_0</span>, <span class="mono">Q</span> is quantize, <span class="mono">4</span> is about 4 bits per weight, <span class="mono">0</span> is the early simple scheme. The extra <span class="mono">K</span> in <span class="mono">Q4_K_M</span> means it is a "<strong>K-quant</strong>" (a smarter block quantization, better quality), and <span class="mono">M</span> is medium (with S=small, L=large fine-tuning the size). In <span class="mono">IQ2_XS</span>, <span class="mono">IQ</span> means an "<strong>ultra-low-bit scheme with imatrix</strong>", <span class="mono">2</span> is about 2 bits, <span class="mono">XS</span> is extra small. A one-line memo: <strong>Q=base, K=smarter blocks, IQ=ultra-low-bit via imatrix, suffix S/M/L=size tweak within a level</strong>. Read the naming and you can pick the one you want at a glance from a long list of file names, without trying each.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Besides picking a level, what useful flags are there? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The most useful is <span class="mono">--dry-run</span> (matching <span class="mono">params.dry_run</span>): it only <strong>computes and prints</strong> the final quantized size without really compressing - when you are torn over "which level fits VRAM", dry-running a few levels to compare sizes is far faster than really compressing each. <span class="mono">--keep-split</span> keeps the output's shard structure the same as the input (big models are often split into several <span class="mono">.gguf</span> shards). And <span class="mono">--output-tensor-type</span> / <span class="mono">--token-embedding-type</span> can give the output layer and token embeddings - two quality-sensitive tensors - their own higher precision; many high-quality quants come from exactly this mix of "compress the body harder, keep key tensors higher". Behind these flags are those fields in the earlier <span class="mono">llama_model_quantize_params</span>; the command line merely exposes them.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">llama-quantize in.gguf out.gguf &lt;ftype&gt;</span> compresses in one command, calling the public API <span class="mono">llama_model_quantize</span> + <span class="mono">llama_model_quantize_params</span>.</li>
+    <li>A level (<span class="mono">ftype</span>) = a bits-per-weight (bpw) scheme; lower bpw = smaller and thriftier but higher ppl. Q4_K_M is the common "sweet spot".</li>
+    <li>imatrix: run the model on calibration text, <span class="mono">collect_imatrix</span> accumulates per-column activation -&gt; <span class="mono">imatrix.gguf</span>; feed it via <span class="mono">--imatrix</span> at quantize time, precision goes first to important columns.</li>
+    <li>At the same bits, imatrix makes "important weights lose less precision, unimportant ones bear more error", lowering overall ppl - why the IQ series is good quality.</li>
+    <li>Practical flags: <span class="mono">--dry-run</span> (only trial-compute size), <span class="mono">--keep-split</span> (keep shards), <span class="mono">--output-tensor-type</span> etc. (per-tensor precision).</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  this quantize lesson hides a recurring engineering wisdom: <strong>facing a limited budget, allocate by importance rather than evenly</strong>. imatrix adds not one bit; it just spends the same bits more cleverly - the same thinking as a cache keeping hot data near, or a scheduler giving compute to critical tasks. It also reminds us that many "free lunches" actually come from "spend a little effort measuring first, then optimize on that". Building an imatrix means running calibration text first (a time cost), but it buys better quality at the same size (a lasting gain). From L6/L12's "principle" to this lesson's "tool", you now not only know what quantization is, but how to use it best - next lesson, we take perplexity as a ruler and measure by hand just how much quantization actually loses. Zoom out and this "measure first, then allocate by importance" idea is everywhere in computer science: a JIT compiler first sees which code is hot, then optimizes it; a database first counts which queries are frequent, then builds indexes for them. They share imatrix's one belief - <strong>rather than guess in the void, let real runtime data speak</strong>. Carry this belief and any future "limited resources, yet want the best result" problem will make you instinctively ask first: can I measure a bit and see where the effort should go? That is more useful than memorizing any single quant level's name.
+</div>
+""",
+}

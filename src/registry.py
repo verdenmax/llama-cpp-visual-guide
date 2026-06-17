@@ -40,4 +40,5 @@ CONTENT = {
     "26-common.html": part5.LESSON_26,
     "27-llama-cli.html": part5.LESSON_27,
     "28-llama-server.html": part5.LESSON_28,
+    "29-quantize-tool.html": part5.LESSON_29,
 }

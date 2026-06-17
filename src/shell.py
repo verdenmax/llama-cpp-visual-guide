@@ -102,6 +102,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("28-llama-server.html", "llama-server", "llama-server",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("29-quantize-tool.html", "quantize 工具", "The quantize tool",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -592,6 +594,8 @@ SUBTITLES = {
                           "the CLI/interactive shell: a generation loop on the shared engine"),
     "28-llama-server.html": ("HTTP + OpenAI 兼容 + slot 连续批处理：把引擎变成服务",
                              "HTTP + OpenAI-compatible + slot continuous batching: the engine as a service"),
+    "29-quantize-tool.html": ("llama-quantize + imatrix：把模型压小，并用重要性矩阵保质量",
+                              "llama-quantize + imatrix: shrink the model, keep quality via an importance matrix"),
 }
 
 

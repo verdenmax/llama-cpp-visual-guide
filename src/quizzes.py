@@ -1870,6 +1870,67 @@ QUIZZES = {
             },
         ],
     },
+    "29-quantize-tool.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "imatrix（重要性矩阵）是做什么用的？",
+                    "en": "What is the imatrix (importance matrix) for?",
+                },
+                "opts": [
+                    {"zh": "记录每个权重列的重要性（激活幅度），量化时把精度优先留给重要的列", "en": "records each weight column's importance (activation magnitude) so quantize keeps precision for important columns first"},
+                    {"zh": "把模型权重再压缩一倍，不损失任何精度", "en": "compresses the weights another 2x with zero precision loss"},
+                    {"zh": "记录每个 token 的生成概率，用于采样", "en": "records each token's generation probability for sampling"},
+                    {"zh": "存储模型的超参数（层数、维度等）", "en": "stores the model's hyperparameters (layers, dims, etc.)"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "imatrix 用校准文本跑模型、由 collect_imatrix 累计每个权重张量每列的激活幅度，得出哪些列“重要”。量化时把它喂进去（--imatrix），同样比特下精度优先留给重要列、误差推给不重要列，整体困惑度更低。它不额外压缩、也与采样/超参无关。",
+                    "en": "imatrix runs the model on calibration text and collect_imatrix accumulates each weight tensor's per-column activation magnitude, telling which columns are 'important'. Fed in at quantize time (--imatrix), at the same bits it keeps precision for important columns and pushes error onto unimportant ones, lowering overall perplexity. It does not compress further and is unrelated to sampling/hyperparameters.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "不真的压缩，只想试算量化后体积，用哪个旗标？",
+                    "en": "Which flag trial-computes the quantized size without actually compressing?",
+                },
+                "opts": [
+                    {"zh": "--dry-run（对应 params.dry_run）", "en": "--dry-run (params.dry_run)"},
+                    {"zh": "--keep-split", "en": "--keep-split"},
+                    {"zh": "--imatrix", "en": "--imatrix"},
+                    {"zh": "--output-tensor-type", "en": "--output-tensor-type"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "--dry-run（params.dry_run）只计算并打印量化后的最终体积、并不真的压，方便你在选档位时快速对比几个档位的体积。--keep-split 保持分片，--imatrix 喂重要性矩阵，--output-tensor-type 按张量定精度，都不是“只试算体积”。",
+                    "en": "--dry-run (params.dry_run) only computes and prints the final quantized size without really compressing, handy for comparing a few levels' sizes when choosing. --keep-split keeps shards, --imatrix feeds the importance matrix, --output-tensor-type sets per-tensor precision - none merely trial-compute size.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "L06/L12 和这一课（L29）的分工是什么？",
+                    "en": "How do L06/L12 and this lesson (L29) divide up?",
+                },
+                "opts": [
+                    {"zh": "L06/L12 讲量化的原理与字节布局；L29 讲怎么用工具压、以及 imatrix 怎么更高质量地压", "en": "L06/L12 cover quantization's principle and byte layout; L29 covers how to compress with the tool and how imatrix compresses with higher quality"},
+                    {"zh": "完全重复，L29 只是把前面再讲一遍", "en": "they fully overlap; L29 just repeats the earlier lessons"},
+                    {"zh": "L06/L12 讲工具用法，L29 讲底层数学", "en": "L06/L12 cover tool usage, L29 covers the underlying math"},
+                    {"zh": "L29 讲采样，和量化无关", "en": "L29 covers sampling, unrelated to quantization"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "L06/L12 是“懂原理”（为什么能压、各格式字节怎么排）；L29 是“会操作”（llama-quantize 一键压、各档位取舍、imatrix 用校准数据把同样比特花得更聪明）。两者互补，不重复。",
+                    "en": "L06/L12 is 'understand the principle' (why compression works, how each format's bytes are laid out); L29 is 'operate the tool' (one-command llama-quantize, level trade-offs, imatrix spending the same bits more cleverly via calibration data). They are complementary, not repetitive.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "你有一张 8GB 显存的显卡，想跑一个 13B 模型。结合这一课的“先看显存、再看用途、超低比特认 imatrix”，说说你会怎么选量化档位？为什么很多人说“同样大小宁可选大模型的低档量化”？",
+                "en": "You have an 8GB GPU and want to run a 13B model. Using this lesson's 'VRAM first, then use, ultra-low-bit demands imatrix', explain how you would pick a quant level. Why do many say 'at the same size, prefer a bigger model's lower level'?",
+            },
+        ],
+    },
 }
 
 
