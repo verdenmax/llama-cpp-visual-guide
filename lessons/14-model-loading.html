@@ -376,8 +376,10 @@ ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="c
 去文件的哪个位置取数。L13 讲"文件里怎么存"，这一课讲"loader 怎么把它读回内存"，两课正好首尾相接。</p>
 <p>这里藏着一个和 L13"头部轻、尾部重"呼应的巧思：loader <strong>先</strong>读那一小段头部（metadata + tensor info，通常几十 KB），就把模型的全部结构搞清楚了——几层、多宽、有哪些张量、各在文件哪个位置；
 <strong>之后</strong>才按需去碰那几个 GB 的权重数据。正因为"描述"和"数据"在文件里是分开的，loader 才能用很小的代价先建好整张清单和骨架，把真正的大块留到 mmap 按页惰性载入。这一步的轻量，直接决定了大模型能不能"秒开"。</p>
-<p>还要留意 <span class="mono">create_tensor</span> 这一步的轻——它在 <span class="mono">ggml_context</span> 里建的只是张量的<strong>元数据</strong>（形状、类型、名字），并不为那几 GB 的浮点数据另开缓冲（这正是 L08 讲的 <span class="mono">no_alloc</span>）。
-于是装下"整个模型的骨架"只要几 MB 的 context，真正占地方的权重则由 mmap 映射承接。元数据归元数据、数据归数据，两者分头安放——这是 L08 内存观在加载阶段的直接兑现，也让"先把结构建全、数据按需就位"成为可能。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  还要留意 <span class="mono">create_tensor</span> 这一步的轻——它在 <span class="mono">ggml_context</span> 里建的只是张量的<strong>元数据</strong>（形状、类型、名字），并不为那几 GB 的浮点数据另开缓冲（这正是 L08 讲的 <span class="mono">no_alloc</span>）。于是装下"整个模型的骨架"只要几 MB 的 context，真正占地方的权重则由 mmap 映射承接。元数据归元数据、数据归数据，两者分头安放——这是 L08 内存观在加载阶段的直接兑现，也让"先把结构建全、数据按需就位"成为可能。
+</div>
 <p>再把 <span class="mono">offs</span> 这个字段说细一点：它记的是这个张量的数据在文件里的<strong>字节偏移</strong>（对应 L13 tensor info 的 offset）。有了它，<span class="mono">load_data_for</span> 才能在 mmap 映射里<strong>直接算出</strong>这个张量从哪开始——
 映射基址 + 数据段起点 + offs，一步定位，不用顺序扫描。这正是 L13 讲的"按 offset 定位张量"在加载代码里的落地。</p>
 <p>读张量时 loader 还会做一些<strong>一致性检查</strong>：比如某个张量的形状要和架构期望的对得上、类型是否被支持。这些检查放在加载期做最划算——一旦放行，后面建图、推理就可以默认"张量都是对的"，
@@ -392,8 +394,10 @@ ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="c
 <p>分片靠几样东西对上：文件名格式 <span class="mono">"%s-%05d-of-%05d.gguf"</span>（由 <span class="mono">llama_split_path</span> 拼，<span class="mono">src/llama.cpp</span>）告诉你"第几片、共几片"；元数据键 <span class="mono">split.count</span>
 （<span class="mono">LLM_KV_SPLIT_COUNT</span>）记总片数；而每个张量在 <span class="mono">weights_map</span> 里的 <span class="mono">idx</span> 字段，正是记着"我来自第几片"。</p>
 <p>这也解释了前面为什么 <span class="mono">weights_map</span> 要按名字：分片把同一个模型的张量分散到多个文件，唯有按名字才能跨文件把它们统一查到、拼成完整的一份。对使用者来说，分不分片几乎无感——你只管给入口一个路径，loader 在背后把碎片拼好。</p>
-<p>为什么要分片？一是<strong>下载与分发</strong>友好：一个 200 GB 的模型切成几十个几 GB 的片，断点续传、并行下载、镜像同步都更容易；二是有些文件系统对单文件大小有上限，分片能绕开；
-三是方便<strong>按需取用</strong>。你在 HuggingFace 上看到的大模型，权重文件往往就是 <span class="mono">...-of-00010.gguf</span> 这样一长串。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  为什么要分片？一是<strong>下载与分发</strong>友好：一个 200 GB 的模型切成几十个几 GB 的片，断点续传、并行下载、镜像同步都更容易；二是有些文件系统对单文件大小有上限，分片能绕开；三是方便<strong>按需取用</strong>。你在 HuggingFace 上看到的大模型，权重文件往往就是 <span class="mono">...-of-00010.gguf</span> 这样一长串。
+</div>
 <p>一个自然的疑问：分片之后，前面说的 mmap 零拷贝还成立吗？成立——loader 给每一片各做一个映射（<span class="mono">mappings</span> 是一组映射、不是一个），每个张量的 <span class="mono">idx</span> 记着它属于哪一片，
 <span class="mono">load_data_for</span> 就去对应那片的映射里取数。所以"分片"和"零拷贝"是正交的两件事：分片解决"文件太大不好搬"，mmap 解决"数据太大不想拷"，两者叠加，超大模型既好分发、又能秒加载。</p>
 <p>顺便消除一个误解：分片不是什么特殊模式。单文件模型其实就是"只有一片"的退化情形——<span class="mono">split.count</span> 为 1（或干脆没有这个键）。loader 的代码<strong>统一</strong>按"可能有多片"来写，单文件只是片数为一的特例。
@@ -417,7 +421,10 @@ ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="c
 <p>加载到此为止。下一课（L15）我们就接着问：这一堆"带名字的张量"，怎么知道自己属于哪种架构（llama？qwen2？）、每层有哪些部件、怎么按超参组织起来——也就是 loader 读出的东西，到底要<strong>按什么图纸</strong>拼成一个模型。</p>
 <p>稍微展开一下加载完拿到的 <span class="mono">llama_model</span> 到底是什么：它是一个<strong>只读</strong>的对象，装着所有权重张量（data 指针指进 mmap）、加上从 metadata 读出的超参（L15 会装进 <span class="mono">llama_hparams</span>）和词表（L20）。
 它不含任何"会话状态"——没有 KV cache、没有当前算到哪。这正是下一层（L17）要把 <span class="mono">llama_model</span> 和 <span class="mono">llama_context</span> 分开的伏笔：知识（权重）只读可共享，状态（KV/进度）每会话一份。加载这一课，交付的就是那份"只读的知识"。</p>
-<p>顺带一提：加载失败是有明确信号的——magic 不对、version 不认识、某个必需张量缺失，loader 都会当场报错而不是带病继续。这种"加载期就把问题暴露出来"的做法，比"跑到一半才崩"友好得多，也是把校验集中在 loader 这一层的好处。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  顺带一提：加载失败是有明确信号的——magic 不对、version 不认识、某个必需张量缺失，loader 都会当场报错而不是带病继续。这种"加载期就把问题暴露出来"的做法，比"跑到一半才崩"友好得多，也是把校验集中在 loader 这一层的好处。
+</div>
 <p>把这一课收个尾：loader 站在"格式"和"模型"之间，向下它只关心 GGUF 的字节怎么排（L13），向上它只交付一份干净的、按名字可查的、数据已就位的张量集合。它不懂什么是注意力、不懂 llama 和 qwen 有什么不同——这些是上面几课的事。
 正是这种"各司其职、边界清晰"的分层，让 llama.cpp 能一边支持越来越多的新格式细节、一边支持越来越多的新架构，而两边的改动很少互相牵连。读懂了加载，你就握住了从磁盘到模型的第一环。</p>
 <p>最后看一眼那条"入口 -&gt; _impl -&gt; _load"的调用链为什么要分这么多层。最外层 <span class="mono">llama_model_load_from_file</span> 是<strong>稳定的公开 C API</strong>，要长期不变、给各种语言绑定调用；
@@ -583,8 +590,10 @@ ml.<span class="fn">get_key</span>(LLM_KV_BLOCK_COUNT, n_layer)   <span class="c
 where in the file to fetch from. L13 covered "how it is stored in the file", this lesson covers "how the loader reads it back into memory" - the two meet end to end.</p>
 <p>Here is a clever touch echoing L13's "light head, heavy tail": the loader <strong>first</strong> reads that small header (metadata + tensor info, usually tens of KB) and thereby learns the model's entire structure - how many layers, how wide, which tensors, where each sits in the file;
 <strong>only then</strong> does it touch those GB of weight data on demand. Because "description" and "data" are separated in the file, the loader can build the whole list and skeleton at tiny cost and leave the real bulk to mmap's lazy, page-by-page loading. The lightness of this step directly decides whether a large model can "open instantly".</p>
-<p>Note also how light the <span class="mono">create_tensor</span> step is - in the <span class="mono">ggml_context</span> it builds only a tensor's <strong>metadata</strong> (shape, type, name), reserving no buffer for those GB of float data (exactly L08's <span class="mono">no_alloc</span>).
-So holding "the whole model's skeleton" takes only a few MB of context, while the weights that actually take space are carried by the mmap mapping. Metadata as metadata, data as data, placed separately - the direct cash-out of L08's memory model at load time, and what makes "build the full structure first, bring data into place on demand" possible.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Note also how light the <span class="mono">create_tensor</span> step is - in the <span class="mono">ggml_context</span> it builds only a tensor's <strong>metadata</strong> (shape, type, name), reserving no buffer for those GB of float data (exactly L08's <span class="mono">no_alloc</span>). So holding "the whole model's skeleton" takes only a few MB of context, while the weights that actually take space are carried by the mmap mapping. Metadata as metadata, data as data, placed separately - the direct cash-out of L08's memory model at load time, and what makes "build the full structure first, bring data into place on demand" possible.
+</div>
 <p>A bit more on the <span class="mono">offs</span> field: it records this tensor's data <strong>byte offset</strong> in the file (matching L13's tensor info offset). With it, <span class="mono">load_data_for</span> can <strong>directly compute</strong> where this tensor starts in the mmap mapping -
 mapping base + data-section start + offs, located in one step, no sequential scan. This is exactly L13's "addressing tensors by offset" realized in loading code.</p>
 <p>While reading tensors the loader also does some <strong>consistency checks</strong>: a tensor's shape must match what the architecture expects, its type must be supported. Doing these at load time is most economical - once they pass, graph-building and inference can assume "the tensors are all correct"
@@ -599,8 +608,10 @@ without re-guarding at every step. Centralizing validation at the gate is what l
 <p>Splits line up via a few things: the filename format <span class="mono">"%s-%05d-of-%05d.gguf"</span> (built by <span class="mono">llama_split_path</span>, <span class="mono">src/llama.cpp</span>) tells you "which shard, of how many"; the metadata key <span class="mono">split.count</span>
 (<span class="mono">LLM_KV_SPLIT_COUNT</span>) records the total shard count; and each tensor's <span class="mono">idx</span> field in <span class="mono">weights_map</span> records "which shard I came from".</p>
 <p>This also explains why <span class="mono">weights_map</span> is keyed by name: splits scatter one model's tensors across files, and only by name can they be looked up uniformly across files and stitched into a complete whole. To the caller, split-or-not is nearly invisible - you just hand the entry point a path, and the loader stitches the pieces behind the scenes.</p>
-<p>Why split at all? First, <strong>download and distribution</strong> friendliness: a 200 GB model cut into dozens of few-GB shards is easier to resume, download in parallel, and mirror; second, some file systems cap single-file size, which splitting sidesteps;
-third, it eases <strong>selective loading</strong>. The large models you see on HuggingFace often have weight files like a long <span class="mono">...-of-00010.gguf</span> series.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Why split at all? First, <strong>download and distribution</strong> friendliness: a 200 GB model cut into dozens of few-GB shards is easier to resume, download in parallel, and mirror; second, some file systems cap single-file size, which splitting sidesteps; third, it eases <strong>selective loading</strong>. The large models you see on HuggingFace often have weight files like a long <span class="mono">...-of-00010.gguf</span> series.
+</div>
 <p>A natural question: after splitting, does the earlier mmap zero-copy still hold? It does - the loader makes one mapping per shard (<span class="mono">mappings</span> is a set, not a single map), each tensor's <span class="mono">idx</span> records which shard it belongs to,
 and <span class="mono">load_data_for</span> fetches from that shard's mapping. So "splitting" and "zero-copy" are orthogonal: splitting solves "the file is too big to move around", mmap solves "the data is too big to copy"; together, a huge model is both easy to distribute and instant to load.</p>
 <p>Clearing up a misconception: splitting is not a special mode. A single-file model is just the degenerate "one shard" case - <span class="mono">split.count</span> is 1 (or the key is simply absent). The loader's code is written <strong>uniformly</strong> as "there may be multiple shards", and a single file is just the one-shard special case.
@@ -624,7 +635,10 @@ and returns a <span class="mono">llama_model</span> - whose weight tensors alrea
 <p>Loading ends here. The next lesson (L15) asks what comes next: this pile of "named tensors" - how does it know which architecture it belongs to (llama? qwen2?), which parts each layer has, how it is organized by the hyperparameters - that is, <strong>by what blueprint</strong> the loader's output is assembled into a model.</p>
 <p>A bit more on what the <span class="mono">llama_model</span> you get after loading actually is: a <strong>read-only</strong> object holding all weight tensors (data pointers into mmap), plus the hyperparameters read from metadata (L15 packs them into <span class="mono">llama_hparams</span>) and the vocab (L20).
 It contains no "session state" - no KV cache, no notion of where computation currently is. That foreshadows why the next layer (L17) separates <span class="mono">llama_model</span> from <span class="mono">llama_context</span>: knowledge (weights) is read-only and shareable, state (KV/progress) is per-session. What this loading lesson delivers is exactly that "read-only knowledge".</p>
-<p>By the way: load failures are signaled clearly - a wrong magic, an unknown version, a missing required tensor, and the loader errors out on the spot rather than limping on. This "surface problems at load time" approach is far friendlier than "crash halfway through", and is a benefit of centralizing validation in the loader layer.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  By the way: load failures are signaled clearly - a wrong magic, an unknown version, a missing required tensor, and the loader errors out on the spot rather than limping on. This "surface problems at load time" approach is far friendlier than "crash halfway through", and is a benefit of centralizing validation in the loader layer.
+</div>
 <p>To close this lesson: the loader stands between "format" and "model" - downward it only cares how GGUF's bytes are laid out (L13), upward it only delivers a clean, name-addressable set of tensors with data in place. It knows nothing of attention, nothing of how llama differs from qwen - those belong to the lessons above.
 This very "each does its job, with clear boundaries" layering is what lets llama.cpp keep supporting more format details on one side and more architectures on the other, with the two rarely entangling. Understand loading and you hold the first link from disk to model.</p>
 <p>Finally, a look at why the "entry -&gt; _impl -&gt; _load" chain has so many layers. The outermost <span class="mono">llama_model_load_from_file</span> is the <strong>stable public C API</strong>, meant to stay unchanged for the long run and be called by bindings in many languages;

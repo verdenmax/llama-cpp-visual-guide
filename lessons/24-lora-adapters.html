@@ -326,7 +326,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <p>先想清楚全量微调的痛点。一个几十亿参数的模型，要让它适配一个新任务，传统做法是继续训练、更新它的<strong>所有</strong>权重，然后把这一整套新权重存下来。问题是：每个任务都得存一份几十 GB 的模型，训练也要很大显存——又贵、又占地方、又难分享。</p>
 <p>LoRA 换了个思路：<strong>冻结</strong>原权重一个字节都不改，只在旁边学两个小矩阵 A、B。要用的时候，把 A、B 算出的增量临时加到原权重上即可。于是你存的、传的、加载的"适配器"，就只有 A、B 这两个小矩阵，常常只有几 MB——和几十 GB 的全量微调一比，省了好几个数量级。</p>
 <p>这背后的关键假设是：微调给权重带来的改变，往往集中在一个<strong>低维子空间</strong>里。换句话说，"让模型学会某个新任务"所需的调整，没那么多自由度，用一个低秩矩阵就能很好地近似。正是这个洞察，让"只学两个小矩阵"成为可能，且效果出奇地好。</p>
-<p>实际收益是实打实的：一个基础模型 + 一堆几 MB 的 LoRA，就能变出无数"专精版本"——写代码的、扮角色的、特定领域的，随用随挂。基础模型只读、只存一份，差异全在那些小适配器里。这种"一份底座、多个补丁"的格局，正是 LoRA 流行的根本原因。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  实际收益是实打实的：一个基础模型 + 一堆几 MB 的 LoRA，就能变出无数"专精版本"——写代码的、扮角色的、特定领域的，随用随挂。基础模型只读、只存一份，差异全在那些小适配器里。这种"一份底座、多个补丁"的格局，正是 LoRA 流行的根本原因。
+</div>
 <p>打个更接地气的比方。全量微调像是为了改一句话，把整本书重新印一遍；LoRA 则像在原书上贴几张便签——书没动，便签却足以表达你的修改。要换一种修改，撕掉便签换一批即可，原书永远是那一本。这种"原件不动、改动外挂"的思路，是 LoRA 一切便利的源头。</p>
 <p>它带来的协作红利也很大。社区里，大家共享的不再是几十 GB 的整模型，而是几 MB 的适配器——下载快、存储省、还能像插件一样自由组合。一个流行的基础模型周围，往往围着成百上千个各显神通的 LoRA，这种繁荣正是"轻量、可分享"换来的。</p>
 <p>当然 LoRA 不是万能的。它擅长"在已有能力上做风格化、领域化的调整"，但要让模型学会一项它<strong>完全没有</strong>的全新本领，低秩增量的表达力可能就不够，那时还得靠更重的训练。明白它的边界，才能用在刀刃上——多数"调性、格式、领域"层面的需求，LoRA 都能漂亮地接住。</p>
@@ -353,7 +356,10 @@ res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class
 }</pre>
 <p>上面这段（简化自 <span class="mono">src/llama-graph.cpp</span> 的 <span class="mono">build_lora_mm</span>）就是它在建图（L16）时干的事：先算基础的 <span class="mono">mul_mat(w, cur)</span>，再对每个生效的适配器，算 <span class="mono">B·(A·cur)</span>、乘 scale、加回去。注意这一切发生在<strong>计算图</strong>里——增量是临时算出来叠加的，并没有真去改 W 那几个 GB 的权重。</p>
 <p>那个 scale 也有讲究：它由适配器的 <span class="mono">alpha</span> 和秩 r 算出（大致是 <span class="mono">alpha/rank</span>，再乘上用户给的比例）。这个比例就是你挂载时能调的"<strong>强度</strong>"旋钮——调大，适配器的影响更强；调小，更接近原模型。把强度做成可调，让你能在"原汁原味"和"完全变身"之间平滑过渡。</p>
-<p>为什么是 A 降维、B 升维这<strong>两步</strong>，而不是直接学一个同样大小的增量矩阵？因为直接学一个 d×d 的满秩矩阵，参数量和原权重一样大，就失去意义了。拆成 d×r 和 r×d 两个瘦长矩阵（r 远小于 d），参数量从 d×d 降到 2dr——这正是"低秩"省参数的数学本质。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  为什么是 A 降维、B 升维这<strong>两步</strong>，而不是直接学一个同样大小的增量矩阵？因为直接学一个 d×d 的满秩矩阵，参数量和原权重一样大，就失去意义了。拆成 d×r 和 r×d 两个瘦长矩阵（r 远小于 d），参数量从 d×d 降到 2dr——这正是"低秩"省参数的数学本质。
+</div>
 <p>再把"秩"这个词说透一点。一个矩阵的秩，粗略地说就是它"真正独立的方向"有多少。满秩意味着各个方向都用上了，信息量最大但也最占参数；低秩则是说"其实只用了少数几个方向就够描述这次改动"。LoRA 赌的就是：适配一个任务所需的改动，本质上是低秩的，于是用 r 个方向（A、B 的中间维度就是 r）足以近似。</p>
 <p>还有个常被忽略的细节：A、B 的初始化是不对称的。通常 B 初始化为全零、A 随机初始化，于是训练刚开始时增量 B·A 为零——也就是说，挂上一个<strong>没训练过</strong>的 LoRA，对模型毫无影响，和不挂一样。训练过程才慢慢让这个增量长出有用的方向。这个"从零开始、平滑加入"的设计，让 LoRA 训练既稳定又安全。</p>
 
@@ -375,7 +381,10 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 </div>
 <p>"能同时挂多个、各带 scale"不是摆设，而是<strong>能力叠加</strong>的基础：你可以把"中文风格"和"法律领域"两个 LoRA 同时挂上、各给一个权重，让模型同时具备两种特长。批量接口天然支持这种组合——这也是为什么它被设计成一组 <span class="mono">{适配器, scale}</span>，而不是一次只能挂一个。</p>
 <p>还要强调那个"<strong>不复制权重</strong>"：挂载只是在 context 上记下"现在生效哪些适配器、各什么 scale"，真正的叠加发生在每次 decode 建图时（<span class="mono">build_lora_mm</span>）。所以挂上、卸下 LoRA 几乎是零成本的——不涉及那几十 GB 权重的任何拷贝或修改，切换风格快得像换个滤镜。</p>
-<p>适配器为什么也用 <span class="mono">.gguf</span> 格式（L13）？因为 LoRA 本质上也是"一堆带名字的张量"（A、B 矩阵，按它们要修改的目标权重命名），和模型权重是同一类东西。复用 GGUF 这套自描述格式，意味着加载器（L14）几乎能照搬——读元数据、按名字建张量清单，连工具链都是现成的。一种格式通吃，省了重复造轮子。</p>
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  适配器为什么也用 <span class="mono">.gguf</span> 格式（L13）？因为 LoRA 本质上也是"一堆带名字的张量"（A、B 矩阵，按它们要修改的目标权重命名），和模型权重是同一类东西。复用 GGUF 这套自描述格式，意味着加载器（L14）几乎能照搬——读元数据、按名字建张量清单，连工具链都是现成的。一种格式通吃，省了重复造轮子。
+</div>
 <p>挂载时按目标张量名对号入座，也呼应了 L15 的命名约定。每个 LoRA 张量的名字，记着它要修改的是哪一层的哪个权重（比如某层的 attn_q）。建图时 <span class="mono">build_lora_mm</span> 算到那个权重，就去适配器里按名字找有没有对应的 A、B，有就把增量加上。名字再一次成了把"权重"和"补丁"对上的关键。</p>
 <p>这种设计还带来一个好处：同一个 LoRA 文件，能套到任何<strong>结构兼容</strong>的基础模型上——因为它修改的目标是按名字指定的，不绑死某个具体模型实例。于是社区里一个针对某架构训练的 LoRA，常常能直接用在该架构的不同微调版本上。名字驱动的松耦合，让适配器的复用范围大大扩展。</p>
 <p>顺带提一个实践中的常见组合：很多人用一个量化过的基础模型（L12）+ 一个 LoRA 适配器来跑，既享受量化省下的显存、又靠适配器获得任务特长。llama.cpp 对这种"量化底座 + LoRA"是支持的——适配器的增量在建图时按需叠加，和底座怎么量化基本正交。省显存和可定制，两个好处可以同时要。</p>
@@ -510,7 +519,10 @@ All through Part 4, you can now load, infer, tokenize, sample, apply chat format
 <p>First, see full fine-tuning's pain point clearly. To adapt a billions-of-parameters model to a new task, the traditional way is to keep training and update <strong>all</strong> its weights, then store this whole new weight set. The problem: each task needs its own tens-of-GB model, training takes lots of VRAM - expensive, space-hungry, and hard to share.</p>
 <p>LoRA takes a different tack: <strong>freeze</strong> the original weights, not a byte changed, and learn just two small matrices A, B alongside. To use it, temporarily add the delta computed from A and B onto the original weights. So the "adapter" you store, share, and load is just those two small matrices A and B, often only a few MB - compared to tens of GB of full fine-tuning, several orders of magnitude smaller.</p>
 <p>The key assumption behind this is: the change fine-tuning brings to the weights often concentrates in a <strong>low-dimensional subspace</strong>. In other words, the adjustment needed to "make the model learn a task" has not that many degrees of freedom, and a low-rank matrix approximates it well. It is exactly this insight that makes "learn just two small matrices" possible, and surprisingly effective.</p>
-<p>The real payoff is concrete: one base model + a pile of few-MB LoRAs conjures countless "specialized versions" - a coder, a role-player, a domain expert, attached on demand. The base model is read-only, stored once, and all the difference lives in those small adapters. This "one base, many patches" pattern is the fundamental reason LoRA caught on.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The real payoff is concrete: one base model + a pile of few-MB LoRAs conjures countless "specialized versions" - a coder, a role-player, a domain expert, attached on demand. The base model is read-only, stored once, and all the difference lives in those small adapters. This "one base, many patches" pattern is the fundamental reason LoRA caught on.
+</div>
 <p>A more down-to-earth analogy. Full fine-tuning is like reprinting a whole book to change one sentence; LoRA is like sticking a few notes onto the original book - the book is untouched, yet the notes suffice to express your edits. To change an edit, peel the notes and swap a new batch; the original book is forever that one book. This "original untouched, edits attached" thinking is the source of all of LoRA's convenience.</p>
 <p>The collaboration dividend is large too. In the community, what people share is no longer the tens-of-GB whole model but few-MB adapters - fast to download, cheap to store, and freely combinable like plugins. A popular base model is often surrounded by hundreds or thousands of LoRAs each with its own trick, a flourishing bought precisely by "lightweight and shareable".</p>
 <p>Of course LoRA is not omnipotent. It excels at "stylistic, domain-specific adjustments on top of existing ability", but to make the model learn a brand-new skill it <strong>utterly lacks</strong>, the low-rank delta's expressiveness may fall short, and heavier training is then needed. Knowing its boundary lets you use it where it counts - most needs at the "tone, format, domain" level, LoRA catches beautifully.</p>
@@ -537,7 +549,10 @@ res = <span class="fn">ggml_mul_mat</span>(w, cur);                  <span class
 }</pre>
 <p>The snippet above (simplified from <span class="mono">src/llama-graph.cpp</span>'s <span class="mono">build_lora_mm</span>) is what it does at graph-build time (L16): first compute the base <span class="mono">mul_mat(w, cur)</span>, then for each active adapter compute <span class="mono">B*(A*cur)</span>, multiply by scale, and add back. Note all this happens in the <strong>compute graph</strong> - the delta is computed and added on the fly, never actually modifying those GB of W weights.</p>
 <p>That scale matters too: it is computed from the adapter's <span class="mono">alpha</span> and the rank r (roughly <span class="mono">alpha/rank</span>, times a user-given ratio). This ratio is the "<strong>strength</strong>" knob you can tune at attach time - turn it up for a stronger adapter influence, down to stay closer to the original model. Making strength adjustable lets you glide smoothly between "as-is" and "fully transformed".</p>
-<p>Why the <strong>two steps</strong> of A down, B up, rather than learning one delta matrix of the same size directly? Because learning a full-rank d x d matrix directly has as many parameters as the original weight, defeating the point. Splitting into two slim matrices d x r and r x d (r far smaller than d) drops the parameters from d squared to 2dr - this is the mathematical essence of "low rank" saving parameters.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  Why the <strong>two steps</strong> of A down, B up, rather than learning one delta matrix of the same size directly? Because learning a full-rank d x d matrix directly has as many parameters as the original weight, defeating the point. Splitting into two slim matrices d x r and r x d (r far smaller than d) drops the parameters from d squared to 2dr - this is the mathematical essence of "low rank" saving parameters.
+</div>
 <p>Let me spell out the word "rank" a bit more. A matrix's rank is, roughly, how many "truly independent directions" it has. Full rank means all directions are used, maximal information but also maximal parameters; low rank says "actually only a few directions suffice to describe this change". LoRA's bet is exactly that the change needed to adapt a task is essentially low-rank, so r directions (the inner dimension of A and B is r) approximate it well enough.</p>
 <p>One often-missed detail: the initialization of A and B is asymmetric. Usually B is initialized to all zeros and A randomly, so at the start of training the delta B*A is zero - that is, attaching an <strong>untrained</strong> LoRA has no effect on the model, the same as attaching none. Only training gradually grows useful directions in this delta. This "start from zero, join smoothly" design makes LoRA training both stable and safe.</p>
 
@@ -559,7 +574,10 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
 </div>
 <p>"Attach several at once, each with a scale" is no ornament but the basis of <strong>stacking abilities</strong>: you can attach a "Chinese style" and a "legal domain" LoRA at once, each with a weight, giving the model both specialties. The batched interface naturally supports this combination - which is why it is designed as a set of <span class="mono">{adapter, scale}</span>, not one-at-a-time.</p>
 <p>Stress that "<strong>no weight copy</strong>" again: attaching merely records on the context "which adapters are active now, each at what scale"; the real addition happens at each decode's graph build (<span class="mono">build_lora_mm</span>). So attaching and detaching a LoRA is nearly free - involving no copy or modification of those GB of weights, switching styles as fast as swapping a filter.</p>
-<p>Why is an adapter also in <span class="mono">.gguf</span> format (L13)? Because a LoRA is essentially also "a bunch of named tensors" (the A, B matrices, named after the target weights they modify), the same kind of thing as model weights. Reusing GGUF's self-describing format means the loader (L14) can be reused almost verbatim - read metadata, build the tensor list by name, even the toolchain is ready-made. One format fits all, sparing reinvented wheels.</p>
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Why is an adapter also in <span class="mono">.gguf</span> format (L13)? Because a LoRA is essentially also "a bunch of named tensors" (the A, B matrices, named after the target weights they modify), the same kind of thing as model weights. Reusing GGUF's self-describing format means the loader (L14) can be reused almost verbatim - read metadata, build the tensor list by name, even the toolchain is ready-made. One format fits all, sparing reinvented wheels.
+</div>
 <p>Matching by target tensor name at attach time also echoes L15's naming convention. Each LoRA tensor's name records which layer's which weight it modifies (say a layer's attn_q). At graph build, when <span class="mono">build_lora_mm</span> reaches that weight, it looks up the adapter by name for a matching A, B, and adds the delta if found. Names once again become the key that pairs "weight" with "patch".</p>
 <p>This design brings another benefit: the same LoRA file can apply to any <strong>structurally compatible</strong> base model - because its modification targets are specified by name, not bound to a specific model instance. So a community LoRA trained for one architecture can often be used directly on different fine-tuned versions of that architecture. Name-driven loose coupling vastly expands an adapter's reuse range.</p>
 <p>A common combination in practice worth mentioning: many people run a quantized base model (L12) + a LoRA adapter, enjoying the VRAM saved by quantization while gaining task specialty from the adapter. llama.cpp supports this "quantized base + LoRA" - the adapter's delta is added on demand at graph build, largely orthogonal to how the base is quantized. Saving VRAM and staying customizable, you can have both.</p>
