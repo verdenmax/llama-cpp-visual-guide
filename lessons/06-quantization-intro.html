@@ -413,6 +413,27 @@ for i in range(32):
 <p>顺带一问：块大小为什么常取 <strong>32</strong>？这又是一处权衡——块越小，scale 越贴合局部、精度越高，但要存的 scale 越多、压缩率下降；块越大则相反。
 32 是精度和体积之间一个经过实践检验的折中，也正好契合硬件上常见的并行宽度，算起来顺手。K-quant 用 256 的超块再细分，则是想"<strong>既要大块的高压缩率、又要小块的高精度</strong>"，
 试图鱼和熊掌兼得。</p>
+<p>把一组真实权重压一遍再还原，"有损但损得很小"就看得见了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次量化往返</b>：4 个权重压成 4-bit 再还原，看误差有多小（数字为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 原始权重</h5>
+      <div class="cellrow"><span class="vc">0.46</span><span class="vc">-0.12</span><span class="vc">0.31</span><span class="vc">-0.40</span></div>
+      <div class="tlab">块内 4 个 fp16</div></div>
+    <div class="op">找最大<br>定 scale</div>
+    <div class="stn"><h5>② scale d</h5>
+      <div class="cellrow"><span class="vc hot">-0.058</span></div>
+      <div class="tlab">d = max/-8 = 0.46/-8</div></div>
+    <div class="op">量化<br>round(x/d)+8</div>
+    <div class="stn"><h5>③ 4-bit 码</h5>
+      <div class="cellrow"><span class="vc">0</span><span class="vc">10</span><span class="vc">3</span><span class="vc">15</span></div>
+      <div class="tlab">存进 0..15</div></div>
+    <div class="op">反量化<br>(q-8)×d</div>
+    <div class="stn"><h5>④ 还原值</h5>
+      <div class="cellrow"><span class="vc blue">0.46</span><span class="vc blue">-0.12</span><span class="vc blue">0.29</span><span class="vc blue">-0.40</span></div>
+      <div class="tlab">误差 ≤ 0.02</div></div>
+  </div>
+</div>
 
 <h2>Q8_0 / K-quant：精度与压缩的取舍</h2>
 <p>Q4_0 只是量化大家庭里的一个。同样的"块 + scale"思路，换一换参数，就是不同档位：</p>
@@ -658,6 +679,27 @@ quantization error comes from.</p>
 scales, lowering the compression ratio; larger blocks do the reverse. 32 is a practice-tested compromise between accuracy and size, and it also matches common hardware
 parallel widths, so it computes nicely. K-quant's 256-weight super-block with sub-division then tries to get "<strong>both the high compression of big blocks and the
 high accuracy of small ones</strong>".</p>
+<p>Push a few real weights through and back, and "lossy but barely" becomes visible:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one quantization round-trip</b>: 4 weights squeezed to 4-bit and restored - see how small the error is (numbers illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) original weights</h5>
+      <div class="cellrow"><span class="vc">0.46</span><span class="vc">-0.12</span><span class="vc">0.31</span><span class="vc">-0.40</span></div>
+      <div class="tlab">4 fp16 in a block</div></div>
+    <div class="op">find max<br>set scale</div>
+    <div class="stn"><h5>(2) scale d</h5>
+      <div class="cellrow"><span class="vc hot">-0.058</span></div>
+      <div class="tlab">d = max/-8 = 0.46/-8</div></div>
+    <div class="op">quantize<br>round(x/d)+8</div>
+    <div class="stn"><h5>(3) 4-bit codes</h5>
+      <div class="cellrow"><span class="vc">0</span><span class="vc">10</span><span class="vc">3</span><span class="vc">15</span></div>
+      <div class="tlab">stored in 0..15</div></div>
+    <div class="op">dequant<br>(q-8)*d</div>
+    <div class="stn"><h5>(4) restored</h5>
+      <div class="cellrow"><span class="vc blue">0.46</span><span class="vc blue">-0.12</span><span class="vc blue">0.29</span><span class="vc blue">-0.40</span></div>
+      <div class="tlab">error &lt;= 0.02</div></div>
+  </div>
+</div>
 
 <h2>Q8_0 / K-quant: trading accuracy against compression</h2>
 <p>Q4_0 is just one member of the quantization family. The same "block + scale" idea, with different parameters, gives different tiers:</p>
