@@ -2305,7 +2305,27 @@ LESSON_21 = {
 </div>
 <p>于是管线大致长这样：先用惩罚压低重复，再用 top-k/top-p 砍掉长尾候选，接着用温度调节剩下分布的软硬，最后用 dist 按概率抽一个（或 greedy 直接取最大）。每一步只做一件小事，叠起来就是一套完整的采样策略。</p>
 <p>要强调的是，这套管线只动 logits/概率、<strong>不碰模型本身</strong>。模型每步老老实实算出同一排 logits，至于怎么从中选词，全由采样这层说了算。所以"换个生成风格"根本不用动模型，调调采样参数即可——这也是同一个模型能时而严谨、时而天马行空的原因。</p>
-<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。</p>
+<p>不妨把这排 logits 想象成一座<strong>高低起伏的山脉</strong>：模型越看好的词，峰就越高。采样要做的，就是按这座山的形状来取舍——只在高峰附近选（保守），还是连山脚的小丘也给点机会（发散）。后面的每个采样器，其实都在<strong>重塑这座山的轮廓</strong>，再决定从哪儿落子。这个画面记住了，后面的 top-k、温度就都好理解了。把这条链路用一个具体例子走一遍就清楚了：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次采样</b>：5 个候选词，看一排 logits 怎么一步步变成最终选中的一个 token（数字为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① logits</h5>
+      <div class="cellrow"><span class="vc">3.2</span><span class="vc">2.1</span><span class="vc">1.0</span><span class="vc">0.5</span><span class="vc">-0.3</span></div>
+      <div class="tlab">cat / dog / sky / run / blue</div></div>
+    <div class="op">÷T<br>T=0.7</div>
+    <div class="stn"><h5>② 温度缩放</h5>
+      <div class="cellrow"><span class="vc">4.6</span><span class="vc">3.0</span><span class="vc">1.4</span><span class="vc">0.7</span><span class="vc">-.4</span></div>
+      <div class="tlab">T&lt;1 放大差距</div></div>
+    <div class="op">top-k<br>k=3</div>
+    <div class="stn"><h5>③ 截断候选</h5>
+      <div class="cellrow"><span class="vc hot">4.6</span><span class="vc hot">3.0</span><span class="vc hot">1.4</span><span class="vc dim">0.7</span><span class="vc dim">-.4</span></div>
+      <div class="tlab">只留分数最高的 3 个</div></div>
+    <div class="op">softmax<br>top-p .9</div>
+    <div class="stn"><h5>④ 概率 → 采样</h5>
+      <div class="cellrow"><span class="vc blue">.78</span><span class="vc blue">.18</span><span class="vc dim">.04</span></div>
+      <div class="tlab">按概率抽一个 → <strong>cat</strong></div></div>
+  </div>
+</div>
 
 <h2>采样器接口</h2>
 <pre class="code"><span class="cm">// 简化自 include/llama.h</span>
@@ -2466,7 +2486,27 @@ Last lesson the vocab turned text into token ids fed to the model; the model com
 </div>
 <p>So the pipeline looks roughly like this: penalties damp repeats first, top-k/top-p chop the long tail, then temperature tunes the softness of what remains, and finally dist draws one by probability (or greedy takes the max). Each step does one small thing; stacked together they are a complete sampling strategy.</p>
 <p>Worth stressing: this pipeline touches only logits/probabilities, <strong>never the model itself</strong>. The model dutifully computes the same row of logits each step; how a word is chosen from them is entirely up to the sampling layer. So "change the generation style" needs no change to the model, just sampling parameters - which is why one model can be rigorous one moment and wildly imaginative the next.</p>
-<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy.</p>
+<p>Picture this row of logits as a <strong>mountain range of peaks and valleys</strong>: the more the model favors a word, the higher its peak. Sampling chooses by the shape of this range - pick only near the high peaks (conservative), or give the foothills a chance too (divergent). Every later sampler is really <strong>reshaping this range's outline</strong> before deciding where to land. Hold this picture, and top-k and temperature later all become easy. Walking one concrete example through this pipeline makes it click:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one sampling step</b>: 5 candidate words - watch a row of logits become the single chosen token (numbers illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) logits</h5>
+      <div class="cellrow"><span class="vc">3.2</span><span class="vc">2.1</span><span class="vc">1.0</span><span class="vc">0.5</span><span class="vc">-0.3</span></div>
+      <div class="tlab">cat / dog / sky / run / blue</div></div>
+    <div class="op">/T<br>T=0.7</div>
+    <div class="stn"><h5>(2) temperature</h5>
+      <div class="cellrow"><span class="vc">4.6</span><span class="vc">3.0</span><span class="vc">1.4</span><span class="vc">0.7</span><span class="vc">-.4</span></div>
+      <div class="tlab">T&lt;1 widens gaps</div></div>
+    <div class="op">top-k<br>k=3</div>
+    <div class="stn"><h5>(3) truncate</h5>
+      <div class="cellrow"><span class="vc hot">4.6</span><span class="vc hot">3.0</span><span class="vc hot">1.4</span><span class="vc dim">0.7</span><span class="vc dim">-.4</span></div>
+      <div class="tlab">keep the top 3 only</div></div>
+    <div class="op">softmax<br>top-p .9</div>
+    <div class="stn"><h5>(4) probs -&gt; sample</h5>
+      <div class="cellrow"><span class="vc blue">.78</span><span class="vc blue">.18</span><span class="vc dim">.04</span></div>
+      <div class="tlab">draw one by probability -&gt; <strong>cat</strong></div></div>
+  </div>
+</div>
 
 <h2>The sampler interface</h2>
 <pre class="code"><span class="cm">// simplified from include/llama.h</span>
