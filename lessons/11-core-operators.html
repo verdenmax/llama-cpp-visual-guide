@@ -349,6 +349,37 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 <h2>头号算子：矩阵乘 mul_mat</h2>
 <p>神经网络里<strong>绝大部分的计算量，都花在矩阵乘上</strong>——注意力、前馈层、输出投影，本质都是矩阵乘。所以 <span class="mono">ggml_mul_mat</span>
 是当之无愧的头号算子。它的形状规则，是这一课<strong>最该记牢</strong>的一条：</p>
+<p>先用一个具体的小例子看清这条规则：结果里的每个数，都是 A 的一行配 B 的一列、对应位置相乘再求和——于是内维 k 消失，只剩下两边各自的"另一维"。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次矩阵乘</b>：[k=3,m=2] x [k=3,n=2]，看内维 k 怎么被"乘加求和"吃掉，只剩 [m,n]（数字为示意）。</div>
+  <svg viewBox="0 0 482 268" width="100%" role="img" aria-label="matrix multiply worked example">
+<g font-family="ui-monospace,monospace" font-size="14">
+<text x="40" y="142" fill="#5b6470" font-size="12">A  ne=[3,2]</text>
+<text x="360" y="22" fill="#5b6470" font-size="12">B  ne=[3,2]</text>
+<text x="360" y="246" fill="#5b6470" font-size="12">C = A&#183;B  ne=[2,2]</text>
+<line x1="178" y1="169" x2="360" y2="169" stroke="#cdd5df" stroke-dasharray="3 3"/>
+<line x1="383" y1="144" x2="383" y2="150" stroke="#cdd5df" stroke-dasharray="3 3"/>
+<text x="269" y="163" text-anchor="middle" fill="#c2630e" font-size="10">对 k=3 求和</text>
+<rect x="40" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="63" y="174" text-anchor="middle" fill="#fff">1</text>
+<rect x="86" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="109" y="174" text-anchor="middle" fill="#fff">0</text>
+<rect x="132" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="155" y="174" text-anchor="middle" fill="#fff">2</text>
+<rect x="40" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="63" y="212" text-anchor="middle" fill="#1d2129">-1</text>
+<rect x="86" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="109" y="212" text-anchor="middle" fill="#1d2129">3</text>
+<rect x="132" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="155" y="212" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="360" y="30" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="54" text-anchor="middle" fill="#fff">2</text>
+<rect x="406" y="30" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="54" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="360" y="68" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="92" text-anchor="middle" fill="#fff">1</text>
+<rect x="406" y="68" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="92" text-anchor="middle" fill="#1d2129">0</text>
+<rect x="360" y="106" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="130" text-anchor="middle" fill="#fff">0</text>
+<rect x="406" y="106" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="130" text-anchor="middle" fill="#1d2129">2</text>
+<rect x="360" y="150" width="46" height="38" rx="4" fill="#2563eb" stroke="#2563eb"/><text x="383" y="174" text-anchor="middle" fill="#fff" font-weight="700">2</text>
+<rect x="406" y="150" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="174" text-anchor="middle" fill="#1d2129">5</text>
+<rect x="360" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="383" y="212" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="406" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="212" text-anchor="middle" fill="#1d2129">1</text>
+</g>
+<text x="20" y="266" font-size="12" fill="#2563eb" font-family="ui-monospace,monospace">C[0,0] = 1&#183;2 + 0&#183;1 + 2&#183;0 = 2</text>
+</svg>
+</div>
 <div class="cellgroup">
   <div class="cg-cap"><b>mul_mat 形状推导</b>：内维 ne[0] 必须相等(被消去)，结果取两者的"另一维"</div>
   <div class="cells"><span class="lab">a</span><span class="cell hl">k</span><span class="cell">m</span><span class="lab">ne=[k, m]</span></div>
@@ -568,6 +599,37 @@ becomes mostly readable - you can tell what each line is assembling.</p>
 <h2>The number-one operator: matmul mul_mat</h2>
 <p>In a neural network, <strong>the vast majority of compute goes into matrix multiplication</strong> - attention, feed-forward, output projection are all essentially matmuls.
 So <span class="mono">ggml_mul_mat</span> is the undisputed number-one operator. Its shape rule is the one thing this lesson is <strong>most worth memorizing</strong>:</p>
+<p>See the rule in action with a small concrete example first: each output number is one row of A times one column of B - multiplied position by position, then summed - so the inner dim k vanishes and only each side's other dim is left.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one matmul</b>: [k=3,m=2] x [k=3,n=2] - watch the inner dim k get eaten by multiply-and-sum, leaving [m,n] (numbers illustrative).</div>
+  <svg viewBox="0 0 482 268" width="100%" role="img" aria-label="matrix multiply worked example">
+<g font-family="ui-monospace,monospace" font-size="14">
+<text x="40" y="142" fill="#5b6470" font-size="12">A  ne=[3,2]</text>
+<text x="360" y="22" fill="#5b6470" font-size="12">B  ne=[3,2]</text>
+<text x="360" y="246" fill="#5b6470" font-size="12">C = A.B  ne=[2,2]</text>
+<line x1="178" y1="169" x2="360" y2="169" stroke="#cdd5df" stroke-dasharray="3 3"/>
+<line x1="383" y1="144" x2="383" y2="150" stroke="#cdd5df" stroke-dasharray="3 3"/>
+<text x="269" y="163" text-anchor="middle" fill="#c2630e" font-size="10">sum over k=3</text>
+<rect x="40" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="63" y="174" text-anchor="middle" fill="#fff">1</text>
+<rect x="86" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="109" y="174" text-anchor="middle" fill="#fff">0</text>
+<rect x="132" y="150" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="155" y="174" text-anchor="middle" fill="#fff">2</text>
+<rect x="40" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="63" y="212" text-anchor="middle" fill="#1d2129">-1</text>
+<rect x="86" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="109" y="212" text-anchor="middle" fill="#1d2129">3</text>
+<rect x="132" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="155" y="212" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="360" y="30" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="54" text-anchor="middle" fill="#fff">2</text>
+<rect x="406" y="30" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="54" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="360" y="68" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="92" text-anchor="middle" fill="#fff">1</text>
+<rect x="406" y="68" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="92" text-anchor="middle" fill="#1d2129">0</text>
+<rect x="360" y="106" width="46" height="38" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="383" y="130" text-anchor="middle" fill="#fff">0</text>
+<rect x="406" y="106" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="130" text-anchor="middle" fill="#1d2129">2</text>
+<rect x="360" y="150" width="46" height="38" rx="4" fill="#2563eb" stroke="#2563eb"/><text x="383" y="174" text-anchor="middle" fill="#fff" font-weight="700">2</text>
+<rect x="406" y="150" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="174" text-anchor="middle" fill="#1d2129">5</text>
+<rect x="360" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="383" y="212" text-anchor="middle" fill="#1d2129">1</text>
+<rect x="406" y="188" width="46" height="38" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="429" y="212" text-anchor="middle" fill="#1d2129">1</text>
+</g>
+<text x="20" y="266" font-size="12" fill="#2563eb" font-family="ui-monospace,monospace">C[0,0] = 1*2 + 0*1 + 2*0 = 2</text>
+</svg>
+</div>
 <div class="cellgroup">
   <div class="cg-cap"><b>mul_mat shape inference</b>: the inner dim ne[0] must be equal (eliminated); the result takes each one's "other dim"</div>
   <div class="cells"><span class="lab">a</span><span class="cell hl">k</span><span class="cell">m</span><span class="lab">ne=[k, m]</span></div>
