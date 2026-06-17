@@ -623,6 +623,44 @@ ptr    = (<span class="kw">char</span>*)tensor-&gt;data + offset   <span class="
 ggml 允许某些维度上"<strong>一个元素当很多元素用</strong>"——靠的还是 stride 的小把戏：把那一维的 <span class="mono">nb</span> 设成 0，下标怎么变、
 地址都不动，于是同一个值被反复读取，看起来就像"复制"了一遍，实际上<strong>一个字节都没多占</strong>。这又是一次"改 nb 而不搬 data"的典型，
 和 view、转置一脉相承。</p>
+<p>就拿转置来说，把它摊开看最清楚：同一排内存，原张量横着读、转置竖着读，6 个值一个都没动。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次转置</b>：[3,2] 变 [2,3] 只是换了 ne/nb 怎么读这块内存，底层 6 个字节一个都没搬。</div>
+  <svg viewBox="0 0 560 268" width="100%" role="img" aria-label="转置示例：ne/nb 互换，内存不动">
+<g font-family="ui-monospace,monospace" font-size="14">
+<text x="20" y="20" fill="#5b6470" font-size="12">原始 ne=[3,2] nb=[4,12]</text>
+<text x="360" y="20" fill="#5b6470" font-size="12">转置 ne=[2,3] nb=[12,4]</text>
+<rect x="20" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="66" y="30" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="87" y="50" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="112" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="20" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="66" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="87" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="112" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="360" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="406" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="360" y="64" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="381" y="84" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="406" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="360" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="406" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="40" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="76" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<text x="76" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+0</text>
+<rect x="118" y="180" width="72" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="154" y="200" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<text x="154" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+4</text>
+<rect x="196" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="232" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<text x="232" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+8</text>
+<rect x="274" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="310" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<text x="310" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+12</text>
+<rect x="352" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="388" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<text x="388" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+16</text>
+<rect x="430" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="466" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<text x="466" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+20</text>
+<text x="40" y="170" fill="#5b6470" font-size="12">底层内存：6 个值一个都没搬（offset 单位:字节）</text>
+<line x1="87" y1="60" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<line x1="381" y1="94" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+</g>
+<text x="40" y="262" fill="#c2630e" font-size="12" font-family="ui-monospace,monospace">同一个 b：在两种网格里位置不同，指向的却是同一块内存</text>
+</svg>
+</div>
 <p>一个最常见的 reshape 例子：把形状 <span class="mono">[n_embd, n_tokens]</span> 的激活，按多头注意力的需要"摊"成
 <span class="mono">[head_dim, n_head, n_tokens]</span>——元素总数没变（<span class="mono">n_embd = head_dim × n_head</span>），数据也没搬，
 只是<strong>重新解释了 ne/nb</strong>，就把"一个大向量"看成了"若干个头各自的小向量"。课 04 说的多头注意力里，大量这种"同一块数据、换个形状看"的操作，
@@ -830,6 +868,44 @@ big stride each time and misses the cache more often. Many operator implementati
 every row), ggml lets some dimension use "<strong>one element as many</strong>" - again via a stride trick: set that dim's <span class="mono">nb</span> to 0, so no
 matter how the index changes the address does not, and the same value is re-read, looking "copied" while taking <strong>not one extra byte</strong>. Another
 "change nb, don't move data" classic, of a piece with views and transpose.</p>
+<p>Take transpose itself, laid out in full: the same row of memory, read across as the original and down as the transpose - none of the 6 values moved.</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one transpose</b>: [3,2] -&gt; [2,3] just changes how ne/nb read this memory; the 6 underlying bytes never move.</div>
+  <svg viewBox="0 0 560 268" width="100%" role="img" aria-label="transpose worked example">
+<g font-family="ui-monospace,monospace" font-size="14">
+<text x="20" y="20" fill="#5b6470" font-size="12">original ne=[3,2] nb=[4,12]</text>
+<text x="360" y="20" fill="#5b6470" font-size="12">transposed ne=[2,3] nb=[12,4]</text>
+<rect x="20" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="66" y="30" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="87" y="50" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="112" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="20" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="41" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="66" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="87" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="112" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="133" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="360" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<rect x="406" y="30" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="50" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<rect x="360" y="64" width="42" height="30" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="381" y="84" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<rect x="406" y="64" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="84" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<rect x="360" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="381" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<rect x="406" y="98" width="42" height="30" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="427" y="118" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<rect x="40" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="76" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">a</text>
+<text x="76" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+0</text>
+<rect x="118" y="180" width="72" height="34" rx="4" fill="#c2630e" stroke="#c2630e"/><text x="154" y="200" text-anchor="middle" fill="#fff" font-weight="700">b</text>
+<text x="154" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+4</text>
+<rect x="196" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="232" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">c</text>
+<text x="232" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+8</text>
+<rect x="274" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="310" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">d</text>
+<text x="310" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+12</text>
+<rect x="352" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="388" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">e</text>
+<text x="388" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+16</text>
+<rect x="430" y="180" width="72" height="34" rx="4" fill="#ffffff" stroke="#cdd5df"/><text x="466" y="200" text-anchor="middle" fill="#1d2129" font-weight="700">f</text>
+<text x="466" y="230" text-anchor="middle" fill="#5b6470" font-size="11">+20</text>
+<text x="40" y="170" fill="#5b6470" font-size="12">underlying memory: 6 values never move (offset in bytes)</text>
+<line x1="87" y1="60" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+<line x1="381" y1="94" x2="154" y2="180" stroke="#c2630e" stroke-dasharray="3 3" stroke-width="1.6"/>
+</g>
+<text x="40" y="262" fill="#c2630e" font-size="12" font-family="ui-monospace,monospace">same b: different grid position, same memory cell</text>
+</svg>
+</div>
 <p>A very common reshape: take activations of shape <span class="mono">[n_embd, n_tokens]</span> and "fan them out" for multi-head attention into
 <span class="mono">[head_dim, n_head, n_tokens]</span> - the element count is unchanged (<span class="mono">n_embd = head_dim x n_head</span>) and no data moves; only
 ne/nb are <strong>reinterpreted</strong>, turning "one big vector" into "several heads' small vectors". The multi-head attention from lesson 04 is full of these
