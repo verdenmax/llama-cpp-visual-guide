@@ -94,6 +94,8 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("24-lora-adapters.html", "LoRA 适配器", "LoRA adapters",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("25-c-api.html", "C API 总览", "The C API",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -576,6 +578,8 @@ SUBTITLES = {
                         "GBNF; llama_grammar; mask sampling(-inf); root rule"),
     "24-lora-adapters.html": ("LoRA 低秩增量 scale·B·A · llama_set_adapters_lora · 控制向量",
                               "LoRA low-rank delta scale*B*A; llama_set_adapters_lora; control vectors"),
+    "25-c-api.html": ("include/llama.h：句柄、调用序列、C++ RAII 包装",
+                      "include/llama.h: handles, call sequence, the C++ RAII wrappers"),
 }
 
 

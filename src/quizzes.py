@@ -1626,6 +1626,67 @@ QUIZZES = {
             },
         ],
     },
+    "25-c-api.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model 和 llama_context，哪个能被多个会话安全共享？",
+                    "en": "Of llama_model and llama_context, which can be safely shared across sessions?",
+                },
+                "opts": [
+                    {"zh": "llama_model：加载后只读，多个 context 可共用一份", "en": "llama_model: read-only after load, many contexts can share one copy"},
+                    {"zh": "llama_context：它装着会话状态，最适合共享", "en": "llama_context: it holds session state, best for sharing"},
+                    {"zh": "两个都不能共享，必须各自独立", "en": "neither can be shared, each must be independent"},
+                    {"zh": "两个都能随便共享，无所谓", "en": "both can be shared freely, it does not matter"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_model 是只读知识（权重加载后不变），能被多个 context 共享，加载一次到处推理；llama_context 装的是每会话私有状态（KV cache、计算缓冲、采样位置），必须一个会话一个。",
+                    "en": "llama_model is read-only knowledge (weights never change after load), shareable across contexts - load once, infer in many places; llama_context holds per-session private state (KV cache, compute buffers, sampling position), so it must be one per session.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在典型调用序列里，tokenize 之后、sample 之前，缺了哪一步？",
+                    "en": "In the typical call sequence, what step sits between tokenize and sample?",
+                },
+                "opts": [
+                    {"zh": "decode 一遍计算图、取出 logits（llama_decode -> llama_get_logits）", "en": "decode the graph once and read the logits (llama_decode -> llama_get_logits)"},
+                    {"zh": "直接释放模型", "en": "free the model directly"},
+                    {"zh": "再加载一次词表", "en": "load the vocab again"},
+                    {"zh": "重新初始化后端", "en": "reinitialize the backend"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "顺序是 tokenize -> decode -> get_logits -> sample：分词得到 token 后，必须先 llama_decode 跑一遍计算图、用 llama_get_logits 取出每个 token 的分数，采样链才有分数可挑。",
+                    "en": "The order is tokenize -> decode -> get_logits -> sample: after tokenizing, you must llama_decode the graph and read per-token scores via llama_get_logits before the sampler chain has anything to pick from.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 C++ 里想让句柄自动释放，最省心的做法是？",
+                    "en": "In C++, the tidiest way to release handles automatically is?",
+                },
+                "opts": [
+                    {"zh": "用 include/llama-cpp.h 的 _ptr 别名（unique_ptr，带匹配的 _free 删除器）", "en": "use include/llama-cpp.h's _ptr aliases (unique_ptr with matching _free deleters)"},
+                    {"zh": "什么都不做，句柄会被垃圾回收", "en": "do nothing, handles are garbage-collected"},
+                    {"zh": "在每个函数末尾手写 llama_free，绝不会忘", "en": "hand-write llama_free at the end of every function, never forgetting"},
+                    {"zh": "调用 llama_backend_free 一次性清掉所有句柄", "en": "call llama_backend_free to wipe all handles at once"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "include/llama-cpp.h 给每个句柄定义了 unique_ptr 别名（llama_model_ptr 等），删除器会调用匹配的 _free，句柄一出作用域就自动释放，不怕漏放或顺序写反。C/C++ 都没有 GC，手动 _free 容易出错。",
+                    "en": "include/llama-cpp.h defines a unique_ptr alias per handle (llama_model_ptr etc.) whose deleter calls the matching _free, so a handle frees the moment it leaves scope - no missed frees or wrong order. C/C++ has no GC, and manual _free is error-prone.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 llama.cpp 对外暴露的是 C 接口而不是 C++ 类？结合 ABI 稳定性和跨语言绑定（Python/Go/Rust/Node）说说 opaque 句柄起了什么作用。",
+                "en": "Why does llama.cpp expose a C interface rather than C++ classes? Drawing on ABI stability and cross-language bindings (Python/Go/Rust/Node), explain what the opaque handles buy you.",
+            },
+        ],
+    },
 }
 
 
