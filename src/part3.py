@@ -480,6 +480,24 @@ LESSON_09 = {
     <p>第二个算子结果，<span class="mono">src = [W2, h]</span>；注意它依赖上一步的 <span class="mono">h</span>。</p>
   </div></div>
 </div>
+<p>把上面这两步画成图就一目了然：x、W1、W2 是叶子，h 和 y 是算子节点，每个节点用 src 指针指回自己的输入——于是"写下算式"就等于"连出一张有向图"。</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次建图</b>：写下 y=W2&#183;(W1&#183;x) 时，每个算子只新建一个节点、用 src 指回输入，于是长成一张有向图（还没开算）。</div>
+  <svg viewBox="0 0 600 252" width="100%" role="img" aria-label="建图示例：算子连成有向图">
+<g font-family="ui-monospace,monospace">
+<rect x="30" y="44" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="65" y="66" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="65" y="91" text-anchor="middle" fill="#5b6470" font-size="10">叶子 op=NONE</text>
+<rect x="30" y="120" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="65" y="142" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W1</text><text x="65" y="167" text-anchor="middle" fill="#5b6470" font-size="10">叶子 op=NONE</text>
+<rect x="250" y="168" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="285" y="190" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W2</text><text x="285" y="215" text-anchor="middle" fill="#5b6470" font-size="10">叶子 op=NONE</text>
+<rect x="250" y="74" width="132" height="40" rx="6" fill="#c2630e" stroke="#c2630e"/><text x="316" y="99" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">h = W1&#183;x</text><text x="316" y="127" text-anchor="middle" fill="#5b6470" font-size="10">op=MUL_MAT</text>
+<rect x="470" y="108" width="120" height="40" rx="6" fill="#c2630e" stroke="#c2630e"/><text x="530" y="133" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y = W2&#183;h</text><text x="530" y="161" text-anchor="middle" fill="#5b6470" font-size="10">op=MUL_MAT</text>
+<line x1="250" y1="90" x2="104" y2="61" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 104 61 L 113 59 L 111 67 z" fill="#9aa6b2"/><text x="176" y="71" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="250" y1="104" x2="104" y2="137" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 104 137 L 111 131 L 113 139 z" fill="#9aa6b2"/><text x="176" y="116" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="470" y1="124" x2="386" y2="97" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 386 97 L 395 95 L 392 103 z" fill="#9aa6b2"/><text x="427" y="106" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="470" y1="134" x2="324" y2="181" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 324 181 L 330 175 L 333 183 z" fill="#9aa6b2"/><text x="396" y="154" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+</g>
+<text x="30" y="240" fill="#5b6470" font-size="12" font-family="ui-monospace,monospace">拓扑序：x, W1, W2 -&gt; h -&gt; y（只连指针，还没开算）</text>
+</svg>
+</div>
 <p>这张图的妙处在于：从输出 <span class="mono">y</span> 出发，顺着 src 指针往回走，就能<strong>找到算出它所需的一切</strong>——
 y 依赖 W2 和 h，h 又依赖 W1 和 x。ggml 用 <span class="mono">ggml_build_forward_expand(graph, y)</span> 做的正是这件事：
 从你指定的输出张量出发，<strong>沿 src 递归回溯，把所有依赖按"先算谁后算谁"的顺序（拓扑排序）收集进一张 <span class="mono">ggml_cgraph</span></strong>：</p>
@@ -663,6 +681,24 @@ directed graph</strong>. Take the smallest example - two linear transforms <span
     <h4>y = mul_mat(W2, h)</h4>
     <p>the second operator result, <span class="mono">src = [W2, h]</span>; note it depends on the previous <span class="mono">h</span>.</p>
   </div></div>
+</div>
+<p>Draw those two steps as a graph and it clicks: x, W1, W2 are leaves, h and y are operator nodes, and each node points back at its inputs via src - so "writing the expression" is the same as "wiring up a directed graph".</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one graph build</b>: writing y=W2*(W1*x), each op just creates a node pointing back at its inputs via src - growing a DAG (nothing computed yet).</div>
+  <svg viewBox="0 0 600 252" width="100%" role="img" aria-label="graph build worked example">
+<g font-family="ui-monospace,monospace">
+<rect x="30" y="44" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="65" y="66" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">x</text><text x="65" y="91" text-anchor="middle" fill="#5b6470" font-size="10">leaf op=NONE</text>
+<rect x="30" y="120" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="65" y="142" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W1</text><text x="65" y="167" text-anchor="middle" fill="#5b6470" font-size="10">leaf op=NONE</text>
+<rect x="250" y="168" width="70" height="34" rx="6" fill="#ffffff" stroke="#cdd5df"/><text x="285" y="190" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="14">W2</text><text x="285" y="215" text-anchor="middle" fill="#5b6470" font-size="10">leaf op=NONE</text>
+<rect x="250" y="74" width="132" height="40" rx="6" fill="#c2630e" stroke="#c2630e"/><text x="316" y="99" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">h = W1*x</text><text x="316" y="127" text-anchor="middle" fill="#5b6470" font-size="10">op=MUL_MAT</text>
+<rect x="470" y="108" width="120" height="40" rx="6" fill="#c2630e" stroke="#c2630e"/><text x="530" y="133" text-anchor="middle" fill="#fff" font-weight="700" font-size="14">y = W2*h</text><text x="530" y="161" text-anchor="middle" fill="#5b6470" font-size="10">op=MUL_MAT</text>
+<line x1="250" y1="90" x2="104" y2="61" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 104 61 L 113 59 L 111 67 z" fill="#9aa6b2"/><text x="176" y="71" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="250" y1="104" x2="104" y2="137" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 104 137 L 111 131 L 113 139 z" fill="#9aa6b2"/><text x="176" y="116" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="470" y1="124" x2="386" y2="97" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 386 97 L 395 95 L 392 103 z" fill="#9aa6b2"/><text x="427" y="106" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+<line x1="470" y1="134" x2="324" y2="181" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 324 181 L 330 175 L 333 183 z" fill="#9aa6b2"/><text x="396" y="154" text-anchor="middle" fill="#5b6470" font-size="10">src</text>
+</g>
+<text x="30" y="240" fill="#5b6470" font-size="12" font-family="ui-monospace,monospace">topological order: x, W1, W2 -&gt; h -&gt; y (pointers only, no compute yet)</text>
+</svg>
 </div>
 <p>The beauty of this graph: starting from the output <span class="mono">y</span> and walking back along src pointers, you can <strong>find everything needed to compute it</strong> -
 y depends on W2 and h, and h depends on W1 and x. That is exactly what <span class="mono">ggml_build_forward_expand(graph, y)</span> does: starting from the output tensor you specify,
