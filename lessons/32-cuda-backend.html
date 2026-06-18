@@ -385,6 +385,17 @@ html[data-lang="zh"] .lang-en { display: none !important; }
     C[row*N + col] = acc;                        <span class="cm">// 一格只写回一次</span>
 }</pre>
 <p>关键就在那两个 <span class="mono">__syncthreads()</span>：第一个保证"整块都搬上工作台了"才开始算，第二个保证"大家都算完了"才去覆盖下一块——少了任何一个，就会有线程读到半截数据，结果全错。而一块 tile 一旦搬进 shared memory，就被 block 里所有线程<strong>反复复用</strong>很多次，把慢的 global 访问摊薄到极低。这正是把上一课"载入一次、复用多次"的 tiling 思想搬到了 GPU 的片上内存上：CPU 复用的是 cache，GPU 复用的是 shared memory，但省访存的算盘一模一样。粗算一下复用的威力：一块 T x T 的 tile 一旦载入 shared，块内线程会把它当行/列反复用上约 T 次——也就是每个从 global 搬来的数平均被复用约 T 倍；T 取 32，慢显存的访问量就直接降到约三十分之一。（代码里的 T 是 tile 的边长，常取 16 或 32；blockDim 也设成 T 行 T 列，正好一个线程管一格。）</p>
+<p>这套骨架不是我们编的——它就是真实 <span class="mono">mmq.cuh</span>（量化矩阵乘）主循环的结构。把真实代码的核心几行抽出来对一下：</p>
+<pre class="code"><span class="cm">// 真实 mmq 主循环 (简化自 ggml-cuda/mmq.cuh mul_mat_q_process_tile)</span>
+float sum[...] = {0.0f};                          <span class="cm">// 累加器在寄存器里</span>
+<span class="kw">for</span> (int kb0 = kb0_start; kb0 &lt; kb0_stop; kb0 += blocks_per_iter) {
+    <span class="fn">load_tiles</span>(x, tile_x, offset_x + kb0, ...); <span class="cm">// 把 A 的 tile 载入 shared</span>
+    <span class="cm">// ... 把 B 的 tile 也载入 shared (tile_y) ...</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// 等整块载完</span>
+    <span class="fn">vec_dot</span>(tile_x, tile_y, sum, 0);            <span class="cm">// 块内复用、累加</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// 等大家算完再覆盖下一块</span>
+}</pre>
+<p>结构和上面的教学骨架一模一样：<strong>循环 tile -&gt; 载入 shared -&gt; __syncthreads -&gt; 累加 -&gt; __syncthreads</strong>。真实版多出来的复杂度，几乎全在 <span class="mono">load_tiles</span>（按量化格式 Q4_0/Q4_K… 各写一版解包）和 <span class="mono">vec_dot</span>（用 <span class="mono">dp4a</span> 做 int8 点积、或用 tensor core 的 <span class="mono">mma</span>）这两个被调用的函数里——而骨架本身，就是你已经看懂的那几行。</p>
 <p>把这个过程定格成一张图最直观——一个 block 把 A 的行块、B 的列块载入 shared，块内每个线程负责输出 C 的一格：</p>
 <div class="trace">
   <div class="tcap"><b>追踪一次分块矩阵乘</b>：一个 thread block 把 A 的行块、B 的列块载入 shared memory，块内每个线程算 C 的一格（As 的一行与 Bs 的一列做点积），沿 K 维循环累加（示意）。</div>
@@ -627,6 +638,17 @@ Last lesson watched the CPU backend make matmul fast with SIMD + multithreading 
     C[row*N + col] = acc;                        <span class="cm">// write each cell back just once</span>
 }</pre>
 <p>The crux is those two <span class="mono">__syncthreads()</span>: the first guarantees "the whole tile is on the bench" before any compute starts, the second guarantees "everyone is done" before overwriting the next tile - drop either and some thread reads half-loaded data and the result is all wrong. Once a tile is in shared memory it is <strong>reused</strong> many times by all threads in the block, amortizing the slow global accesses down to almost nothing. This carries last lesson's "load once, reuse many" tiling onto the GPU's on-chip memory: the CPU reuses cache, the GPU reuses shared memory, but the memory-saving arithmetic is identical. A rough sense of the payoff: once a T x T tile is in shared, the block's threads reuse it as rows/columns about T times - so each value hauled from global is reused roughly T-fold; with T = 32, slow VRAM traffic drops to about one thirtieth. (T is the tile width, often 16 or 32; blockDim is set to T x T so one thread owns exactly one cell.)</p>
+<p>This skeleton is not something we invented - it is the structure of the real <span class="mono">mmq.cuh</span> (quantized matmul) main loop. Pull out the core few lines of the real code and compare:</p>
+<pre class="code"><span class="cm">// real mmq main loop (simplified from ggml-cuda/mmq.cuh mul_mat_q_process_tile)</span>
+float sum[...] = {0.0f};                          <span class="cm">// accumulators in registers</span>
+<span class="kw">for</span> (int kb0 = kb0_start; kb0 &lt; kb0_stop; kb0 += blocks_per_iter) {
+    <span class="fn">load_tiles</span>(x, tile_x, offset_x + kb0, ...); <span class="cm">// load A's tile into shared</span>
+    <span class="cm">// ... load B's tile into shared (tile_y) too ...</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// wait for the tile to load</span>
+    <span class="fn">vec_dot</span>(tile_x, tile_y, sum, 0);            <span class="cm">// reuse in-block, accumulate</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// wait before overwriting next tile</span>
+}</pre>
+<p>The structure is identical to the teaching skeleton above: <strong>loop tiles -&gt; load into shared -&gt; __syncthreads -&gt; accumulate -&gt; __syncthreads</strong>. Almost all the real version's extra complexity lives inside the two called functions - <span class="mono">load_tiles</span> (a per-quant-format unpack, one for Q4_0/Q4_K/...) and <span class="mono">vec_dot</span> (int8 dot via <span class="mono">dp4a</span>, or <span class="mono">mma</span> on tensor cores) - while the skeleton itself is exactly the few lines you already understand.</p>
 <p>Freezing the process into one picture is clearest - a block loads A's row-tile and B's col-tile into shared, and each thread in the block owns one cell of the output C:</p>
 <div class="trace">
   <div class="tcap"><b>Trace one tiled matmul</b>: one thread block loads A's row-tile and B's col-tile into shared memory; each thread in the block computes one C cell (dot of an As row and a Bs col), looping and accumulating along K.</div>
