@@ -2175,6 +2175,250 @@ QUIZZES = {
             },
         ],
     },
+    "34-speculative-decoding.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "投机解码为什么能加速 decode？",
+                    "en": "Why can speculative decoding speed up decode?",
+                },
+                "opts": [
+                    {"zh": "decode 是访存密集（带宽瓶颈），一次前向并行验证 K 个 token 和生成 1 个几乎一样快", "en": "decode is memory-bound (bandwidth-bottlenecked), so one forward pass verifying K tokens is about as fast as generating 1"},
+                    {"zh": "草稿模型比 target 模型算得更准", "en": "the draft model computes more accurately than the target model"},
+                    {"zh": "它把模型权重压缩得更小", "en": "it compresses the model weights smaller"},
+                    {"zh": "它跳过了一部分注意力计算", "en": "it skips part of the attention computation"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "decode 阶段大部分时间花在把几 GB 权重从显存搬进来（L30/L32 的 memory-bound），算力有富余。所以一次 llama_decode 顺手并行验证 K 个候选 token，和只生成 1 个相比，额外成本极小。投机解码就是用一个小模型/n-gram 先猜一串、大模型一次前向并行验证，把串行的 N 步压成少数几次——省的是“等数据”的时间，不是“算”的量。",
+                    "en": "In decode most time goes to hauling several GB of weights in from VRAM (the memory-bound point of L30/L32), with compute to spare. So one llama_decode verifying K candidate tokens in parallel costs almost nothing extra versus generating just 1. Speculative decoding has a small model / n-gram guess a run, then the big model verify it in one parallel pass, compressing N serial steps into a few - saving 'waiting for data' time, not the amount of 'computing'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "投机解码会不会改变输出质量？为什么？",
+                    "en": "Does speculative decoding change output quality? Why?",
+                },
+                "opts": [
+                    {"zh": "不会——数学上等价于直接从 target 采样，草稿只影响速度、不参与最终决策", "en": "no - it is mathematically equivalent to sampling from the target; the draft affects only speed, not the final decision"},
+                    {"zh": "会变好，因为草稿模型补充了细节", "en": "it gets better, because the draft model adds detail"},
+                    {"zh": "会变差，因为用小模型替代了大模型", "en": "it gets worse, because a small model replaces the big one"},
+                    {"zh": "看运气，有时好有时坏", "en": "it is random, sometimes better sometimes worse"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "被接受的 token 都是 target 自己也会给出的（验证通过）；被拒位置用的是 target 自己的预测（bonus）。草稿只在“提议”环节出现，提议得好不好只影响接受率（速度），完全不决定“最终选哪个 token”。贪心下逐位必须精确匹配；带温度采样下 llama.cpp 在每个位置照常从 target 采一个 token、只有草稿和它完全相同才接受——发出去的永远是 target 自己采的那个，所以分布天然不变。所以开不开投机，输出分布完全一致——只换速度，不换质量。",
+                    "en": "Accepted tokens are ones the target itself would give (they passed verification); rejected positions use the target's own prediction (the bonus). The draft appears only in 'proposing', and how well it proposes affects only the acceptance rate (speed), never 'which token is final'. Greedy requires exact per-position matches; under temperature sampling llama.cpp samples a token from the target at each position as usual and accepts the draft only on an exact match with it - what is emitted is always the target's own sample, so the distribution is unchanged by construction. So the output distribution is identical whether speculation is on or off - trading only speed, not quality.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "什么情况下投机解码反而会变慢？",
+                    "en": "When does speculative decoding get slower instead?",
+                },
+                "opts": [
+                    {"zh": "接受率低时——草稿老被拒，每轮白跑一遍小模型，得不偿失", "en": "when the acceptance rate is low - the draft keeps getting rejected, wasting a small-model run each round"},
+                    {"zh": "序列太短时", "en": "when the sequence is too short"},
+                    {"zh": "显存太大时", "en": "when there is too much VRAM"},
+                    {"zh": "永远不会变慢", "en": "it never gets slower"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "加速比由接受率决定：平均接受 m 个 -> 每次前向推进约 m+1 个 token。接受率低时草稿老被拒，等于每轮都白跑一遍草稿模型、还多搬一次草稿 token 的 KV，反而更慢。所以任务越“可预测”（代码、翻译、改写）越划算，越“发散”（创意写作、高温采样）越容易亏。实用判断：看 llama.cpp 打印的接受率，低于约 0.3 就考虑关掉——别猜，去量（L30）。",
+                    "en": "The speedup is set by the acceptance rate: m accepted on average -> each forward advances about m+1 tokens. When acceptance is low the draft keeps being rejected, so each round wastes a draft-model run plus extra KV for the draft tokens, making it slower. So the more 'predictable' the task (code, translation, rewriting) the more it pays; the more 'divergent' (creative writing, high-temperature sampling) the easier it loses. Practical test: watch llama.cpp's printed acceptance rate; below about 0.3, consider turning it off - do not guess, measure (L30).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "投机解码的精髓是“提议 + 验证”：用一个便宜的近似（小模型/n-gram）先猜，再用昂贵但权威的本体（target）一次并行验证、猜错也不亏。请说说这个模式和计算机系统里的其它“投机”有什么共性（比如 CPU 分支预测、数据库乐观锁、预取）；再想想：为什么它必须满足“验证比生成便宜”才划算？如果验证和生成一样贵，这套还成立吗？",
+                "en": "Speculative decoding's essence is 'propose + verify': a cheap approximation (small model / n-gram) guesses first, then the expensive but authoritative original (the target) verifies in one parallel pass, losing nothing if wrong. Discuss what this pattern shares with other 'speculation' in computer systems (e.g. CPU branch prediction, database optimistic locking, prefetch); then consider: why must 'verifying is cheaper than generating' hold for it to pay off? If verifying were as expensive as generating, would the scheme still work?",
+            },
+        ],
+    },
+    "35-moe.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "MoE 的核心取舍是什么？",
+                    "en": "What is the core tradeoff of MoE?",
+                },
+                "opts": [
+                    {"zh": "参数容量像大模型，但单 token 的算力只花用到的那几个专家——参数大、算力小", "en": "parameter capacity like a big model, but per-token compute only pays for the few experts used - big params, small compute"},
+                    {"zh": "参数更少、算力也更少", "en": "fewer parameters and less compute"},
+                    {"zh": "参数更多、算力也更多", "en": "more parameters and more compute"},
+                    {"zh": "参数和算力都不变，只是更快", "en": "params and compute unchanged, just faster"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "MoE 把一个大 FFN 拆成 N 个专家，但每个 token 只激活其中 top-k 个（比如 8 选 2）。于是模型“装得下”的知识由总参数量决定（像一个很大的稠密模型），而每个 token 真正要算的乘加只来自被选中的 k 个专家（像一个小模型）。代价是显存要装下全部专家的权重、路由不规整带来访存和负载均衡的麻烦。一句话：拿显存换算力，用稀疏激活把“大容量”和“低单步算力”同时拿到手。",
+                    "en": "MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 为什么要专门做一个 ggml_mul_mat_id 算子，而不是用普通的矩阵乘？",
+                    "en": "Why does ggml need a dedicated ggml_mul_mat_id op instead of a plain matmul?",
+                },
+                "opts": [
+                    {"zh": "要按每个 token 选出的专家 id，只取对应专家的权重去算——真正做到“只算被选中的 k 个”", "en": "to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'"},
+                    {"zh": "因为它算得更精确", "en": "because it computes more accurately"},
+                    {"zh": "因为它能压缩权重", "en": "because it compresses the weights"},
+                    {"zh": "因为它跳过了 softmax", "en": "because it skips the softmax"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "稀疏的关键在“只算被选中的专家”。如果用普通 mul_mat 把 8 个专家全乘一遍再扔掉 6 个，参数是稀疏了、算力一点没省。ggml_mul_mat_id 接收一个 ids 张量（top-k 路由的结果），按 id 去 gather 对应专家的权重列、只对选中的 k 个做乘加。这正是 MoE 省算力的落地点——没有这个算子，“8 选 2 省 3/4 算力”就只是纸面上的话。",
+                    "en": "Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于 MoE 的显存占用，下面哪句对？",
+                    "en": "Regarding MoE's VRAM footprint, which is correct?",
+                },
+                "opts": [
+                    {"zh": "显存要装下全部专家的权重，按总参数算；省的是每步算力，不是显存", "en": "VRAM must hold every expert's weights, sized by total params; what is saved is per-step compute, not VRAM"},
+                    {"zh": "显存只需装下被激活的 k 个专家", "en": "VRAM only needs to hold the k activated experts"},
+                    {"zh": "显存比同算力的稠密模型还小", "en": "VRAM is smaller than a dense model of equal compute"},
+                    {"zh": "显存和专家数量无关", "en": "VRAM is unrelated to the number of experts"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "哪个 token 会路由到哪个专家是运行时才知道的，所以全部专家的权重都得常驻显存待命——显存按“总参数量”算，不按“激活的 k 个”算。这就是为什么 MoE 模型的 GGUF 文件和显存需求往往很大（DeepSeek、Mixtral 都是几十上百 GB）。MoE 省的是“每个 token 的乘加次数”（算力 / 时间），不是“要装多少权重”（显存）。把这两件事分开看，才不会对 MoE 的资源需求产生误解。",
+                    "en": "Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "MoE 的路由用 argsort 取 top-k，是一个“硬选择”（要么选中、要么没选中），它对每个专家的输入不是连续可微的。请想一想：训练时这种硬路由会带来什么麻烦（比如某些专家总没人选、梯度怎么传）？真实系统是怎么缓解的（提示：归一化、负载均衡损失、专家分组 n_expert_groups）？再把它和你学过的稠密 FFN 对比：稠密 FFN 为什么没有“专家饿死”这种问题？",
+                "en": "MoE routing uses argsort to take top-k, a 'hard selection' (selected or not) that is not continuously differentiable in each expert's input. Consider: what trouble does such hard routing cause in training (e.g. some experts never get picked, how do gradients flow)? How do real systems mitigate it (hint: normalization, load-balancing loss, expert grouping n_expert_groups)? Then contrast with the dense FFN you learned: why does a dense FFN have no 'expert starvation' problem?",
+            },
+        ],
+    },
+    "36-multimodal.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "多模态的核心做法是把一张图变成什么？",
+                    "en": "At its core, multimodality turns an image into what?",
+                },
+                "opts": [
+                    {"zh": "一串 embedding 向量，和文本 token 的 embedding 一样塞进同一个序列", "en": "a run of embedding vectors, spliced into the same sequence like text tokens' embeddings"},
+                    {"zh": "一段新的文字描述，再当普通 prompt 输入", "en": "a new text description, fed back as an ordinary prompt"},
+                    {"zh": "一组特殊的 token id，查词表得到", "en": "a set of special token ids looked up in the vocabulary"},
+                    {"zh": "一张压缩后的小图，直接送进 transformer", "en": "a compressed thumbnail sent straight into the transformer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键洞察：LLM 主体从头到尾只处理 embedding 向量序列，它根本不知道“token”长什么样。所以多模态不改模型本体，而是把图像也编码成 N 个 embedding（clip 编码 + projector 投影到 LLM 的 embedding 空间），按 &lt;image&gt; 占位插进文本序列。LLM 拿到这串向量，分不出哪些来自文字、哪些来自图像——照常前向即可。这也是为什么 llama_batch 能同时放 token 和 embd（L18）：图像走的就是 embd 那条入口。",
+                    "en": "Key insight: the LLM body only ever processes sequences of embedding vectors - it has no idea what a 'token' looks like. So multimodality does not change the model body; it encodes the image into N embeddings too (clip encodes + projector projects into the LLM's embedding space), spliced into the text sequence at the &lt;image&gt; marker. Handed this run of vectors, the LLM cannot tell which came from text and which from the image - it just runs forward. This is also why llama_batch can carry both token and embd (L18): images go in through the embd entry.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "projector（mmproj）在多模态管线里负责什么？",
+                    "en": "What does the projector (mmproj) do in the multimodal pipeline?",
+                },
+                "opts": [
+                    {"zh": "把 clip 的视觉特征投影到 LLM 的 embedding 维度和空间，让它“像个 token embedding”", "en": "project clip's visual features into the LLM's embedding dimension and space, making them 'look like a token embedding'"},
+                    {"zh": "把图像压缩成更小的文件以省显存", "en": "compress the image into a smaller file to save VRAM"},
+                    {"zh": "给图像分类、识别里面有什么物体", "en": "classify the image and recognize what objects are in it"},
+                    {"zh": "把文本 token 翻译成图像", "en": "translate text tokens into an image"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "clip 输出的视觉特征和 LLM 的 token embedding 不在一个空间——维度可能不同、数值分布和语义也是两套体系，直接塞进去模型读不懂。projector 就是这座桥：一个小网络，把视觉特征对齐到 LLM 的 embedding 维度/空间。clip_n_mmproj_embd 必须等于 LLM 的 embedding 维度，否则塞不进序列。正因为它是为“某个 clip + 某个 LLM”专门训练的，所以是个单独的 mmproj 文件、要单独加载；少了它，模型就只会读字、不会看图。",
+                    "en": "clip's visual features and the LLM's token embeddings are not in the same space - dimensions may differ, and value distributions and semantics are two different systems, so feeding them in directly is unreadable to the model. The projector is that bridge: a small network aligning visual features to the LLM's embedding dimension/space. clip_n_mmproj_embd must equal the LLM's embedding dimension or the vectors will not fit. Because it is trained for one specific 'this clip + this LLM' pairing, it is a separate mmproj file loaded separately; without it the model only reads text and cannot see images.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一张图进了 LLM 之后，对 KV cache 意味着什么？",
+                    "en": "Once an image is in the LLM, what does it mean for the KV cache?",
+                },
+                "opts": [
+                    {"zh": "它占 N 个序列位置、写 N 份 KV，和文本一样吃上下文预算；图越多 / 越清，涨得越快", "en": "it takes N sequence positions and writes N entries of KV, eating the context budget like text; more / sharper images grow it faster"},
+                    {"zh": "图像不进 KV cache，只在编码时存在一下", "en": "images do not enter the KV cache, they exist only briefly during encoding"},
+                    {"zh": "一张图永远只占 1 个位置", "en": "an image always takes exactly 1 position"},
+                    {"zh": "图像会替换掉之前的文本 KV", "en": "the image replaces the earlier text KV"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "image embedding 一旦插进序列，对 LLM 来说就是实打实的 N 个位置：要分配 position、要写进 KV cache（L19），还要参与之后每个 token 的注意力。所以一张高清图可能占掉几百上千个位置，几张图下来 KV cache 直追长文本——“32K 上下文的多模态模型”，这 32K 是图和字共享的预算。clip_n_output_tokens 决定这个 N，有些 projector（resampler）会主动压 N 来省 KV。这正呼应 L19：序列越长，KV cache 越大，能并发的请求越少。",
+                    "en": "Once image embeddings are spliced in, to the LLM they are N real positions: assigned positions, written into the KV cache (L19), and joining the attention of every later token. So one high-res image can take hundreds or thousands of positions, and a few images in the KV cache rivals long text - a '32K-context multimodal model' shares that 32K between images and text. clip_n_output_tokens sets this N, and some projectors (resamplers) actively compress N to save KV. This echoes L19: the longer the sequence, the bigger the KV cache, the fewer concurrent requests.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课反复强调一件事：LLM 从没“看见”过图，它眼里只有 embedding 向量序列，多模态全靠在它前面加一道“翻译”。请顺着这个视角想：(1) 为什么说图像、音频走的是同一套机制（mtmd 的 chunk 类型里 IMAGE 和 AUDIO 并列）？(2) 这种“冻结主体、只在边界加适配器”的思路，和你在 L24 学的 LoRA 有什么共性？(3) 如果让你给这个 LLM 接一种全新的模态（比如时间序列传感器数据），你需要造哪两个部件？",
+                "en": "This lesson kept stressing one thing: the LLM has never 'seen' an image; in its eyes there are only sequences of embedding vectors, and multimodality is entirely a 'translation' bolted in front. Follow that view: (1) why do image and audio go through the same mechanism (mtmd's chunk types put IMAGE and AUDIO side by side)? (2) what does this 'freeze the body, only add adapters at the boundary' idea share with the LoRA you learned in L24? (3) if you had to plug a brand-new modality into this LLM (say time-series sensor data), which two components would you need to build?",
+            },
+        ],
+    },
+    "37-state-space.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "相比注意力，SSM（Mamba/RWKV）的显存随序列长度怎么变？",
+                    "en": "Compared with attention, how does an SSM's (Mamba/RWKV) memory change with sequence length?",
+                },
+                "opts": [
+                    {"zh": "不变（O(1)）——用一个固定大小的递推状态概括历史，不随序列变长", "en": "constant (O(1)) - a fixed-size recurrent state summarizes the history, not growing with the sequence"},
+                    {"zh": "线性增长，和注意力一样", "en": "grows linearly, same as attention"},
+                    {"zh": "平方增长", "en": "grows quadratically"},
+                    {"zh": "先涨后降", "en": "rises then falls"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是 SSM 最大的卖点。注意力要把每个 token 的 KV 都存进 KV cache（显存随序列线性涨，L19），第 t 步还要回看全部历史（整段 O(n^2)）。SSM 反过来：维护一个固定大小的状态 h（大小由 ssm_d_state 定死），每步只用上一个状态 h_(t-1) 和当前输入 x_t 算出新状态——和历史多长无关。所以显存 O(1)、整段算力 O(n)，序列拉到几十万 token 单步开销也纹丝不动。这让它在超长上下文、流式、端侧低显存场景特别香。",
+                    "en": "This is the SSM's biggest selling point. Attention must store every token's KV in the KV cache (memory grows linearly, L19) and step t looks back over all history (O(n^2) overall). The SSM does the reverse: maintain a fixed-size state h (size fixed by ssm_d_state), and each step computes the new state from only the previous state h_(t-1) and current input x_t - independent of history length. So memory is O(1), whole-sequence compute O(n), and even at hundreds of thousands of tokens the per-step cost does not budge. This makes it especially sweet for very long context, streaming, and low-VRAM on-device.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_ssm_scan(s, x, dt, A, B, C, ids) 算的是什么？“选择性”体现在哪？",
+                    "en": "What does ggml_ssm_scan(s, x, dt, A, B, C, ids) compute? Where is the 'selectivity'?",
+                },
+                "opts": [
+                    {"zh": "选择性扫描：按 A/B/C/dt 把状态沿时间递推；“选择性”指 B/C/dt 随输入变化", "en": "the selective scan: recur the state along time by A/B/C/dt; 'selectivity' means B/C/dt vary with the input"},
+                    {"zh": "把所有 token 的注意力分数算出来", "en": "computes the attention scores of all tokens"},
+                    {"zh": "对权重做量化压缩", "en": "quantizes and compresses the weights"},
+                    {"zh": "把图像编码成 embedding", "en": "encodes an image into embeddings"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_ssm_scan 做的是核心递推 h = A*h + B*x；y = C*h，从头到尾扫一遍序列、状态一步步往前推。A 管“上一个状态保留多少”、B 管“输入怎么写进状态”、C 管“从状态读出什么”、dt(Δ) 是步长。关键在“选择性”：Mamba 让 B、C、dt 都从当前输入 x 投影出来（输入相关），于是模型能动态决定“这个 token 重要就多写进状态、没用就忽略”——这正是它追平 transformer 的关键。A 仍保持固定（学到的参数），管状态自身的稳定衰减。",
+                    "en": "ggml_ssm_scan does the core recurrence h = A*h + B*x; y = C*h, scanning the sequence start to end and pushing the state forward step by step. A governs 'how much of the previous state to keep', B 'how the input is written into the state', C 'what is read out of the state', and dt (Delta) is the step size. The key is 'selectivity': Mamba projects B, C, dt from the current input x (input-dependent), so the model can dynamically decide 'write an important token into the state more, ignore a useless one' - exactly what let it match transformers. A stays fixed (a learned parameter), governing the state's own stable decay.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SSM 用固定状态换来了 O(1) 显存，代价是什么？",
+                    "en": "The SSM trades a fixed state for O(1) memory; what is the cost?",
+                },
+                "opts": [
+                    {"zh": "状态是有损压缩，长程精确检索（如逐字 copy）不如能回查 KV 的注意力", "en": "the state is lossy compression; long-range exact retrieval (e.g. verbatim copy) is worse than attention, which can look up KV"},
+                    {"zh": "它比注意力慢得多", "en": "it is much slower than attention"},
+                    {"zh": "它不能处理长序列", "en": "it cannot handle long sequences"},
+                    {"zh": "它需要更多显存", "en": "it needs more memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "天下没有免费的午餐。把任意长的历史压进一个固定大小的状态，本质是有损压缩：该记的太多、状态装不下时，它只能取舍着忘。于是 SSM 在“精确检索”类任务上天然吃亏——比如把很久以前第 3000 个 token 原样复制出来（copy 任务），或回头精确比对某个细节。注意力能回头逐个查 KV，SSM 却只有一个被反复覆写的摘要。这不是实现问题，是“固定状态”这个选择的根本代价。正因如此，实践中常用混合架构（llama-memory-hybrid）：多数层用 SSM 扛长度，少数层插注意力补精确检索。",
+                    "en": "No free lunch. Compressing arbitrarily long history into a fixed-size state is inherently lossy: when there is too much worth remembering and the state cannot hold it, it must forget selectively. So SSMs are handicapped on 'exact retrieval' tasks - e.g. copying out the 3000th token from long ago verbatim (the copy task), or looking back to compare a detail exactly. Attention can look back and check each KV; the SSM has only one repeatedly-overwritten summary. This is not an implementation flaw but the fundamental cost of choosing 'fixed state'. Hence the common hybrid architecture (llama-memory-hybrid): most layers use SSM to carry length, a few insert attention for exact retrieval.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课的母题是：“模型必须记住全部历史”其实是一个选择、不是一条定律。注意力选了“全记下来、随时回查”，SSM 选了“只记一个滚动摘要”。请顺着这个视角想：(1) 为什么 llama.cpp 要给 SSM 单独做一套 llama-memory-recurrent，而不复用 KV cache（提示：两者的“记忆形状”不同）？(2) 如果一个任务要在 100 万 token 的日志里精确找出某一行，你会更信任纯 SSM 还是带注意力的模型，为什么？(3) 把第七部分四课串起来看——投机解码、MoE、多模态、SSM 各自挑战了哪个“本以为天经地义”的默认假设？",
+                "en": "This lesson's motif: 'the model must remember the whole history' is a choice, not a law. Attention chose 'keep it all, look back anytime', the SSM chose 'keep only a rolling summary'. Follow that view: (1) why does llama.cpp build a dedicated llama-memory-recurrent for SSMs instead of reusing the KV cache (hint: their 'memory shapes' differ)? (2) if a task must find one exact line in a 1-million-token log, would you trust a pure SSM or an attention-bearing model more, and why? (3) tying Part 7's four lessons together - which 'taken-as-self-evident' default did speculative decoding, MoE, multimodality, and the SSM each challenge?",
+            },
+        ],
+    },
 }
 
 

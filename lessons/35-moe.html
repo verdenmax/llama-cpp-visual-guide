@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程</title>
+<meta name="description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程">
+<meta property="og:description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程">
+<meta name="twitter:description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第七部分 · 进阶专题</span><span class="lang-en">Part 7 · Advanced topics</span></span>
+    <span class="pill">35 / 37</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:94%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第七部分 · 进阶专题</span><span class="lang-en">Part 7 · Advanced topics</span></div>
+    <h1><span class="lang-zh">MoE 专家混合</span><span class="lang-en">Mixture of experts</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+前面每一层 FFN（前馈网络，L11），都是"每个 token 都老老实实从头到尾过一遍"。可现在最大的那些开源模型（Mixtral、DeepSeek、Qwen-MoE…）几乎都不这么干了——它们把一层 FFN 拆成几十甚至上百个"专家"（expert），每个 token 只挑其中两三个走。这就是 MoE（Mixture of Experts，专家混合）。这一课看 ggml 怎么实现它：一个 token 怎么被"路由"到几个专家、又怎么只算这几个而不浪费算力。这不是什么边角技巧——它已经是当下最强开源模型的标配架构，理解它，你才能读懂这一代模型为什么能又大又跑得动。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">MoE 的魔力在一句话：<strong>参数容量像个大模型，单 token 的计算量却像个小模型</strong>。一个 8 专家、每 token 选 2 的 MoE 层，参数量约等于 8 个 FFN；可每个 token 只过其中 2 个——计算量只有"同样大的稠密模型"的四分之一。模型因此能用大参数"记"住多得多的东西，而每步推理的算力却省下一大截。</p>
+<p style="color:var(--muted)">路线图：先看路由（router 怎么给每个 token 挑专家），配一张图追踪一个 token 的路由；再看 ggml 怎么用 <span class="mono">ggml_mul_mat_id</span> 只算被选中的专家；最后看这套"激活稀疏"的设计到底在用什么换什么、代价又在哪。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  MoE 的核心是一个朴素的赌注：<strong>不是每个 token 都需要整个网络的全部本事</strong>。一个讲代码的 token 和一个讲诗的 token，也许该交给不同的"专家"去处理。于是 MoE 把一层大 FFN 拆成 N 个小专家，再加一个"调度员"（router）给每个 token 挑最合适的 k 个。好处是参数能堆得很大（每个专家各记一点不同的东西），但每个 token 的实际计算只摊到 k 个专家上——<strong>用"激活稀疏"换"参数容量"</strong>。这也是为什么你会看到"总参数 600 亿、激活参数只有 100 亿"这种说法：前者是全部专家加起来，后者是单个 token 真正走过的那几个。这套"总参数大、激活参数小"的设计，正是为什么 MoE 模型下载下来动辄上百 GB、跑起来却没那么吃算力——你买的是"容量"，付的是"显存"。也正因如此，MoE 模型对个人玩家有点"门槛在显存"：它推理不费算力，却要求你先有足够的显存把全部专家装下——这又把皮球踢回了 L33 的多卡与 offload。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把稠密 FFN 想成一家<strong>什么都管的全科门诊</strong>：每个病人来了，都要把所有科室从头看一遍，又慢又浪费。MoE 则像一家<strong>分科的大医院 + 一个分诊台</strong>：分诊台（router）看一眼你的症状，把你只派给最相关的两三个科室（专家）。医院科室再多（参数再大），你这一趟也只跑两三个科室（算力不变）。代价也很直白：所有科室都得开着门、养着人（所有专家权重都要驻留显存），哪怕这一刻只有两个在接诊。这个类比也点出了 MoE 的甜与苦：分科让"看专科"更快更准（专家各管一摊），但维持一整座大医院的开销（养所有科室）始终都在。顺着这个类比你还能想到：要是分诊台水平不行（router 没训好），把急诊病人派去看眼科，那再好的专家也救不了——这就是后面要讲的"负载均衡 / 路由质量"为什么关键。
+</div>
+
+<h2>路由：router 怎么给 token 挑专家</h2>
+<p>一切从一个小小的"打分"开始。MoE 层里有一个 <strong>router（也叫 gate，门控）</strong>，本质就是一个小线性层：拿当前 token 的向量，对每个专家打一个分。分越高，说明这个 token 越该交给那个专家。你可以把 router 想成一个"调度员"：它读一眼 token 的"语义指纹"（就是那个向量），凭训练得来的经验判断"这活儿该派给哪几位"。<span class="mono">ggml_argsort_top_k</span> 从这些分里挑出最高的 k 个（比如 8 选 2），就是这个 token 这一步要走的专家。这里有个常被问到的点：为什么是 top-k（选好几个）而不是 top-1（只选最好的一个）？因为只选一个，路由一旦判断失误就没有退路、训练也更不稳；选 2 个则让两个专家的输出加权融合，既容错、又能表达"这个 token 介于两类之间"的细腻语义。来看 ggml 里真实的路由几行（出自 <span class="mono">build_moe_ffn</span>）：</p>
+<pre class="code"><span class="cm">// MoE 路由 (简化自 src/llama-graph.cpp build_moe_ffn)</span>
+logits = <span class="fn">build_lora_mm</span>(gate_inp, cur);        <span class="cm">// router 线性层: 每个专家一个分 [n_expert, n_tokens]</span>
+probs  = <span class="fn">ggml_soft_max</span>(logits);                 <span class="cm">// 转成概率 (有的模型用 sigmoid)</span>
+selected = <span class="fn">ggml_argsort_top_k</span>(probs, n_expert_used); <span class="cm">// 选 top-k 个专家 (如 8 选 2)</span>
+weights = <span class="fn">ggml_get_rows</span>(probs, selected);       <span class="cm">// 取这 k 个专家的门控权重</span>
+weights = <span class="fn">normalize</span>(weights);                   <span class="cm">// 归一化, 让 k 个权重加起来为 1</span></pre>
+<p>逐行看：<span class="mono">build_lora_mm(gate_inp, cur)</span> 是 router 线性层，给每个 token 算出对所有专家的打分（<span class="mono">logits</span>）；<span class="mono">ggml_soft_max</span> 把分变成概率；<span class="mono">ggml_argsort_top_k</span> 挑出最高的 <span class="mono">n_expert_used</span> 个（这就是"8 选 2"里的 2）；<span class="mono">ggml_get_rows</span> 把这 k 个专家对应的权重取出来、归一化——后面合并专家输出时，就按这组权重加权。整套路由极轻：相比专家本身的大矩阵乘，router 这点开销几乎可以忽略。值得强调的是，router 不是写死的规则，而是<strong>训练出来的</strong>：模型在海量数据上自己学会了"什么样的 token 该交给哪个专家"。所以你没法预先知道某个专家"专精"什么——它可能学成了"管标点的"、"管数字的"、"管某种语言的"，也可能是人类完全看不出规律的某种内部分工。这正是 MoE 既神奇又有点黑箱的地方：分工是涌现的，不是设计的。</p>
+<p>把一个 token 的路由定格成一张图最直观：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一个 token 的 MoE 路由</b>：router 给 8 个专家打分，选出 top-2（带权重），只有这 2 个专家真正参与计算，最后按权重加权求和成输出（示意）。</div>
+<svg viewBox="0 0 680 320" width="100%" role="img" aria-label="MoE 路由示例：一个 token 经 router 打分，从 8 个专家里选 top-2（带权重），两个专家各算后按权重加权求和成输出">
+<g font-family="ui-monospace,monospace">
+<rect x="30" y="150" width="72" height="40" rx="6" fill="#ffffff" stroke="#c2630e"/><text x="66" y="174" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">token</text>
+<line x1="102" y1="170" x2="138" y2="170" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 144 170 L 136 166 L 136 174 z" fill="#9aa6b2"/>
+<rect x="146" y="142" width="92" height="56" rx="6" fill="#ffffff" stroke="#2563eb"/><text x="192" y="168" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">router</text><text x="192" y="185" text-anchor="middle" fill="#5b6470" font-size="10">门控 gate</text>
+<text x="332" y="18" text-anchor="middle" fill="#5b6470" font-size="11">8 个专家 (FFN)</text>
+<line x1="238" y1="170" x2="296" y2="41" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="28" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="45" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E0</text>
+<line x1="238" y1="170" x2="296" y2="73" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="60" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="77" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E1</text>
+<line x1="238" y1="170" x2="296" y2="105" stroke="#7c3aed" stroke-width="1.8"/>
+<path d="M 302 105 L 294 101 L 294 109 z" fill="#7c3aed"/>
+<rect x="300" y="92" width="64" height="26" rx="5" fill="#ece3fb" stroke="#7c3aed"/><text x="332" y="109" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">E2</text>
+<text x="372" y="109" fill="#7c3aed" font-weight="700" font-size="11">w1=0.7</text>
+<line x1="238" y1="170" x2="296" y2="137" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="124" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="141" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E3</text>
+<line x1="238" y1="170" x2="296" y2="169" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="156" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="173" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E4</text>
+<line x1="238" y1="170" x2="296" y2="201" stroke="#7c3aed" stroke-width="1.8"/>
+<path d="M 302 201 L 294 197 L 294 205 z" fill="#7c3aed"/>
+<rect x="300" y="188" width="64" height="26" rx="5" fill="#ece3fb" stroke="#7c3aed"/><text x="332" y="205" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">E5</text>
+<text x="372" y="205" fill="#7c3aed" font-weight="700" font-size="11">w2=0.3</text>
+<line x1="238" y1="170" x2="296" y2="233" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="220" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="237" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E6</text>
+<line x1="238" y1="170" x2="296" y2="265" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="252" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="269" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E7</text>
+<text x="332" y="296" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">top-2 选中</text>
+<text x="332" y="312" text-anchor="middle" fill="#9aa6b2" font-size="10">其余 6 个不算</text>
+<line x1="426" y1="105" x2="470" y2="170" stroke="#7c3aed" stroke-width="1.6"/>
+<line x1="426" y1="201" x2="470" y2="170" stroke="#7c3aed" stroke-width="1.6"/>
+<path d="M 474 170 L 466 166 L 466 174 z" fill="#7c3aed"/>
+<rect x="476" y="132" width="84" height="76" rx="6" fill="#ffffff" stroke="#7c3aed"/><text x="518" y="164" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">加权求和</text><text x="518" y="182" text-anchor="middle" fill="#5b6470" font-size="10">w1*E2 + w2*E5</text>
+<line x1="560" y1="170" x2="588" y2="170" stroke="#c2630e" stroke-width="1.6"/><path d="M 594 170 L 586 166 L 586 174 z" fill="#c2630e"/>
+<rect x="596" y="150" width="64" height="40" rx="6" fill="#ffffff" stroke="#c2630e"/><text x="628" y="174" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">输出</text>
+</g></svg>
+</div>
+
+<h2>稀疏地算：ggml_mul_mat_id 只算选中的专家</h2>
+<p>选好了专家，接下来是 MoE 最关键、也最容易想当然的一步：<strong>怎么"只算被选中的专家"</strong>。一个偷懒的实现可能是"8 个专家全算一遍，再把没选中的 6 个扔掉"——那 MoE 就一点没省算力了。事实上，naive 的"全算再扔"在某些早期实现里真的存在过，效果就是"参数稀疏了、算力没省"，白白浪费了 MoE 的好处。所以"真稀疏"是 MoE 能不能落地的关键，也是 ggml 专门为它做一个 <span class="mono">ggml_mul_mat_id</span> 算子的原因。ggml 用这个算子来做到真正的稀疏：</p>
+<pre class="code"><span class="cm">// 稀疏专家矩阵乘 (src/llama-graph.cpp build_moe_ffn)</span>
+<span class="cm">// selected = 上一节选出的 ids: 每个 token 选中了哪几个专家</span>
+up   = <span class="fn">ggml_mul_mat_id</span>(up_exps,   cur, selected); <span class="cm">// 只对选中专家做 up 投影</span>
+gate = <span class="fn">ggml_mul_mat_id</span>(gate_exps, cur, selected); <span class="cm">// 只对选中专家做 gate 投影</span>
+act  = <span class="fn">silu</span>(gate) * up;                           <span class="cm">// 激活 (SwiGLU)</span>
+out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span class="cm">// down 投影回原维度</span>
+<span class="cm">// 最后按 router 的 weights 把 k 个专家的 out 加权求和</span></pre>
+<p>关键就在 <span class="mono">ggml_mul_mat_id</span> 里那个 <span class="mono">id</span>：它比普通矩阵乘多吃一个 <span class="mono">ids</span> 张量（就是上一节的 <span class="mono">selected</span>），告诉这次乘法"每个 token 该乘哪几个专家的权重"。于是它不把 token 和全部 8 个专家相乘，而是<strong>按 ids 间接寻址</strong>、只取出被选中的那 2 个专家来算。<span class="mono">up_exps</span>/<span class="mono">gate_exps</span>/<span class="mono">down_exps</span> 是把所有专家权重打包在一起的大张量，<span class="mono">ids</span> 就是从里面挑"该用哪几片"的索引。算力因此实打实降到 <span class="mono">n_expert_used / n_expert</span>（8 选 2 就是四分之一），而不是"算完再扔"。顺带说清一个常见误解：MoE 省的是 <strong>FFN 这一块的算力</strong>，不是整个模型的算力。注意力、归一化、embedding 这些每个 token 还是照常全算——只有 FFN 被稀疏化了。但在大模型里 FFN 恰恰是参数和算力的大头，所以把它稀疏掉，整体收益就很可观。（这也是为什么 MoE 几乎只动 FFN、不碰注意力——注意力本来就不是参数大头，拆它收益不大，还会破坏全局信息的流动。）</p>
+<div class="cols">
+  <div class="col"><h4>等容量稠密</h4><p>同样多的参数做成一个大网络，每个 token 全部过一遍：算力 = 8 份专家。</p></div>
+  <div class="col"><h4>MoE（8 选 2）</h4><p>每个 token 只激活 2 个专家：算力 = 2 份，是等容量稠密的 1/4。</p></div>
+  <div class="col"><h4>共同点</h4><p>参数一样多（8 份专家全驻留显存）；差别只在"每步真正激活几份"。</p></div>
+</div>
+
+<h2>为什么这么设计：用稀疏换容量</h2>
+<p>把前面两节连起来，MoE 的取舍就清楚了：它赌的是<strong>"知识可以分而治之"</strong>——与其让每个 token 都过一个无所不包的大 FFN，不如让它只过几个最相关的专家。这样模型能把参数堆得极大（每个专家分管一摊"知识"），而单 token 的计算量只跟"选几个"有关、跟"总共有多少专家"无关。这就是为什么近两年的旗舰开源模型几乎清一色 MoE：在固定的推理算力预算下，MoE 能塞进比稠密模型多得多的参数，从而更"聪明"。换个比喻：稠密模型像请了一个什么都懂一点的全才，MoE 像请了一个专家团再配个分诊台——团队的总知识量大得多，但每次只惊动相关的那两位。MoE 的兴起背后是一条朴素的经济学：训练和推理的算力都很贵，而参数（显存）相对便宜。MoE 正好顺着这条线——花便宜的显存换贵的算力，在同样的算力预算下做出更强的模型。这就是为什么一旦有人证明 MoE 能 scale，整个开源社区几乎一夜之间都跟了上来。当然，MoE 也不是万灵药：它更难训练（负载均衡、稳定性都是坑）、对显存更挑剔、在小规模上未必比稠密划算。它是"大模型时代"的产物——当你想把参数堆到稠密架构吃不消的量级时，MoE 才真正显出威力。</p>
+<p>但天下没有免费的午餐，MoE 的代价也很实在，而且正好踩在前几课讲过的痛点上。<strong>显存</strong>：虽然每步只算 2 个专家，但 8 个专家的权重<strong>全都得待在显存里</strong>——你不知道下一个 token 会路由到哪几个。所以 MoE 的显存占用是按"总参数"算的，往往大得吓人（这也是为什么 MoE 模型特别依赖 L33 的多卡 / offload）。好在量化（L06/L12/L29）在这里帮了大忙：把专家权重压到 4-bit，显存一下小四倍，很多原本装不下的 MoE 才挤得进消费级显卡。</p>
+<p><strong>访存不规整</strong>：相邻的 token 可能路由到完全不同的专家，<span class="mono">ggml_mul_mat_id</span> 的间接寻址让访存比稠密矩阵乘更跳跃、对缓存更不友好（呼应 L31/L32 的访存密集）。所以 MoE 是"省了算力、却更吃显存和带宽"的一笔交易——它把瓶颈从"算"挪向了"存和搬"。这也解释了一个实战现象：同样激活参数的 MoE 和稠密模型，MoE 跑起来不一定更快，但能在同样的显卡上装下聪明得多的模型。还有个微妙之处：prefill 时一批 token 一起算，不同 token 路由到不同专家，反而能把所有专家都用起来、并行度高；而 decode 时一次只有一个 token，往往只激活两个专家，硬件利用率偏低——这又一次呼应了 L18/L30 的 prefill vs decode。</p>
+
+<h2>深入：负载均衡与 MoE 变体</h2>
+<p>最后两个折叠，补两个真正落地 MoE 时绕不开的问题。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么要费劲做"负载均衡"？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>设想 router 学偏了：它把绝大多数 token 都路由给同样那两个专家，剩下六个几乎没人光顾。那会发生两件坏事：被冷落的专家训练不充分、白占参数（容量浪费）；被挤爆的专家成了瓶颈，还可能超出它的"容量"（在某些训练和分布式推理实现里，一个专家一批能接的 token 有上限，超了就丢弃；但注意 llama.cpp 推理并不丢 token，永远把每个被选中的专家都算完）。所以训练 MoE 时通常会加一个<strong>负载均衡的辅助损失</strong>（auxiliary loss），鼓励 router 把 token 尽量均匀地分给所有专家；还会设"容量因子"给每个专家留出余量。这一步在<strong>推理</strong>时其实已经固化在权重里了（router 已经训练好），但理解它能帮你看懂 MoE 的很多设计——比如为什么有的模型要做 expert group、要做 token drop。推理侧 ggml 不需要再算 aux loss，但 router 给出的分布均不均衡，直接影响真实硬件上的专家利用率。还有个推理侧的现实问题，尤其在专家被分散到多张卡上时（L33 的专家并行）：一批 token（比如 server 同时处理的多个请求）如果恰好都挤到同一个专家，承载它的那张卡就成了串行瓶颈、别的卡却闲着——所以 MoE 在多卡高并发服务时，吞吐有时反而不如同等激活参数的稠密模型稳定。（在单卡上则相反：全挤到一个专家反而是一次规整的大矩阵乘，并不构成瓶颈。）（顺带说，正因为推理时 router 已经定型，换不同的输入、跑不同任务，专家的"忙闲"分布会跟着变——这也是为什么同一个 MoE 模型在不同任务上的实际速度会有波动。）</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> shared expert、expert group 是什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>纯 MoE 有个隐患：有些"通用本事"（语法、常识）每个 token 都用得到，让它去挤那 k 个名额有点浪费。于是 DeepSeek 等模型加了 <strong>shared expert（共享专家）</strong>：一个<strong>所有 token 都过</strong>的常驻专家，专管通用部分，再让 router 在剩下的专家里挑 k 个管"专门"部分。<span class="mono">build_moe_ffn</span> 里也支持 <strong>expert group（专家分组）</strong>：先把专家分成几组、先选组再在组内选专家（源码里的 <span class="mono">n_expert_groups</span> / <span class="mono">n_group_used</span>），这在专家数特别多（上百个）时能让路由更高效、也更利于把一组专家放在同一张卡上。这些变体的共同点是：都在"路由怎么挑、挑出来怎么组合"上做文章，而底层那个 <span class="mono">ggml_mul_mat_id</span> 的稀疏算法，始终不变。这也是读 ggml MoE 源码的一个好心态：别被各种模型五花八门的变体绕晕，抓住"打分 -&gt; 选 top-k -&gt; <span class="mono">ggml_mul_mat_id</span> 稀疏算 -&gt; 加权合并"这条主线，剩下的都是在这条线上加花样。举个具体的：DeepSeek-V3 有 256 个路由专家 + 1 个 shared expert、每 token 选 8 个；Mixtral 是 8 选 2；各家配置千差万别，但你拿这条主线去套，每一个都能对上号——这正是"理解机制远比记住配置更重要"的绝佳例子，也是这门课从头到尾想传达的态度。</p>
+  </div>
+</details>
+
+<table class="t">
+  <tr><th>维度</th><th>Mixtral 8x7B</th><th>DeepSeek-V3</th><th>不变的主线</th></tr>
+  <tr><td>专家总数 <span class="mono">n_expert</span></td><td>8</td><td>256 (+1 shared)</td><td>全部权重都要驻留显存</td></tr>
+  <tr><td>每 token 选 <span class="mono">n_expert_used</span></td><td>2</td><td>8</td><td>单步只算被选中的那几个</td></tr>
+  <tr><td>shared expert</td><td>无</td><td>有 1 个常驻</td><td>都在"怎么挑、怎么合"上做文章</td></tr>
+  <tr><td>稀疏算子</td><td><span class="mono">ggml_mul_mat_id</span></td><td><span class="mono">ggml_mul_mat_id</span></td><td>底层算法完全一样</td></tr>
+</table>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>MoE = 把一层 FFN 拆成 N 个专家，每 token 只走 k 个（如 8 选 2）：参数容量像大模型、单 token 算力像小模型。</li>
+    <li>路由：router 小线性层打分 -&gt; <span class="mono">ggml_soft_max</span> -&gt; <span class="mono">ggml_argsort_top_k</span> 选 top-k -&gt; 取门控权重归一化。</li>
+    <li>稀疏：<span class="mono">ggml_mul_mat_id</span> 靠 <span class="mono">ids</span> 间接寻址，只算被选中的专家（算力 = n_expert_used / n_expert），不是"算完再扔"。</li>
+    <li>取舍：用激活稀疏换参数容量；代价是所有专家权重都要驻留显存（吃显存）+ 路由导致访存不规整（吃带宽）。</li>
+    <li>变体：负载均衡（训练期 aux loss）、shared expert（通用常驻）、expert group（先选组）——底层稀疏算法不变。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  MoE 和上一课的投机解码，骨子里是同一种智慧的两面：<strong>不是所有计算都同等重要，找出真正需要的那部分、只算它</strong>。投机解码在"时间"维度上偷懒（猜对的步骤不用真算），MoE 在"参数"维度上偷懒（不相关的专家不用激活）。这种"条件计算 / 稀疏激活"的思路，正在成为大模型继续变大的主要出路——因为稠密地把每个参数都用上，算力很快就撑不住了。往深一层看，这也很像生物大脑：你读这行字时，并没有点亮整个大脑，而只激活了相关的少数区域。顺便说，MoE 也提醒我们一件事：模型变强未必靠"让每个零件都更努力"，也可以靠"把零件分工得更聪明"——这种结构性的进步，往往比单纯堆算力更划算，也正是读底层实现最有意思的回报：你看到的不只是"怎么算得快"，还有"为什么这样组织最聪明"。下一课我们换一个维度：多模态——让模型不只读 token，还能"看见"图像，看 ggml 怎么把一张图变成模型能懂的 embedding。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. MoE 的核心取舍是什么？</div>
+  <ol class="opts">
+    <li>参数容量像大模型，但单 token 的算力只花用到的那几个专家——参数大、算力小</li>
+    <li>参数和算力都不变，只是更快</li>
+    <li>参数更多、算力也更多</li>
+    <li>参数更少、算力也更少</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。MoE 把一个大 FFN 拆成 N 个专家，但每个 token 只激活其中 top-k 个（比如 8 选 2）。于是模型“装得下”的知识由总参数量决定（像一个很大的稠密模型），而每个 token 真正要算的乘加只来自被选中的 k 个专家（像一个小模型）。代价是显存要装下全部专家的权重、路由不规整带来访存和负载均衡的麻烦。一句话：拿显存换算力，用稀疏激活把“大容量”和“低单步算力”同时拿到手。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml 为什么要专门做一个 ggml_mul_mat_id 算子，而不是用普通的矩阵乘？</div>
+  <ol class="opts">
+    <li>因为它能压缩权重</li>
+    <li>因为它跳过了 softmax</li>
+    <li>因为它算得更精确</li>
+    <li>要按每个 token 选出的专家 id，只取对应专家的权重去算——真正做到“只算被选中的 k 个”</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。稀疏的关键在“只算被选中的专家”。如果用普通 mul_mat 把 8 个专家全乘一遍再扔掉 6 个，参数是稀疏了、算力一点没省。ggml_mul_mat_id 接收一个 ids 张量（top-k 路由的结果），按 id 去 gather 对应专家的权重列、只对选中的 k 个做乘加。这正是 MoE 省算力的落地点——没有这个算子，“8 选 2 省 3/4 算力”就只是纸面上的话。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 关于 MoE 的显存占用，下面哪句对？</div>
+  <ol class="opts">
+    <li>显存和专家数量无关</li>
+    <li>显存比同算力的稠密模型还小</li>
+    <li>显存要装下全部专家的权重，按总参数算；省的是每步算力，不是显存</li>
+    <li>显存只需装下被激活的 k 个专家</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。哪个 token 会路由到哪个专家是运行时才知道的，所以全部专家的权重都得常驻显存待命——显存按“总参数量”算，不按“激活的 k 个”算。这就是为什么 MoE 模型的 GGUF 文件和显存需求往往很大（DeepSeek、Mixtral 都是几十上百 GB）。MoE 省的是“每个 token 的乘加次数”（算力 / 时间），不是“要装多少权重”（显存）。把这两件事分开看，才不会对 MoE 的资源需求产生误解。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>MoE 的路由用 argsort 取 top-k，是一个“硬选择”（要么选中、要么没选中），它对每个专家的输入不是连续可微的。请想一想：训练时这种硬路由会带来什么麻烦（比如某些专家总没人选、梯度怎么传）？真实系统是怎么缓解的（提示：归一化、负载均衡损失、专家分组 n_expert_groups）？再把它和你学过的稠密 FFN 对比：稠密 FFN 为什么没有“专家饿死”这种问题？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Every FFN (feed-forward network, L11) so far has every token dutifully pass through the whole thing end to end. But the largest open models today (Mixtral, DeepSeek, Qwen-MoE...) almost all do otherwise - they split one FFN into dozens or even hundreds of "experts", and each token picks only two or three to go through. This is MoE (Mixture of Experts). This lesson looks at how ggml implements it: how one token is "routed" to a few experts, and how only those few are computed without wasting compute. This is no fringe trick - it is already the default architecture of today's strongest open models, and understanding it is what lets you grasp why this generation can be both huge and runnable.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">MoE's magic is one sentence: <strong>the parameter capacity of a big model, but the per-token compute of a small one</strong>. An 8-expert, top-2 MoE layer has about the parameters of 8 FFNs; yet each token goes through only 2 of them - a quarter of the compute of an equally large dense model. The model can thus use its large parameters to "remember" far more, while the compute per inference step drops a great deal.</p>
+<p style="color:var(--muted)">Roadmap: first routing (how the router picks experts for each token), with a trace of one token's routing; then how ggml uses <span class="mono">ggml_mul_mat_id</span> to compute only the selected experts; and finally what this "activation sparsity" design trades for what, and where the cost lies.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  MoE rests on a plain bet: <strong>not every token needs the whole network's full skill</strong>. A token about code and a token about poetry might be better handled by different "experts". So MoE splits one big FFN into N small experts, plus a "dispatcher" (the router) that picks the most fitting k for each token. The gain: parameters can pile up huge (each expert remembers something different), yet each token's actual compute is spread over only k experts - <strong>trading "activation sparsity" for "parameter capacity"</strong>. This is why you see phrasing like "60B total parameters, only 10B active": the former is all experts summed, the latter is the few a single token actually passes through. This "huge total, small active" design is why a MoE model downloads as hundreds of GB yet does not demand that much compute to run - you are buying "capacity" and paying in "VRAM". And for that reason MoE models are a bit "VRAM-gated" for hobbyists: inference is light on compute yet demands enough VRAM to hold all the experts up front - which kicks the ball back to L33's multi-GPU and offload.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Think of a dense FFN as a <strong>one-stop general clinic</strong>: every patient who comes must go through every department head to toe - slow and wasteful. MoE is like a <strong>specialized hospital plus a triage desk</strong>: triage (the router) glances at your symptoms and sends you only to the two or three most relevant departments (experts). However many departments the hospital has (however big the parameters), your visit touches only two or three (compute unchanged). The cost is just as plain: every department must keep its doors open and staff on hand (all expert weights must stay resident in VRAM), even if only two are seeing patients right now. The analogy also captures MoE's sweet and bitter: specialization makes "seeing a specialist" faster and sharper (each expert owns a domain), but the cost of running a whole big hospital (staffing every department) is always there. Following the analogy you can also see: if the triage desk is poor (the router is undertrained) and sends an emergency patient to ophthalmology, even the best specialist cannot help - which is why "load balancing / routing quality", covered later, matters so much.
+</div>
+
+<h2>Routing: how the router picks experts for a token</h2>
+<p>It all starts with a tiny "scoring". An MoE layer has a <strong>router (also called the gate)</strong>, essentially a small linear layer: take the current token's vector and score every expert. The higher the score, the more this token should go to that expert. Think of the router as a "dispatcher": it reads the token's "semantic fingerprint" (that vector) and, on experience learned in training, judges "who should get this job". <span class="mono">ggml_argsort_top_k</span> picks the highest k of those scores (say 2 of 8) - the experts this token goes through this step. A frequently asked point here: why top-k (pick several) rather than top-1 (only the best one)? Because with only one, a single routing mistake has no fallback and training is less stable; picking 2 blends two experts' outputs by weight, which both tolerates errors and can express the subtler semantics of "this token is between two categories". Here are the real routing lines in ggml (from <span class="mono">build_moe_ffn</span>):</p>
+<pre class="code"><span class="cm">// MoE routing (simplified from src/llama-graph.cpp build_moe_ffn)</span>
+logits = <span class="fn">build_lora_mm</span>(gate_inp, cur);        <span class="cm">// router linear: one score per expert [n_expert, n_tokens]</span>
+probs  = <span class="fn">ggml_soft_max</span>(logits);                 <span class="cm">// turn into probabilities (some models use sigmoid)</span>
+selected = <span class="fn">ggml_argsort_top_k</span>(probs, n_expert_used); <span class="cm">// pick the top-k experts (e.g. 2 of 8)</span>
+weights = <span class="fn">ggml_get_rows</span>(probs, selected);       <span class="cm">// take those k experts' gating weights</span>
+weights = <span class="fn">normalize</span>(weights);                   <span class="cm">// normalize so the k weights sum to 1</span></pre>
+<p>Line by line: <span class="mono">build_lora_mm(gate_inp, cur)</span> is the router linear layer, scoring every expert for each token (<span class="mono">logits</span>); <span class="mono">ggml_soft_max</span> turns scores into probabilities; <span class="mono">ggml_argsort_top_k</span> picks the highest <span class="mono">n_expert_used</span> (the "2" in "2 of 8"); <span class="mono">ggml_get_rows</span> pulls out those k experts' weights and normalizes them - later, when combining expert outputs, this is the weighting. The whole router is tiny: against the experts' own big matmuls, its cost is nearly negligible. Worth stressing: the router is not a hardcoded rule but <strong>learned</strong> - on vast data the model itself learns "what kind of token goes to which expert". So you cannot know in advance what an expert "specializes" in - it might have become "the punctuation one", "the numbers one", "the some-language one", or some internal division of labor with no pattern a human can see. This is what makes MoE both magical and a bit of a black box: the division of labor is emergent, not designed.</p>
+<p>Freezing one token's routing into a picture is clearest:</p>
+<div class="trace">
+  <div class="tcap"><b>Trace one token's MoE routing</b>: the router scores 8 experts, picks the top-2 (with weights); only those 2 experts actually compute, and a weighted sum of their outputs forms the result (illustrative).</div>
+<svg viewBox="0 0 680 320" width="100%" role="img" aria-label="MoE routing example: one token is scored by the router, top-2 of 8 experts are selected (with weights), each computes, and a weighted sum forms the output">
+<g font-family="ui-monospace,monospace">
+<rect x="30" y="150" width="72" height="40" rx="6" fill="#ffffff" stroke="#c2630e"/><text x="66" y="174" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">token</text>
+<line x1="102" y1="170" x2="138" y2="170" stroke="#9aa6b2" stroke-width="1.6"/><path d="M 144 170 L 136 166 L 136 174 z" fill="#9aa6b2"/>
+<rect x="146" y="142" width="92" height="56" rx="6" fill="#ffffff" stroke="#2563eb"/><text x="192" y="168" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">router</text><text x="192" y="185" text-anchor="middle" fill="#5b6470" font-size="10">gate</text>
+<text x="332" y="18" text-anchor="middle" fill="#5b6470" font-size="11">8 experts (FFN)</text>
+<line x1="238" y1="170" x2="296" y2="41" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="28" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="45" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E0</text>
+<line x1="238" y1="170" x2="296" y2="73" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="60" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="77" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E1</text>
+<line x1="238" y1="170" x2="296" y2="105" stroke="#7c3aed" stroke-width="1.8"/>
+<path d="M 302 105 L 294 101 L 294 109 z" fill="#7c3aed"/>
+<rect x="300" y="92" width="64" height="26" rx="5" fill="#ece3fb" stroke="#7c3aed"/><text x="332" y="109" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">E2</text>
+<text x="372" y="109" fill="#7c3aed" font-weight="700" font-size="11">w1=0.7</text>
+<line x1="238" y1="170" x2="296" y2="137" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="124" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="141" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E3</text>
+<line x1="238" y1="170" x2="296" y2="169" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="156" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="173" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E4</text>
+<line x1="238" y1="170" x2="296" y2="201" stroke="#7c3aed" stroke-width="1.8"/>
+<path d="M 302 201 L 294 197 L 294 205 z" fill="#7c3aed"/>
+<rect x="300" y="188" width="64" height="26" rx="5" fill="#ece3fb" stroke="#7c3aed"/><text x="332" y="205" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">E5</text>
+<text x="372" y="205" fill="#7c3aed" font-weight="700" font-size="11">w2=0.3</text>
+<line x1="238" y1="170" x2="296" y2="233" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="220" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="237" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E6</text>
+<line x1="238" y1="170" x2="296" y2="265" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="300" y="252" width="64" height="26" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="332" y="269" text-anchor="middle" fill="#9aa6b2" font-weight="400" font-size="11">E7</text>
+<text x="332" y="296" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">top-2 selected</text>
+<text x="332" y="312" text-anchor="middle" fill="#9aa6b2" font-size="10">other 6 not computed</text>
+<line x1="426" y1="105" x2="470" y2="170" stroke="#7c3aed" stroke-width="1.6"/>
+<line x1="426" y1="201" x2="470" y2="170" stroke="#7c3aed" stroke-width="1.6"/>
+<path d="M 474 170 L 466 166 L 466 174 z" fill="#7c3aed"/>
+<rect x="476" y="132" width="84" height="76" rx="6" fill="#ffffff" stroke="#7c3aed"/><text x="518" y="164" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="11">weighted sum</text><text x="518" y="182" text-anchor="middle" fill="#5b6470" font-size="10">w1*E2 + w2*E5</text>
+<line x1="560" y1="170" x2="588" y2="170" stroke="#c2630e" stroke-width="1.6"/><path d="M 594 170 L 586 166 L 586 174 z" fill="#c2630e"/>
+<rect x="596" y="150" width="64" height="40" rx="6" fill="#ffffff" stroke="#c2630e"/><text x="628" y="174" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">output</text>
+</g></svg>
+</div>
+
+<h2>Computing sparsely: ggml_mul_mat_id runs only the selected experts</h2>
+<p>With experts chosen, here comes MoE's most crucial and most easily-assumed step: <strong>how to "compute only the selected experts"</strong>. A lazy implementation might "compute all 8 experts then throw away the 6 not chosen" - then MoE saves no compute at all. In fact the naive "compute all then discard" really existed in some early implementations, with the effect "parameters got sparse but compute did not", squandering MoE's benefit. So "true sparsity" is what makes or breaks MoE in practice, and the reason ggml built a dedicated <span class="mono">ggml_mul_mat_id</span> op just for it. ggml uses that op to be genuinely sparse:</p>
+<pre class="code"><span class="cm">// sparse expert matmul (src/llama-graph.cpp build_moe_ffn)</span>
+<span class="cm">// selected = the ids picked last section: which experts each token chose</span>
+up   = <span class="fn">ggml_mul_mat_id</span>(up_exps,   cur, selected); <span class="cm">// up projection on selected experts only</span>
+gate = <span class="fn">ggml_mul_mat_id</span>(gate_exps, cur, selected); <span class="cm">// gate projection on selected experts only</span>
+act  = <span class="fn">silu</span>(gate) * up;                           <span class="cm">// activation (SwiGLU)</span>
+out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span class="cm">// down projection back to the original dim</span>
+<span class="cm">// finally combine the k experts' out by the router's weights (weighted sum)</span></pre>
+<p>The crux is the <span class="mono">id</span> in <span class="mono">ggml_mul_mat_id</span>: beyond a normal matmul it takes an extra <span class="mono">ids</span> tensor (the <span class="mono">selected</span> from last section), telling the multiply "which experts' weights each token should multiply by". So it does not multiply the token by all 8 experts but <strong>indirectly addresses by ids</strong>, pulling out only the 2 chosen experts to compute. <span class="mono">up_exps</span>/<span class="mono">gate_exps</span>/<span class="mono">down_exps</span> are big tensors packing all experts' weights together, and <span class="mono">ids</span> is the index of "which slices to use". Compute thus really drops to <span class="mono">n_expert_used / n_expert</span> (a quarter for 2 of 8), rather than "compute then discard". Let me clear up a common misconception: MoE saves the <strong>FFN's compute</strong>, not the whole model's. Attention, normalization, embeddings are still computed in full for every token - only the FFN part is sparsified. But in large models the FFN is exactly where most parameters and compute sit, so sparsifying it yields a big overall gain. (This is also why MoE almost only touches the FFN and leaves attention alone - attention is not the parameter-heavy part anyway, so splitting it gains little and would disrupt the flow of global information.)</p>
+<div class="cols">
+  <div class="col"><h4>equal-capacity dense</h4><p>the same parameters made into one big network, every token passing through all of it: compute = 8 experts' worth.</p></div>
+  <div class="col"><h4>MoE (2 of 8)</h4><p>each token activates only 2 experts: compute = 2 experts' worth, a quarter of the equal-capacity dense.</p></div>
+  <div class="col"><h4>in common</h4><p>the same parameter count (all 8 experts resident in VRAM); the only difference is "how many are actually activated per step".</p></div>
+</div>
+
+<h2>Why design it this way: sparsity for capacity</h2>
+<p>Connecting the last two sections, MoE's trade-off is clear: it bets that <strong>"knowledge can be divided and conquered"</strong> - rather than have every token pass through one all-encompassing big FFN, let it pass through only a few most-relevant experts. The model can then pile parameters up enormously (each expert owning a patch of "knowledge"), while a single token's compute depends only on "how many are picked", not "how many experts there are in total". This is why the flagship open models of the last couple of years are almost uniformly MoE: under a fixed inference-compute budget, MoE can pack in far more parameters than a dense model, and so be "smarter". Another metaphor: a dense model is like hiring one generalist who knows a bit of everything; MoE is like hiring a panel of specialists plus a triage desk - the team's total knowledge is far greater, but each query only disturbs the relevant two. Behind MoE's rise is a plain economics: training and inference compute are expensive, while parameters (VRAM) are relatively cheap. MoE rides exactly that line - spend cheap VRAM to save expensive compute, building a stronger model under the same compute budget. That is why, once someone showed MoE scales, the whole open-source community followed almost overnight. Of course, MoE is no panacea: it is harder to train (load balancing and stability are pitfalls), pickier about VRAM, and at small scale not necessarily a better deal than dense. It is a product of the "large-model era" - MoE truly shines only when you want to pile parameters up to a scale a dense architecture cannot bear.</p>
+<p>But there is no free lunch, and MoE's cost is concrete, landing exactly on the sore points of earlier lessons. <strong>VRAM</strong>: though only 2 experts compute per step, all 8 experts' weights <strong>must stay in VRAM</strong> - you do not know which the next token will route to. So MoE's memory footprint is counted by "total parameters", often frighteningly large (which is why MoE models lean so heavily on L33's multi-GPU / offload). Helpfully, quantization (L06/L12/L29) does a lot here: squeeze expert weights to 4-bit and VRAM shrinks fourfold, which is what squeezes many otherwise-too-big MoEs onto consumer GPUs at all.</p>
+<p><strong>Irregular memory access</strong>: neighboring tokens may route to entirely different experts, and <span class="mono">ggml_mul_mat_id</span>'s indirect addressing makes memory access jumpier than a dense matmul and less cache-friendly (echoing the memory-bound theme of L31/L32). So MoE is a "saves compute but costs more VRAM and bandwidth" trade - it moves the bottleneck from "computing" toward "storing and moving". This also explains a real-world observation: at equal active parameters, a MoE and a dense model do not necessarily run at the same speed, but MoE fits a far smarter model onto the same GPU. One subtlety more: in prefill a batch of tokens is computed together, and different tokens routing to different experts can actually exercise all experts with high parallelism; while in decode a single token at a time often activates only two experts, with low hardware utilization - echoing once more the prefill-vs-decode of L18/L30.</p>
+
+<h2>Deeper: load balancing and MoE variants</h2>
+<p>Two last folds for two issues you cannot avoid when actually deploying MoE.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why bother with "load balancing"? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Suppose the router learned badly: it routes the vast majority of tokens to the same two experts, while the other six are barely visited. Two bad things follow: the neglected experts are undertrained and waste their parameters (capacity wasted); the overloaded experts become a bottleneck and may exceed their "capacity" (in some training and distributed-inference implementations an expert can take at most so many tokens per batch, beyond which tokens are dropped; but note llama.cpp inference drops nothing - it always computes every selected expert). So training a MoE usually adds a <strong>load-balancing auxiliary loss</strong>, encouraging the router to spread tokens evenly across experts; a "capacity factor" leaves each expert some headroom. At <strong>inference</strong> this is already baked into the weights (the router is trained), but understanding it helps you read many MoE designs - why some models use expert groups or token dropping. ggml at inference does not compute the aux loss, but how balanced the router's distribution is directly affects expert utilization on real hardware. There is also an inference-side reality, especially when experts are sharded across several GPUs (L33's expert parallelism): if a batch of tokens (say, the multiple requests a server handles at once) happen to all pile onto the same expert, the GPU holding it becomes a serial bottleneck while others sit idle - so under multi-GPU high-concurrency serving, MoE throughput is sometimes less stable than a dense model with equal active parameters. (On a single GPU it is the opposite: all piling onto one expert is just one regular large matmul, no bottleneck.) (Incidentally, because the router is fixed at inference, different inputs and different tasks shift the experts' busy/idle distribution - which is why the same MoE model's real-world speed varies across tasks.)</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What are shared experts and expert groups? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Pure MoE has a pitfall: some "general skills" (grammar, common sense) are used by every token, and making them compete for the k slots is a bit wasteful. So models like DeepSeek add a <strong>shared expert</strong>: a resident expert <strong>every token passes through</strong>, handling the general part, leaving the router to pick k of the rest for the "specialized" part. <span class="mono">build_moe_ffn</span> also supports <strong>expert groups</strong>: split experts into groups, pick a group first then experts within it (<span class="mono">n_expert_groups</span> / <span class="mono">n_group_used</span> in the source), which keeps routing efficient when there are very many experts (hundreds) and helps put a group of experts on the same GPU. What these variants share: they all play with "how routing picks and how the picks are combined", while the underlying <span class="mono">ggml_mul_mat_id</span> sparse algorithm stays the same. This is also a good mindset for reading ggml's MoE source: do not get dizzy in the models' assorted variants - hold the through-line "score -&gt; pick top-k -&gt; <span class="mono">ggml_mul_mat_id</span> sparse compute -&gt; weighted combine", and the rest are just flourishes on that line. Concretely: DeepSeek-V3 has 256 routed experts + 1 shared expert, picking 8 per token; Mixtral is 2 of 8; configs differ wildly, but lay this through-line over each of them and every one lines up - a fine example of "understanding the mechanism beats memorizing the configs", and the attitude this course keeps trying to convey.</p>
+  </div>
+</details>
+
+<table class="t">
+  <tr><th>Dimension</th><th>Mixtral 8x7B</th><th>DeepSeek-V3</th><th>The unchanging through-line</th></tr>
+  <tr><td>Total experts <span class="mono">n_expert</span></td><td>8</td><td>256 (+1 shared)</td><td>all weights must stay resident in VRAM</td></tr>
+  <tr><td>Picked per token <span class="mono">n_expert_used</span></td><td>2</td><td>8</td><td>each step computes only the chosen few</td></tr>
+  <tr><td>shared expert</td><td>none</td><td>1 resident</td><td>all play with "how to pick and combine"</td></tr>
+  <tr><td>sparse op</td><td><span class="mono">ggml_mul_mat_id</span></td><td><span class="mono">ggml_mul_mat_id</span></td><td>the underlying algorithm is identical</td></tr>
+</table>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>MoE = split one FFN into N experts, each token taking only k (e.g. 2 of 8): parameter capacity like a big model, per-token compute like a small one.</li>
+    <li>Routing: a small router linear scores -&gt; <span class="mono">ggml_soft_max</span> -&gt; <span class="mono">ggml_argsort_top_k</span> picks top-k -&gt; take gating weights, normalize.</li>
+    <li>Sparse: <span class="mono">ggml_mul_mat_id</span> uses <span class="mono">ids</span> to indirectly address and compute only the selected experts (compute = n_expert_used / n_expert), not "compute then discard".</li>
+    <li>Trade: activation sparsity for parameter capacity; the cost is all expert weights resident in VRAM (memory) + routing's irregular access (bandwidth).</li>
+    <li>Variants: load balancing (training-time aux loss), shared expert (general resident), expert groups (pick a group first) - the underlying sparse algorithm is unchanged.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  MoE and last lesson's speculative decoding are two faces of the same wisdom at heart: <strong>not all computation is equally important - find the part you actually need and compute only that</strong>. Speculative decoding economizes in the "time" dimension (steps guessed right need no real compute); MoE economizes in the "parameter" dimension (irrelevant experts need not activate). This "conditional computation / sparse activation" idea is becoming the main way for large models to keep growing - because using every parameter densely soon outstrips the compute budget. Deeper still, this resembles a biological brain: reading this line, you do not light up the whole brain, only the few relevant regions. By the way, MoE reminds us of something: a model gets stronger not only by "making every part work harder" but also by "dividing the parts' labor more cleverly" - this structural progress is often a better deal than piling on compute, and it is the most interesting reward of reading low-level implementations: you see not only "how to compute fast" but "why this organization is the smartest". Next lesson we switch dimensions: multimodal - letting the model not only read tokens but "see" images, watching how ggml turns a picture into an embedding the model understands.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the core tradeoff of MoE?</div>
+  <ol class="opts">
+    <li>parameter capacity like a big model, but per-token compute only pays for the few experts used - big params, small compute</li>
+    <li>params and compute unchanged, just faster</li>
+    <li>more parameters and more compute</li>
+    <li>fewer parameters and less compute</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does ggml need a dedicated ggml_mul_mat_id op instead of a plain matmul?</div>
+  <ol class="opts">
+    <li>because it compresses the weights</li>
+    <li>because it skips the softmax</li>
+    <li>because it computes more accurately</li>
+    <li>to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Regarding MoE's VRAM footprint, which is correct?</div>
+  <ol class="opts">
+    <li>VRAM is unrelated to the number of experts</li>
+    <li>VRAM is smaller than a dense model of equal compute</li>
+    <li>VRAM must hold every expert's weights, sized by total params; what is saved is per-step compute, not VRAM</li>
+    <li>VRAM only needs to hold the k activated experts</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>MoE routing uses argsort to take top-k, a 'hard selection' (selected or not) that is not continuously differentiable in each expert's input. Consider: what trouble does such hard routing cause in training (e.g. some experts never get picked, how do gradients flow)? How do real systems mitigate it (hint: normalization, load-balancing loss, expert grouping n_expert_groups)? Then contrast with the dense FFN you learned: why does a dense FFN have no 'expert starvation' problem?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="34-speculative-decoding.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">投机解码</span><span class="lang-en">Speculative decoding</span></div></a><a class="next" href="36-multimodal.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">多模态</span><span class="lang-en">Multimodal</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
