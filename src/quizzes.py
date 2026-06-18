@@ -2297,6 +2297,67 @@ QUIZZES = {
             },
         ],
     },
+    "36-multimodal.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "多模态的核心做法是把一张图变成什么？",
+                    "en": "At its core, multimodality turns an image into what?",
+                },
+                "opts": [
+                    {"zh": "一串 embedding 向量，和文本 token 的 embedding 一样塞进同一个序列", "en": "a run of embedding vectors, spliced into the same sequence like text tokens' embeddings"},
+                    {"zh": "一段新的文字描述，再当普通 prompt 输入", "en": "a new text description, fed back as an ordinary prompt"},
+                    {"zh": "一组特殊的 token id，查词表得到", "en": "a set of special token ids looked up in the vocabulary"},
+                    {"zh": "一张压缩后的小图，直接送进 transformer", "en": "a compressed thumbnail sent straight into the transformer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "关键洞察：LLM 主体从头到尾只处理 embedding 向量序列，它根本不知道“token”长什么样。所以多模态不改模型本体，而是把图像也编码成 N 个 embedding（clip 编码 + projector 投影到 LLM 的 embedding 空间），按 &lt;image&gt; 占位插进文本序列。LLM 拿到这串向量，分不出哪些来自文字、哪些来自图像——照常前向即可。这也是为什么 llama_batch 能同时放 token 和 embd（L18）：图像走的就是 embd 那条入口。",
+                    "en": "Key insight: the LLM body only ever processes sequences of embedding vectors - it has no idea what a 'token' looks like. So multimodality does not change the model body; it encodes the image into N embeddings too (clip encodes + projector projects into the LLM's embedding space), spliced into the text sequence at the &lt;image&gt; marker. Handed this run of vectors, the LLM cannot tell which came from text and which from the image - it just runs forward. This is also why llama_batch can carry both token and embd (L18): images go in through the embd entry.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "projector（mmproj）在多模态管线里负责什么？",
+                    "en": "What does the projector (mmproj) do in the multimodal pipeline?",
+                },
+                "opts": [
+                    {"zh": "把 clip 的视觉特征投影到 LLM 的 embedding 维度和空间，让它“像个 token embedding”", "en": "project clip's visual features into the LLM's embedding dimension and space, making them 'look like a token embedding'"},
+                    {"zh": "把图像压缩成更小的文件以省显存", "en": "compress the image into a smaller file to save VRAM"},
+                    {"zh": "给图像分类、识别里面有什么物体", "en": "classify the image and recognize what objects are in it"},
+                    {"zh": "把文本 token 翻译成图像", "en": "translate text tokens into an image"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "clip 输出的视觉特征和 LLM 的 token embedding 不在一个空间——维度可能不同、数值分布和语义也是两套体系，直接塞进去模型读不懂。projector 就是这座桥：一个小网络，把视觉特征对齐到 LLM 的 embedding 维度/空间。clip_n_mmproj_embd 必须等于 LLM 的 embedding 维度，否则塞不进序列。正因为它是为“某个 clip + 某个 LLM”专门训练的，所以是个单独的 mmproj 文件、要单独加载；少了它，模型就只会读字、不会看图。",
+                    "en": "clip's visual features and the LLM's token embeddings are not in the same space - dimensions may differ, and value distributions and semantics are two different systems, so feeding them in directly is unreadable to the model. The projector is that bridge: a small network aligning visual features to the LLM's embedding dimension/space. clip_n_mmproj_embd must equal the LLM's embedding dimension or the vectors will not fit. Because it is trained for one specific 'this clip + this LLM' pairing, it is a separate mmproj file loaded separately; without it the model only reads text and cannot see images.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一张图进了 LLM 之后，对 KV cache 意味着什么？",
+                    "en": "Once an image is in the LLM, what does it mean for the KV cache?",
+                },
+                "opts": [
+                    {"zh": "它占 N 个序列位置、写 N 份 KV，和文本一样吃上下文预算；图越多 / 越清，涨得越快", "en": "it takes N sequence positions and writes N entries of KV, eating the context budget like text; more / sharper images grow it faster"},
+                    {"zh": "图像不进 KV cache，只在编码时存在一下", "en": "images do not enter the KV cache, they exist only briefly during encoding"},
+                    {"zh": "一张图永远只占 1 个位置", "en": "an image always takes exactly 1 position"},
+                    {"zh": "图像会替换掉之前的文本 KV", "en": "the image replaces the earlier text KV"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "image embedding 一旦插进序列，对 LLM 来说就是实打实的 N 个位置：要分配 position、要写进 KV cache（L19），还要参与之后每个 token 的注意力。所以一张高清图可能占掉几百上千个位置，几张图下来 KV cache 直追长文本——“32K 上下文的多模态模型”，这 32K 是图和字共享的预算。clip_n_output_tokens 决定这个 N，有些 projector（resampler）会主动压 N 来省 KV。这正呼应 L19：序列越长，KV cache 越大，能并发的请求越少。",
+                    "en": "Once image embeddings are spliced in, to the LLM they are N real positions: assigned positions, written into the KV cache (L19), and joining the attention of every later token. So one high-res image can take hundreds or thousands of positions, and a few images in the KV cache rivals long text - a '32K-context multimodal model' shares that 32K between images and text. clip_n_output_tokens sets this N, and some projectors (resamplers) actively compress N to save KV. This echoes L19: the longer the sequence, the bigger the KV cache, the fewer concurrent requests.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课反复强调一件事：LLM 从没“看见”过图，它眼里只有 embedding 向量序列，多模态全靠在它前面加一道“翻译”。请顺着这个视角想：(1) 为什么说图像、音频走的是同一套机制（mtmd 的 chunk 类型里 IMAGE 和 AUDIO 并列）？(2) 这种“冻结主体、只在边界加适配器”的思路，和你在 L24 学的 LoRA 有什么共性？(3) 如果让你给这个 LLM 接一种全新的模态（比如时间序列传感器数据），你需要造哪两个部件？",
+                "en": "This lesson kept stressing one thing: the LLM has never 'seen' an image; in its eyes there are only sequences of embedding vectors, and multimodality is entirely a 'translation' bolted in front. Follow that view: (1) why do image and audio go through the same mechanism (mtmd's chunk types put IMAGE and AUDIO side by side)? (2) what does this 'freeze the body, only add adapters at the boundary' idea share with the LoRA you learned in L24? (3) if you had to plug a brand-new modality into this LLM (say time-series sensor data), which two components would you need to build?",
+            },
+        ],
+    },
 }
 
 

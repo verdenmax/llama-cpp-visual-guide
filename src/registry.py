@@ -49,4 +49,5 @@ CONTENT = {
     "33-backends-dispatch.html": part6.LESSON_33,
     "34-speculative-decoding.html": part7.LESSON_34,
     "35-moe.html": part7.LESSON_35,
+    "36-multimodal.html": part7.LESSON_36,
 }

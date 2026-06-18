@@ -116,6 +116,8 @@ PAGES = [
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
     ("35-moe.html", "MoE 专家混合", "Mixture of experts",
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
+    ("36-multimodal.html", "多模态", "Multimodal",
+     "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
 ]
 
 
@@ -620,6 +622,8 @@ SUBTITLES = {
                                      "draft model / n-gram propose, target verifies in parallel, acceptance rate"),
     "35-moe.html": ("router 门控 -> top-k 选专家 -> ggml_mul_mat_id 稀疏算 -> 加权合并",
                     "router gating -> top-k experts -> ggml_mul_mat_id sparse compute -> weighted combine"),
+    "36-multimodal.html": ("mtmd 管线: 图像 -> clip(ViT) -> projector(mmproj) -> embedding -> 与文本交织",
+                           "mtmd pipeline: image -> clip(ViT) -> projector(mmproj) -> embeddings -> interleave with text"),
 }
 
 

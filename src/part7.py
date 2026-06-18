@@ -487,3 +487,234 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
 </div>
 """,
 }
+
+LESSON_36 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+到这里为止，你脑子里的 LLM 还只会读文字：一段 prompt 切成 token、查 embedding、过几十层 transformer。可现在的模型动不动就能"看图说话"——你发一张图，它就能描述、问答、读表格。它是怎么把"一张图"塞进一个只认 token 的模型里的？答案出乎意料地朴素：<strong>LLM 的输入层根本不在乎喂进来的 embedding 向量是从文字来的还是从图像来的</strong>。多模态要做的，就是把"一张图"也变成<strong>一串 embedding</strong>，和文本 token 的 embedding 拼在同一个序列里，一起送进 <span class="mono">llama_decode</span>。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这一课看 llama.cpp 的 <span class="mono">mtmd</span>（multimodal）子系统怎么干这件事。核心只有一句：模型主体一个字都不用改，多模态全靠在它<strong>前面</strong>接一段"翻译"流水——视觉编码器（clip / ViT）把图像压成视觉特征，projector（mmproj）再把这些特征<strong>投影到 LLM 的 embedding 空间</strong>，得到 N 个"看起来就像 token embedding"的向量，按 prompt 里 <span class="mono">&lt;image&gt;</span> 占位的地方插进序列。LLM 拿到这串向量，根本分不出哪些来自文字、哪些来自图像——它只管照常往下算。这一点初看会让人愣一下：模型明明"看懂"了图，怎么会"不知道那是图"？但这恰恰是这套设计最聪明的地方——把"看懂"这件事完全外包给了前面的视觉流水，LLM 只负责它最擅长的那件事："在向量序列上做推理"。</p>
+<p style="color:var(--muted)">路线图：先看整条 <span class="mono">mtmd</span> 管线（切 chunk -> 编码 -> 取 embedding -> 和文本交织 decode），配一张追踪图看"一张图进 LLM"；再单独讲 projector 这座<strong>桥</strong>为什么不可少；最后两个折叠深挖 clip 的 ViT 内部，以及图像 embedding 在序列里怎么"占位置"、怎么进 KV cache。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  多模态听起来很玄，但拆开看就一句话：<strong>把"非文字"也翻译成 LLM 能吃的 embedding</strong>。回想 L04/L20：文本进 LLM 的第一步，是把每个 token 查成一个 embedding 向量；transformer 主体从头到尾处理的都是<strong>向量序列</strong>，它压根不知道"token"长什么样。这就留了一个口子——只要你能把一张图也变成<strong>同样形状、同样空间</strong>的一串向量，就能直接插进序列里，模型照单全收。所以 llama.cpp 没有去改动 LLM 本体，而是在前面挂一个 <span class="mono">mtmd</span> 流水：clip(ViT) 把图像编码成视觉特征，projector 把特征投影到 LLM 的 embedding 维度，产出 N 个 image embedding，按 <span class="mono">&lt;image&gt;</span> 标记插进文本序列。理解这一点，你就理解了当下绝大多数"多模态大模型"的套路：它们几乎都是"一个现成 LLM + 一个视觉编码器 + 一座 projector 桥"拼出来的——主体没变，只是学会了"看"。这种"冻结主体、外挂适配器"的思路，你其实在 L24 的 LoRA 里已经见过一次——区别只是 LoRA 适配的是"风格/任务"，而这里适配的是"输入模态"。同一个朴素的工程智慧——别动那个又大又难训的主体，只在它周围加可插拔的小零件——在两个完全不同的场景里各结了一次果。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  想象一位<strong>只读中文</strong>的专家（LLM），你要让他理解一张<strong>外文图表</strong>。你不会逼他去学外语（改模型代价太大），而是请一个<strong>翻译官</strong>：翻译官先<strong>看懂</strong>这张图（clip/ViT 把图像编码成视觉特征），再把它<strong>转述成一段中文</strong>（projector 投影到 LLM 的 embedding 空间），然后把这段中文<strong>插进你和专家的对话里</strong>。专家读到这段"中文"，自然地接着往下聊——他根本不知道这段话原本是一张图。这里有两个关键角色：<strong>看懂图的眼睛</strong>（clip）和<strong>把所见转成专家母语的嘴</strong>（projector）。眼睛再好，要是不会说专家的语言，专家也听不懂——所以 projector 这座"翻译桥"才是多模态能不能接上的关键。
+</div>
+<h2>总管线：mtmd 怎么把一张图喂进 LLM</h2>
+<p>先把整条流水看一遍。用户给的是"图文混排"的输入——一段带 <span class="mono">&lt;image&gt;</span> 标记的文字，外加一张（或几张）图的像素。mtmd 把它走成五步：(1) <span class="mono">mtmd_init_from_file</span> 加载 projector（那个单独的 mmproj 文件）；(2) <span class="mono">mtmd_tokenize</span> 把输入<strong>切成一串 chunk</strong>——文字段落是 <span class="mono">TEXT</span> chunk，每张图变成一个 <span class="mono">IMAGE</span> chunk（音频则是 <span class="mono">AUDIO</span>）；(3) 对每个 image chunk 跑 <span class="mono">mtmd_encode_chunk</span>（内部就是 clip + projector）；(4) <span class="mono">mtmd_get_output_embd</span> 取出编码好的视觉 embedding；(5) 把 text chunk 的 token 和 image chunk 的 embedding<strong>按原顺序交织</strong>，一段段喂进 <span class="mono">llama_decode</span>。先看切 chunk 这一步：</p>
+<pre class="code"><span class="cm">// 把"文字 + &lt;image&gt; 标记 + 图像 bitmap"切成有序 chunk (简化自 tools/mtmd/mtmd.h)</span>
+mtmd_input_chunks * chunks = <span class="fn">mtmd_input_chunks_init</span>();
+<span class="fn">mtmd_tokenize</span>(mtmd_ctx, chunks, &amp;text, bitmaps, n_bitmaps);
+<span class="cm">// chunks 里现在是按原文顺序排好的一串:</span>
+<span class="cm">//   [TEXT "这张图是"] [IMAGE 一张图] [TEXT "里面有什么?"]</span>
+<span class="cm">// 每个 chunk 带一个类型: TEXT / IMAGE / AUDIO</span></pre>
+<p>注意 prompt 里那个 <span class="mono">&lt;image&gt;</span>（源码里默认标记其实是 <span class="mono">&lt;__media__&gt;</span>）：它就是个<strong>占位符</strong>，告诉 mtmd"这张图该插在文字的哪个位置"。源码里那段注释举的例子很直白：形如"here is an image: &lt;__media__&gt; ..."这样一句，会被切成三个 chunk——标记前的文字、图像本身、标记后的文字，顺序和原文严丝合缝。切完 chunk，真正的重头戏是把 image chunk 编码成 embedding、再和文字交织着 decode。llama.cpp 把这套逻辑打包进了一个 helper，它的注释几乎就是整条管线的伪代码：</p>
+<pre class="code"><span class="cm">// 逐个 chunk: 文字直接 decode, 图像先 encode 再 decode (简化自 mtmd-helper.cpp)</span>
+<span class="kw">for</span> (each chunk : chunks) {
+    <span class="kw">if</span> (<span class="fn">type</span>(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+        <span class="fn">llama_decode</span>(lctx, <span class="fn">batch_of</span>(chunk.tokens));   <span class="cm">// 文字: 老路, 查 embedding 再算</span>
+    } <span class="kw">else</span> {                                          <span class="cm">// IMAGE / AUDIO chunk:</span>
+        <span class="fn">mtmd_encode_chunk</span>(mtmd_ctx, chunk);          <span class="cm">// 1) 内部跑 clip(ViT) + projector</span>
+        <span class="kw">float</span> * embd = <span class="fn">mtmd_get_output_embd</span>(mtmd_ctx); <span class="cm">// 2) 取出 N 个视觉 embedding</span>
+        <span class="fn">llama_decode</span>(lctx, <span class="fn">batch_of_embd</span>(embd));     <span class="cm">// 3) 直接把 embedding 喂进去</span>
+    }
+}</pre>
+<p>看出门道了吗？文字和图像最后都落到同一个 <span class="mono">llama_decode</span> 上——区别只在"喂进去的是 token（让模型自己查 embedding）还是已经算好的 embedding（直接用）"。<span class="mono">llama_batch</span> 早就同时支持这两种输入（还记得 L18 那个 batch 里既能放 <span class="mono">token</span> 也能放 <span class="mono">embd</span> 吗？），所以图像 embedding 能<strong>无缝</strong>地塞进序列，模型主体一行都不用改。这套设计的妙处在于<strong>复用</strong>：mtmd 没有为图像另起一条推理通路，而是把图像"伪装"成 embedding、复用了文本那一整套 batch、KV cache、采样逻辑——多模态于是变成了一个"前处理"问题，而不是"重写引擎"问题。把"一张图进 LLM"的全过程定格成一条流水：</p>
+<div class="cols">
+  <div class="col"><h4>文字 chunk</h4><p>token id 序列 -&gt; <span class="mono">llama_decode</span> 内部查 embedding 表 -&gt; 算。走的是 L04/L20 的老路。</p></div>
+  <div class="col"><h4>图像 chunk</h4><p>像素 -&gt; clip + projector 算出 embedding -&gt; 直接把 embedding 喂进 <span class="mono">llama_decode</span>。embedding 已备好，跳过查表。</p></div>
+</div>
+<div class="trace">
+  <div class="tcap"><b>追踪一张图进 LLM</b>：像素先过 clip(ViT) 编成视觉特征，projector 投影成 N 个 image embedding，再和文字 token 按原顺序交织成一个序列，整体送进 llama_decode（示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 一张图</h5>
+      <div class="cellrow"><span class="vc">336x336 像素</span></div>
+      <div class="tlab">原始 bitmap</div></div>
+    <div class="op">切 patches<br>clip(ViT)</div>
+    <div class="stn"><h5>② 视觉特征</h5>
+      <div class="cellrow"><span class="vc blue">576 个特征向量</span></div>
+      <div class="tlab">ViT 编码输出</div></div>
+    <div class="op">projector<br>(mmproj)</div>
+    <div class="stn"><h5>③ image embedding</h5>
+      <div class="cellrow"><span class="vc hot">N 个 LLM embedding</span></div>
+      <div class="tlab">投影到 LLM 维度</div></div>
+    <div class="op">按 &lt;image&gt;<br>占位插入</div>
+    <div class="stn"><h5>④ 交织序列</h5>
+      <div class="cellrow"><span class="vc">文字 emb + 图 emb + 文字 emb</span></div>
+      <div class="tlab">一个统一序列</div></div>
+    <div class="op">一起<br>decode</div>
+    <div class="stn"><h5>⑤ llama_decode</h5>
+      <div class="cellrow"><span class="vc blue">LLM 照常前向</span></div>
+      <div class="tlab">分不出图和字</div></div>
+  </div>
+</div>
+<p>值得一提的是，这套"切 chunk -&gt; 编码 -&gt; 交织"的机制对<strong>音频</strong>一视同仁：把语音切成帧、过一个音频编码器（如 Whisper 的前端）、再过 projector 投影成 embedding，走的是和图像完全相同的通路——这就是为什么 <span class="mono">mtmd</span> 的 chunk 类型里 <span class="mono">AUDIO</span> 和 <span class="mono">IMAGE</span> 并列。换句话说，mtmd 的设计目标从一开始就不是"支持图像"，而是"支持任意能被编码成 embedding 的模态"。理解了图像这一条，音频、乃至将来更多模态，都是同一个模子里刻出来的。</p>
+<h2>projector：把"看见的"翻译成 LLM 的母语</h2>
+<p>上面那步 <span class="mono">mtmd_encode_chunk</span> 内部分两半：先 clip(ViT) 把图像"看"成视觉特征，再 projector 把特征"翻译"成 LLM 能读的 embedding。为什么非要这第二步？因为 clip 输出的视觉特征，和 LLM 的 token embedding<strong>根本不在一个空间</strong>——维度可能不一样（clip 也许输出 1024 维，LLM 要 4096 维），数值分布、语义含义更是两套体系。直接把 clip 的输出塞进 LLM，就像把一段没翻译的外文丢给只懂中文的专家，他只会一脸茫然。projector（就是那个单独的 mmproj 文件）就是这座桥：一个小网络，把视觉特征<strong>投影到 LLM 的 embedding 维度和空间</strong>，让它"看起来、用起来都像一个 token embedding"。打个比方，clip 的输出像一段"视觉速记"，每个数字的含义是按视觉任务编排的；LLM 的 embedding 空间则是按语言任务长出来的，同样长度的向量，"坐标系"也完全不同。projector 干的就是坐标变换：把视觉速记重新表达进语言的坐标系里，让"图里有只猫"这件事，落在 LLM 一向用来表示"猫"的那片向量空间附近。</p>
+<p>两个关键的"对齐"由两个函数把关：<span class="mono">clip_n_mmproj_embd(ctx)</span> 返回 projector 的输出维度——它<strong>必须等于</strong> LLM 的 embedding 维度，否则向量塞不进序列；<span class="mono">clip_n_output_tokens(ctx, img)</span> 返回<strong>这一张图会占几个 embedding token</strong>（也就是前面 trace 里那个 N）。这个 N 不是随便定的：图越大、patch 越多，N 越大；有些 projector（resampler 类）还会<strong>主动压缩</strong> N，把几百个 patch 特征汇聚成几十个 embedding，省 KV cache、也省算力。这个 N 直接决定了一张图的"开销"：N 个 embedding 就要占 N 个序列位置、写 N 份 KV——所以同样一张图，projector 把它压成 64 个 embedding 还是铺成 576 个，对显存和速度的影响是数量级的。这也是高分辨率多模态模型的核心权衡之一：看得越细（patch 越多、N 越大）越准，但序列越长、越慢、越吃显存。</p>
+<pre class="code"><span class="cm">// projector 内部: clip 先编码, 投影维度由 mmproj 决定 (简化自 tools/mtmd/clip.h)</span>
+<span class="kw">int</span> n_embd   = <span class="fn">clip_n_mmproj_embd</span>(clip_ctx);       <span class="cm">// projector 输出维度 == LLM embedding 维度</span>
+<span class="kw">int</span> n_tokens = <span class="fn">clip_n_output_tokens</span>(clip_ctx, img); <span class="cm">// 这张图占几个 embedding token</span>
+std::vector&lt;float&gt; out_vec;
+<span class="fn">clip_image_encode</span>(clip_ctx, n_threads, img, out_vec); <span class="cm">// 跑 ViT + projector, 输出 n_tokens x n_embd</span>
+<span class="cm">// out_vec 现在是 n_tokens 个、每个 n_embd 维的视觉 embedding,</span>
+<span class="cm">// 形状和 n_tokens 个 token 的 embedding 完全一样 -&gt; 直接进序列</span></pre>
+<p>常见的 projector 有三档复杂度：<strong>线性层</strong>（一个矩阵乘，最简单，早期 LLaVA 用）、<strong>两层 MLP</strong>（多一层非线性，对齐更好，现在很常见）、<strong>resampler / cross-attention</strong>（用一组可学习 query 把变长的 patch 特征"重采样"成固定个数的 embedding，能压 N、也能处理任意分辨率，Qwen-VL 等用）。选哪一档是<strong>精度和成本的权衡</strong>：线性最省但表达力弱，resampler 最灵活但自己也带一摞参数和算力。不管哪一档，它的职责都一样：<strong>把视觉特征对齐到 LLM 的 embedding 空间</strong>。这也是为什么 mmproj 是个<strong>单独的文件</strong>、要单独加载——它是"某个视觉编码器 + 某个 LLM"这对组合<strong>专门训练</strong>出来的桥，换一个 LLM 或换一个 clip，桥就得重训。理解这一点，你就明白为什么下载多模态模型时，除了主模型那个大 GGUF，还得配一个小小的 mmproj 文件：少了那座桥，模型就只剩"读字"的本事，"看图"的能力无从谈起。一个实用的小知识：HuggingFace 上多模态模型的 GGUF 仓库里，那个名字带 mmproj 的小文件就是它，通常几百 MB 量级，千万别漏下。</p>
+<table class="t">
+  <tr><th>projector 类型</th><th>结构</th><th>特点</th><th>代表</th></tr>
+  <tr><td>线性层</td><td>一个矩阵乘</td><td>最省，表达力弱，固定 N</td><td>早期 LLaVA</td></tr>
+  <tr><td>两层 MLP</td><td>线性 + 非线性 + 线性</td><td>对齐更好，现在常见</td><td>LLaVA-1.5+</td></tr>
+  <tr><td>resampler</td><td>可学习 query + cross-attention</td><td>能压 N、处理任意分辨率</td><td>Qwen-VL</td></tr>
+</table>
+<h2>深入：clip 的眼睛 与 图像的"位置"</h2>
+<p>两个折叠，补两个真要落地多模态时绕不开的细节。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> clip(ViT) 内部到底在做什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>本课把 clip 当黑盒——给它一张图，它吐出一串视觉特征。掀开看，clip 的视觉编码器就是一个<strong>标准的 Vision Transformer（ViT）</strong>，和你前几部分学的文本 transformer 几乎一个套路，只是把"token"换成了"图像 patch"：(1) 把图切成固定大小的小块（patch，比如 14x14 像素一块），每块拉平、线性投影成一个向量——这就是图像版的"embedding"；(2) 加上位置编码（告诉模型每块在原图的哪个位置）；(3) 过若干层自注意力 + FFN，让每个 patch"看到"全图、聚合出语义。最后每个 patch 对应一个输出向量，合起来就是那串视觉特征。所以一张 336x336 的图、14 像素一块，就是 24x24 = 576 个 patch -&gt; 576 个特征（前面 trace 里的数字就是这么来的）。复杂度也从这来：patch 越多，自注意力的开销越大（O(patch^2)），这正是高分辨率图像为什么贵。为了又看得清、又不让 patch 数爆炸，很多实现会把大图<strong>切成几块</strong>分别编码（image tiling / 切片），再把各块的 embedding 拼起来——这也是为什么有的多模态模型吃一张大图会吐出成百上千个 embedding。真正的实现都在 <span class="mono">tools/mtmd/clip.cpp</span>，里面用 ggml 把这套 ViT 搭了出来——如果你已经读懂了 L16 的文本 build graph，那 clip.cpp 对你不会陌生，无非是换了一种 token。本课不逐行展开它，是因为它对"多模态怎么接进 LLM"这条主线不是重点：重点是它吐出的特征，要靠 projector 那座桥才能进 LLM。顺带一提，正因为 clip 内部也是个 transformer，它同样能用 ggml 那套算子、同样能量化、同样能跑在各种后端上——这就是为什么 llama.cpp 能把视觉编码器和 LLM 装进同一套推理框架，而不必再拉一个 PyTorch 进来。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 图像 embedding 在序列里怎么"占位置"、怎么进 KV cache？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>image embedding 一旦插进序列，对 LLM 来说它就是序列里实打实的 N 个位置——和文本 token 一样要分配 position、一样要写进 KV cache（呼应 L19）。这带来两个要处理的问题。<strong>一是位置编码</strong>：普通文本是一维位置（第 0、1、2 个 token），但图像是二维的（某 patch 在第几行第几列），硬拍平成一维会丢掉空间结构。于是不少模型用 <strong>M-RoPE（多维 RoPE）</strong>，给图像 token 一个能表达"行、列"的多维位置——llama.cpp 里 <span class="mono">mtmd_decode_use_mrope</span> 就是问"这个模型要不要用 M-RoPE"，而 <span class="mono">mtmd_helper_get_n_pos</span> 专门算一串 chunk 占了多少个"位置"（注释里点明：一般 n_pos == n_tokens，但 M-RoPE 下两者不同）。直觉上，M-RoPE 给图像 token 的位置不再是一根数轴上的一个点，而更像棋盘上的一个坐标格——这样模型才知道左上角那块和右下角那块在空间上离得远。<strong>二是注意力掩码</strong>：文本是因果的（只能看前面），但一张图内部的 patch 之间往往要<strong>互相都能看见</strong>（双向），所以有些模型（如 Gemma 3）在 decode 图像段时要临时切成非因果注意力——这正是 <span class="mono">mtmd_decode_use_non_causal</span> 在管的事。理解这两点，你就明白图像进 LLM 不只是"塞 N 个向量"那么简单：它还得在<strong>位置</strong>和<strong>注意力</strong>这两件 transformer 的根本机制上，和文本和谐共处。好在这些 llama.cpp 都替你处理好了，你只要知道：图像 embedding 进了序列，就和文本一样占 KV cache、一样参与后面每个 token 的注意力——这也是为什么图越多、KV cache 涨得越快。这件事在工程上很要命：一张高分辨率图可能就占掉几百上千个位置，几张图下来，KV cache 的占用直追一段长文本。所以多模态服务里，"图片预算"经常得和"上下文预算"一起算——这又一次把你带回 L19 的老问题：序列越长，KV cache 越大，能并发的请求就越少。多模态没有逃开这条铁律，只是让"序列里能有什么"变得更丰富了。所以下次看到"32K 上下文的多模态模型"，你心里要清楚：这 32K 是图和字<strong>共享</strong>的预算，一张高清图就能吃掉一大块。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>核心：LLM 主体只认 embedding 向量、不在乎来自文字还是图像；多模态 = 把"一张图"也变成 N 个 embedding 插进同一序列。</li>
+    <li>mtmd 管线：<span class="mono">mtmd_tokenize</span> 切 chunk（TEXT/IMAGE/AUDIO）-&gt; 对 image chunk 跑 <span class="mono">mtmd_encode_chunk</span>(clip+projector) -&gt; <span class="mono">mtmd_get_output_embd</span> 取 embedding -&gt; 和文本交织进 <span class="mono">llama_decode</span>。</li>
+    <li>projector(mmproj) 是桥：把 clip 视觉特征投影到 LLM 的 embedding 维度/空间；<span class="mono">clip_n_mmproj_embd</span>=LLM embd 维度，<span class="mono">clip_n_output_tokens</span>=一张图占几个 token。</li>
+    <li>mmproj 是单独文件、为"某 clip + 某 LLM"专门训练；少了它模型只会读字、不会看图。</li>
+    <li>图像 embedding 照常占 position、进 KV cache（L19）；M-RoPE 处理二维位置、非因果掩码处理图内双向（<span class="mono">mtmd_decode_use_mrope</span> / <span class="mono">_non_causal</span>）。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  多模态这一课最该带走的，不是 clip 或 projector 的细节，而是那个朴素到有点反直觉的事实：<strong>LLM 从没"看见"过图</strong>。它眼里永远只有 embedding 向量序列——多模态的全部魔法，是在它<strong>前面</strong>加了一道翻译，把图像翻成它早就习惯的那种向量。这是一种极有生命力的设计哲学：<strong>不改动核心，只在边界处做适配</strong>。同一个 LLM，配一座视觉桥就能看图、配一座音频桥就能听声、将来配别的桥还能接别的模态——核心始终是那个只懂 embedding 的 transformer。回头看你学过的整条链：L04 的 token、L20 的 embedding、L18 的 batch（能放 token 也能放 embd）、L19 的 KV cache——多模态没有推翻其中任何一块，只是站在它们肩上，把"输入能是什么"往外推了一大步。第七部分到这里，我们已经看了三种"在标准 transformer 之外做文章"的思路：投机解码改的是"怎么更快地出 token"、MoE 改的是"怎么用稀疏换容量"、多模态改的是"输入能是什么"。最后一课要动的是更根本的东西——状态空间模型（Mamba / RWKV）干脆把 transformer 赖以为生的注意力<strong>换掉</strong>，用另一套方式记住历史。
+</div>
+
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Up to here, the LLM in your head still only reads text: a prompt is split into tokens, each looked up to an embedding, then run through dozens of transformer layers. Yet today's models routinely "talk about pictures" - you send an image and they describe it, answer questions, read tables. How do they fit "an image" into a model that only knows tokens? The answer is surprisingly plain: <strong>the LLM's input layer does not care whether the embedding vectors fed in came from text or from an image</strong>. Multimodality just turns "an image" into <strong>a run of embeddings</strong> too, splices them into the same sequence as the text tokens' embeddings, and sends the lot into <span class="mono">llama_decode</span>.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This lesson looks at how llama.cpp's <span class="mono">mtmd</span> (multimodal) subsystem does it. The core is one sentence: the model body needs not a single change; multimodality rides entirely on a "translation" pipeline bolted <strong>in front</strong> of it - a vision encoder (clip / ViT) compresses the image into visual features, and the projector (mmproj) <strong>projects those features into the LLM's embedding space</strong>, yielding N vectors that "look just like token embeddings", spliced in where the prompt's <span class="mono">&lt;image&gt;</span> marker sits. The LLM, handed this run of vectors, cannot tell which came from text and which from the image - it just computes on as usual. This gives pause at first: if the model clearly "understood" the image, how can it "not know it was an image"? But that is precisely the cleverest part of the design - "understanding the picture" is fully outsourced to the vision pipeline in front, and the LLM does only what it is best at: reasoning over a sequence of vectors.</p>
+<p style="color:var(--muted)">Roadmap: first the whole <span class="mono">mtmd</span> pipeline (split into chunks -> encode -> get embeddings -> interleave with text and decode), with a trace of "one image entering the LLM"; then a dedicated look at why the projector <strong>bridge</strong> is indispensable; and finally two folds digging into clip's ViT internals and how image embeddings "take positions" in the sequence and enter the KV cache.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Multimodality sounds mystical, but unpacked it is one sentence: <strong>translate "non-text" into embeddings the LLM can eat too</strong>. Recall L04/L20: the first step for text entering an LLM is looking up each token to an embedding vector; the transformer body, start to finish, processes <strong>vector sequences</strong> - it has no idea what a "token" looks like. That leaves an opening - as long as you can turn an image into a run of vectors of the <strong>same shape, same space</strong>, you can splice it straight into the sequence and the model takes it all. So llama.cpp does not touch the LLM body; it hangs an <span class="mono">mtmd</span> pipeline in front: clip(ViT) encodes the image into visual features, the projector projects features to the LLM's embedding dimension, producing N image embeddings spliced in at the <span class="mono">&lt;image&gt;</span> marker. Grasp this and you grasp the recipe behind almost every "multimodal LLM" today: nearly all are "an off-the-shelf LLM + a vision encoder + a projector bridge" bolted together - the body unchanged, it merely learned to "see". This "freeze the body, bolt on an adapter" idea you have actually met once before, in L24's LoRA - the only difference is that LoRA adapts "style/task" while here we adapt "input modality". The same plain engineering wisdom - do not touch the big, hard-to-train body, just add pluggable little pieces around it - bearing fruit twice in two completely different settings.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture an expert who <strong>only reads Chinese</strong> (the LLM), and you want them to understand a <strong>foreign-language chart</strong>. You would not force them to learn the language (changing the model is too costly); you hire a <strong>translator</strong>: the translator first <strong>understands</strong> the chart (clip/ViT encodes the image into visual features), then <strong>retells it as a Chinese passage</strong> (the projector projects into the LLM's embedding space), then <strong>splices that passage into your conversation</strong> with the expert. Reading this "Chinese", the expert naturally carries on - never knowing the passage was originally a picture. Two key roles here: <strong>the eyes that see the picture</strong> (clip) and <strong>the mouth that turns what is seen into the expert's mother tongue</strong> (projector). However good the eyes, if they cannot speak the expert's language the expert understands nothing - which is why the projector "translation bridge" is what makes or breaks multimodality.
+</div>
+<h2>The whole pipeline: how mtmd feeds an image into the LLM</h2>
+<p>First walk the whole pipeline. The user gives an "interleaved image-text" input - some text carrying an <span class="mono">&lt;image&gt;</span> marker, plus the pixels of one (or a few) images. mtmd runs it in five steps: (1) <span class="mono">mtmd_init_from_file</span> loads the projector (that separate mmproj file); (2) <span class="mono">mtmd_tokenize</span> <strong>splits the input into a run of chunks</strong> - text passages are <span class="mono">TEXT</span> chunks, each image becomes an <span class="mono">IMAGE</span> chunk (audio is <span class="mono">AUDIO</span>); (3) each image chunk is run through <span class="mono">mtmd_encode_chunk</span> (internally clip + projector); (4) <span class="mono">mtmd_get_output_embd</span> pulls out the encoded visual embeddings; (5) the text chunks' tokens and the image chunks' embeddings are <strong>interleaved in original order</strong> and fed segment by segment into <span class="mono">llama_decode</span>. First, the splitting:</p>
+<pre class="code"><span class="cm">// split "text + &lt;image&gt; marker + image bitmap" into ordered chunks (simplified from tools/mtmd/mtmd.h)</span>
+mtmd_input_chunks * chunks = <span class="fn">mtmd_input_chunks_init</span>();
+<span class="fn">mtmd_tokenize</span>(mtmd_ctx, chunks, &amp;text, bitmaps, n_bitmaps);
+<span class="cm">// chunks now hold, in original order:</span>
+<span class="cm">//   [TEXT "this image is"] [IMAGE one picture] [TEXT "what is in it?"]</span>
+<span class="cm">// each chunk carries a type: TEXT / IMAGE / AUDIO</span></pre>
+<p>Note the <span class="mono">&lt;image&gt;</span> in the prompt (the source's default marker is actually <span class="mono">&lt;__media__&gt;</span>): it is just a <strong>placeholder</strong> telling mtmd "where in the text this image should be inserted". The source's comment gives a plain example: a line like "here is an image: &lt;__media__&gt; ..." splits into three chunks - the text before the marker, the image itself, the text after - in exact original order. Once chunks are split, the real show is encoding the image chunk into embeddings and decoding it interleaved with text. llama.cpp packs this logic into a helper whose comment is practically the whole pipeline's pseudo-code:</p>
+<pre class="code"><span class="cm">// per chunk: text decodes directly, image encodes first then decodes (simplified from mtmd-helper.cpp)</span>
+<span class="kw">for</span> (each chunk : chunks) {
+    <span class="kw">if</span> (<span class="fn">type</span>(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+        <span class="fn">llama_decode</span>(lctx, <span class="fn">batch_of</span>(chunk.tokens));   <span class="cm">// text: old path, look up embeddings then compute</span>
+    } <span class="kw">else</span> {                                          <span class="cm">// IMAGE / AUDIO chunk:</span>
+        <span class="fn">mtmd_encode_chunk</span>(mtmd_ctx, chunk);          <span class="cm">// 1) internally runs clip(ViT) + projector</span>
+        <span class="kw">float</span> * embd = <span class="fn">mtmd_get_output_embd</span>(mtmd_ctx); <span class="cm">// 2) pull out N visual embeddings</span>
+        <span class="fn">llama_decode</span>(lctx, <span class="fn">batch_of_embd</span>(embd));     <span class="cm">// 3) feed the embeddings straight in</span>
+    }
+}</pre>
+<p>See the trick? Text and image both land on the same <span class="mono">llama_decode</span> - the only difference is "whether you feed in tokens (and let the model look up embeddings) or already-computed embeddings (used directly)". <span class="mono">llama_batch</span> has long supported both inputs (remember from L18 that a batch can carry either <span class="mono">token</span> or <span class="mono">embd</span>?), so image embeddings slot <strong>seamlessly</strong> into the sequence, with not one line of the model body changed. The beauty of this design is <strong>reuse</strong>: mtmd does not open a second inference path for images, it "disguises" images as embeddings and reuses the entire text machinery of batching, KV cache, and sampling - so multimodality becomes a "preprocessing" problem, not a "rewrite the engine" problem. Freezing one image's whole journey into the LLM as a pipeline:</p>
+<div class="cols">
+  <div class="col"><h4>text chunk</h4><p>a sequence of token ids -&gt; <span class="mono">llama_decode</span> looks up the embedding table inside -&gt; compute. The old path of L04/L20.</p></div>
+  <div class="col"><h4>image chunk</h4><p>pixels -&gt; clip + projector compute embeddings -&gt; feed embeddings straight into <span class="mono">llama_decode</span>. Embeddings ready, table lookup skipped.</p></div>
+</div>
+<div class="trace">
+  <div class="tcap"><b>Tracing one image into the LLM</b>: pixels first pass clip(ViT) into visual features, the projector projects them into N image embeddings, which are then interleaved with text tokens in original order into one sequence, sent whole into llama_decode (illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>1 one image</h5>
+      <div class="cellrow"><span class="vc">336x336 pixels</span></div>
+      <div class="tlab">raw bitmap</div></div>
+    <div class="op">split patches<br>clip(ViT)</div>
+    <div class="stn"><h5>2 visual features</h5>
+      <div class="cellrow"><span class="vc blue">576 feature vectors</span></div>
+      <div class="tlab">ViT encode output</div></div>
+    <div class="op">projector<br>(mmproj)</div>
+    <div class="stn"><h5>3 image embedding</h5>
+      <div class="cellrow"><span class="vc hot">N LLM embeddings</span></div>
+      <div class="tlab">projected to LLM dim</div></div>
+    <div class="op">insert at<br>&lt;image&gt;</div>
+    <div class="stn"><h5>4 interleaved seq</h5>
+      <div class="cellrow"><span class="vc">text emb + image emb + text emb</span></div>
+      <div class="tlab">one unified sequence</div></div>
+    <div class="op">decode<br>together</div>
+    <div class="stn"><h5>5 llama_decode</h5>
+      <div class="cellrow"><span class="vc blue">LLM runs as usual</span></div>
+      <div class="tlab">cannot tell image from text</div></div>
+  </div>
+</div>
+<p>Worth noting: this "split chunks -&gt; encode -&gt; interleave" mechanism treats <strong>audio</strong> identically - cut speech into frames, run an audio encoder (like Whisper's front end), then a projector to embeddings, taking exactly the same path as images. That is why <span class="mono">mtmd</span>'s chunk types put <span class="mono">AUDIO</span> right beside <span class="mono">IMAGE</span>. In other words, mtmd's design goal from the start was not "support images" but "support any modality that can be encoded into embeddings". Once you understand the image path, audio - and more modalities to come - are cast from the same mold.</p>
+<h2>The projector: translating "what is seen" into the LLM's mother tongue</h2>
+<p>That <span class="mono">mtmd_encode_chunk</span> step splits internally into two halves: first clip(ViT) "sees" the image as visual features, then the projector "translates" those features into embeddings the LLM can read. Why is this second step mandatory? Because clip's visual features and the LLM's token embeddings <strong>are simply not in the same space</strong> - the dimensions may differ (clip might output 1024-d, the LLM wants 4096-d), and the value distributions and semantics are two different systems entirely. Feeding clip's output straight into the LLM is like handing an untranslated foreign passage to an expert who only reads Chinese - blank stares. The projector (that separate mmproj file) is the bridge: a small network that <strong>projects visual features into the LLM's embedding dimension and space</strong>, making them "look and behave just like a token embedding". By analogy, clip's output is a kind of "visual shorthand" whose numbers mean things arranged for a vision task; the LLM's embedding space grew out of a language task, so vectors of the same length live in completely different "coordinate systems". The projector does exactly that change of coordinates: re-expressing the visual shorthand into the language coordinate system, so "there is a cat in the image" lands near the patch of vector space the LLM has always used for "cat".</p>
+<p>Two key "alignments" are guarded by two functions: <span class="mono">clip_n_mmproj_embd(ctx)</span> returns the projector's output dimension - it <strong>must equal</strong> the LLM's embedding dimension, or the vectors will not fit into the sequence; <span class="mono">clip_n_output_tokens(ctx, img)</span> returns <strong>how many embedding tokens this one image occupies</strong> (the N in the earlier trace). That N is not arbitrary: bigger image, more patches, larger N; some projectors (resampler types) even <strong>actively compress</strong> N, aggregating hundreds of patch features into a few dozen embeddings, saving KV cache and compute. This N directly sets an image's "cost": N embeddings take N sequence positions and write N entries of KV - so for the same image, whether the projector squeezes it to 64 embeddings or lays out 576 changes VRAM and speed by an order of magnitude. This is one of the core tradeoffs of high-resolution multimodal models: the finer it sees (more patches, larger N) the more accurate, but the longer the sequence, the slower and more VRAM-hungry.</p>
+<pre class="code"><span class="cm">// inside the projector: clip encodes first, output dim set by mmproj (simplified from tools/mtmd/clip.h)</span>
+<span class="kw">int</span> n_embd   = <span class="fn">clip_n_mmproj_embd</span>(clip_ctx);       <span class="cm">// projector output dim == LLM embedding dim</span>
+<span class="kw">int</span> n_tokens = <span class="fn">clip_n_output_tokens</span>(clip_ctx, img); <span class="cm">// how many embedding tokens this image takes</span>
+std::vector&lt;float&gt; out_vec;
+<span class="fn">clip_image_encode</span>(clip_ctx, n_threads, img, out_vec); <span class="cm">// run ViT + projector, output n_tokens x n_embd</span>
+<span class="cm">// out_vec is now n_tokens visual embeddings, each n_embd-dim,</span>
+<span class="cm">// exactly the shape of n_tokens token embeddings -&gt; straight into the sequence</span></pre>
+<p>Common projectors come in three tiers of complexity: a <strong>linear layer</strong> (one matmul, simplest, early LLaVA), a <strong>two-layer MLP</strong> (one more nonlinearity, better alignment, common today), and a <strong>resampler / cross-attention</strong> (a set of learned queries "resamples" the variable-length patch features into a fixed number of embeddings, compressing N and handling arbitrary resolution, used by Qwen-VL etc). Which tier is a <strong>tradeoff of accuracy and cost</strong>: linear is cheapest but least expressive, the resampler is most flexible but carries its own pile of parameters and compute. Whichever tier, its job is the same: <strong>align visual features into the LLM's embedding space</strong>. This is also why the mmproj is a <strong>separate file</strong>, loaded separately - it is a bridge <strong>specifically trained</strong> for one "this vision encoder + this LLM" pairing; swap the LLM or the clip and the bridge must be retrained. Grasp this and you see why, when downloading a multimodal model, besides the big main GGUF you also need a tiny mmproj file: without that bridge, the model keeps only its "read text" skill, and "see images" is off the table. A practical tip: in a multimodal model's GGUF repo on HuggingFace, the small file with mmproj in its name is exactly this, usually on the order of a few hundred MB - do not forget to grab it.</p>
+<table class="t">
+  <tr><th>projector type</th><th>structure</th><th>traits</th><th>example</th></tr>
+  <tr><td>linear</td><td>one matmul</td><td>cheapest, least expressive, fixed N</td><td>early LLaVA</td></tr>
+  <tr><td>two-layer MLP</td><td>linear + nonlinearity + linear</td><td>better alignment, common today</td><td>LLaVA-1.5+</td></tr>
+  <tr><td>resampler</td><td>learned queries + cross-attention</td><td>compresses N, any resolution</td><td>Qwen-VL</td></tr>
+</table>
+<h2>Deeper: clip's eyes, and an image's "position"</h2>
+<p>Two folds for two details you cannot avoid when really deploying multimodality.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What is clip(ViT) actually doing inside? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>This lesson treats clip as a black box - give it an image, it spits out a run of visual features. Lift the lid and clip's vision encoder is just a <strong>standard Vision Transformer (ViT)</strong>, almost the same recipe as the text transformer from earlier parts, only with "token" swapped for "image patch": (1) cut the image into fixed-size blocks (patches, say 14x14 pixels each), flatten each and linearly project it to a vector - the image's version of an "embedding"; (2) add positional encoding (telling the model where each block sits in the original image); (3) run through several layers of self-attention + FFN, letting each patch "see" the whole image and aggregate semantics. Each patch ends up with one output vector, and together they are that run of visual features. So a 336x336 image at 14 pixels a block is 24x24 = 576 patches -&gt; 576 features (that is where the trace's number came from). The cost comes from here too: more patches, larger self-attention cost (O(patch^2)), which is why high-resolution images are expensive. To stay sharp without letting the patch count explode, many implementations <strong>cut a big image into tiles</strong>, encode each, and concatenate the tiles' embeddings - which is also why some multimodal models emit hundreds or thousands of embeddings for one large image. The real implementation lives in <span class="mono">tools/mtmd/clip.cpp</span>, where ggml builds this ViT out - if you already followed L16's text build-graph, clip.cpp will not feel foreign, just a different kind of token. This lesson does not unroll it line by line because, for the through-line of "how multimodality plugs into the LLM", it is not the point: the point is that the features it emits need the projector bridge to get into the LLM. Incidentally, because clip is internally a transformer too, it can use the same ggml ops, be quantized, and run on the same backends - which is why llama.cpp can fit the vision encoder and the LLM into one inference framework, without dragging in a separate PyTorch.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> How do image embeddings "take position" in the sequence and enter the KV cache? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Once image embeddings are spliced into the sequence, to the LLM they are N real positions in it - assigned positions like text tokens, written into the KV cache like text tokens (echoing L19). This brings two things to handle. <strong>First, positional encoding</strong>: plain text is one-dimensional position (the 0th, 1st, 2nd token), but an image is two-dimensional (which row and column a patch is in), and flattening to 1D loses spatial structure. So many models use <strong>M-RoPE (multi-dimensional RoPE)</strong>, giving image tokens a multi-dimensional position that can express "row, column" - in llama.cpp <span class="mono">mtmd_decode_use_mrope</span> asks "does this model need M-RoPE", and <span class="mono">mtmd_helper_get_n_pos</span> specifically counts how many "positions" a run of chunks occupies (its comment notes: normally n_pos == n_tokens, but under M-RoPE they differ). Intuitively, M-RoPE gives an image token's position not a single point on one number line but more like a coordinate cell on a chessboard - so the model knows the top-left patch and the bottom-right patch are far apart in space. <strong>Second, the attention mask</strong>: text is causal (can only see what came before), but the patches within one image usually need to <strong>all see each other</strong> (bidirectional), so some models (like Gemma 3) temporarily switch to non-causal attention while decoding the image segment - exactly what <span class="mono">mtmd_decode_use_non_causal</span> governs. Grasp these two and you see that an image entering the LLM is not just "splice in N vectors": it must also coexist with text on the two fundamental transformer mechanisms of <strong>position</strong> and <strong>attention</strong>. Helpfully llama.cpp handles all this for you; you just need to know: once image embeddings enter the sequence, they take KV cache like text and join the attention of every later token - which is why more images make the KV cache grow faster. This matters acutely in engineering: one high-resolution image can take hundreds or thousands of positions, and a few images in, the KV cache rivals a long passage of text. So in multimodal serving the "image budget" often has to be counted together with the "context budget" - which brings you right back to L19's old problem: the longer the sequence, the bigger the KV cache, the fewer requests you can run concurrently. Multimodality does not escape this iron law, it only makes "what can be in the sequence" richer. So next time you see a "32K-context multimodal model", be clear in your head: that 32K is a budget <strong>shared</strong> by images and text, and one high-res image can eat a big chunk of it.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Core: the LLM body only knows embedding vectors, not caring if they came from text or image; multimodality = turn "an image" into N embeddings too, spliced into the same sequence.</li>
+    <li>mtmd pipeline: <span class="mono">mtmd_tokenize</span> splits chunks (TEXT/IMAGE/AUDIO) -&gt; run <span class="mono">mtmd_encode_chunk</span>(clip+projector) on image chunks -&gt; <span class="mono">mtmd_get_output_embd</span> gets embeddings -&gt; interleave with text into <span class="mono">llama_decode</span>.</li>
+    <li>projector(mmproj) is the bridge: projects clip's visual features into the LLM's embedding dim/space; <span class="mono">clip_n_mmproj_embd</span>=LLM embd dim, <span class="mono">clip_n_output_tokens</span>=tokens one image takes.</li>
+    <li>mmproj is a separate file, trained for one "this clip + this LLM" pairing; without it the model only reads text, cannot see images.</li>
+    <li>Image embeddings take position and enter the KV cache as usual (L19); M-RoPE handles 2D position, non-causal mask handles in-image bidirectionality (<span class="mono">mtmd_decode_use_mrope</span> / <span class="mono">_non_causal</span>).</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The thing to take from this lesson is not clip's or the projector's details, but a fact plain to the point of being counterintuitive: <strong>the LLM has never "seen" an image</strong>. In its eyes there are only sequences of embedding vectors - all of multimodality's magic is a translation bolted <strong>in front</strong>, turning images into the kind of vector it was already used to. This is an enormously vital design philosophy: <strong>do not touch the core, only adapt at the boundary</strong>. The same LLM, given a vision bridge can see, given an audio bridge can hear, given some other bridge could take some other modality - the core staying that one embedding-only transformer. Look back over the whole chain you learned: L04's tokens, L20's embeddings, L18's batch (carrying token or embd), L19's KV cache - multimodality overturns none of them, it stands on their shoulders and pushes "what the input can be" a big step outward. By this point in Part 7 we have seen three takes on "working outside the standard transformer": speculative decoding changed "how to emit tokens faster", MoE changed "how to trade sparsity for capacity", multimodality changed "what the input can be". The last lesson touches something more fundamental - state-space models (Mamba / RWKV) simply <strong>replace</strong> the attention the transformer lives on, remembering history a different way.
+</div>
+
+""",
+}
