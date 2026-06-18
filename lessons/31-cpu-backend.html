@@ -361,6 +361,16 @@ __m256 acc = <span class="fn">_mm256_setzero_ps</span>();             <span clas
 }
 float sum = <span class="fn">hsum_float_8</span>(acc);               <span class="cm">// 8 路水平求和 -> 标量</span></pre>
 <p>右边的 SIMD（Single Instruction Multiple Data，单指令多数据）就是来榨干那部分闲置算力的。AVX2 提供 256 位的 <span class="mono">__m256</span> 寄存器，一个正好装 8 个 float；一条 <span class="mono">_mm256_fmadd_ps</span>（fused multiply-add，乘加融合）指令，让这 8 个 <strong>lane（通道）</strong>同时各做一次 <span class="mono">acc[i] += a[i]*b[i]</span>。循环步长因此从 1 变成 8，指令数少了八分之七。ARM 的 NEON 是 128 位、一次 4 个 float，思路完全一样，只是宽度减半。</p>
+<p>把这"宽度减半"落到真代码上看最清楚——同一段点积，NEON 版只是把 8 路换成 4 路、把 <span class="mono">_mm256_*</span> 换成 <span class="mono">v*_f32</span>：</p>
+<pre class="code"><span class="cm">// NEON / ARM: 一条指令算 4 个 (vec.cpp 的 NEON 路径, 宏定义见 simd-mappings.h)</span>
+float32x4_t acc = <span class="fn">vdupq_n_f32</span>(0.0f);          <span class="cm">// 4 路 float 累加器</span>
+<span class="kw">for</span> (int i = 0; i &lt; n; i += 4) {
+    float32x4_t va = <span class="fn">vld1q_f32</span>(a + i);        <span class="cm">// 一次载 4 个 a</span>
+    float32x4_t vb = <span class="fn">vld1q_f32</span>(b + i);        <span class="cm">// 一次载 4 个 b</span>
+    acc = <span class="fn">vfmaq_f32</span>(acc, va, vb);             <span class="cm">// acc += va*vb, 4 路同时 (FMA)</span>
+}
+float sum = <span class="fn">vaddvq_f32</span>(acc);                  <span class="cm">// 4 路水平求和 -> 标量</span></pre>
+<p>逐行对一下 AVX2：<span class="mono">vdupq_n_f32(0)</span> 对应 <span class="mono">_mm256_setzero_ps</span>、<span class="mono">vld1q_f32</span> 对应 <span class="mono">_mm256_loadu_ps</span>、<span class="mono">vfmaq_f32</span> 对应 <span class="mono">_mm256_fmadd_ps</span>、<span class="mono">vaddvq_f32</span> 对应 <span class="mono">hsum_float_8</span>——名字全变了，骨架一模一样。这正是 SIMD 的可移植之处：换架构只是换一组 intrinsic，"载入一排、乘加一排、最后水平求和"这套结构岿然不动。</p>
 <p>把这"8 路并行"画出来最直观。下面追踪一次 SIMD 点积：8 对数同时乘加进 8 个累加器，循环若干轮后，再用一次<strong>水平求和</strong>（horizontal sum，hsum）把 8 个累加器合成最终的一个标量。</p>
 <div class="trace">
   <div class="tcap"><b>追踪一次 SIMD 点积</b>：8 个 float 装进一个 256 位寄存器，一条 fmadd 指令让 8 路同时乘加，最后水平求和成一个标量（示意）。</div>
@@ -595,6 +605,16 @@ __m256 acc = <span class="fn">_mm256_setzero_ps</span>();             <span clas
 }
 float sum = <span class="fn">hsum_float_8</span>(acc);               <span class="cm">// horizontal sum of 8 lanes -> scalar</span></pre>
 <p>The SIMD (Single Instruction Multiple Data) on the right exists to squeeze out that idle compute. AVX2 offers 256-bit <span class="mono">__m256</span> registers, one holding exactly 8 floats; one <span class="mono">_mm256_fmadd_ps</span> (fused multiply-add) instruction makes these 8 <strong>lanes</strong> each do one <span class="mono">acc[i] += a[i]*b[i]</span> simultaneously. The loop stride goes from 1 to 8, cutting instruction count by seven-eighths. ARM's NEON is 128-bit, 4 floats at a time - the same idea at half the width.</p>
+<p>Seeing that "half the width" in real code is clearest - the same dot product, NEON just swaps 8 lanes for 4 and <span class="mono">_mm256_*</span> for <span class="mono">v*_f32</span>:</p>
+<pre class="code"><span class="cm">// NEON / ARM: one instruction does 4 (vec.cpp NEON path; macros in simd-mappings.h)</span>
+float32x4_t acc = <span class="fn">vdupq_n_f32</span>(0.0f);          <span class="cm">// 4-lane float accumulator</span>
+<span class="kw">for</span> (int i = 0; i &lt; n; i += 4) {
+    float32x4_t va = <span class="fn">vld1q_f32</span>(a + i);        <span class="cm">// load 4 a's at once</span>
+    float32x4_t vb = <span class="fn">vld1q_f32</span>(b + i);        <span class="cm">// load 4 b's at once</span>
+    acc = <span class="fn">vfmaq_f32</span>(acc, va, vb);             <span class="cm">// acc += va*vb, 4 lanes at once (FMA)</span>
+}
+float sum = <span class="fn">vaddvq_f32</span>(acc);                  <span class="cm">// horizontal sum of 4 lanes -> scalar</span></pre>
+<p>Map it line-by-line to AVX2: <span class="mono">vdupq_n_f32(0)</span> ~ <span class="mono">_mm256_setzero_ps</span>, <span class="mono">vld1q_f32</span> ~ <span class="mono">_mm256_loadu_ps</span>, <span class="mono">vfmaq_f32</span> ~ <span class="mono">_mm256_fmadd_ps</span>, <span class="mono">vaddvq_f32</span> ~ <span class="mono">hsum_float_8</span> - all the names change, the skeleton is identical. That is SIMD's portability: switching architecture only swaps one set of intrinsics; "load a row, multiply-add a row, finally horizontal-sum" stands unchanged.</p>
 <p>Drawing this "8 lanes in parallel" is the clearest. Below we trace one SIMD dot product: 8 pairs multiply-add into 8 accumulators at once, and after a few rounds a single <strong>horizontal sum</strong> (hsum) folds the 8 accumulators into the final scalar.</p>
 <div class="trace">
   <div class="tcap"><b>Tracing one SIMD dot product</b>: 8 floats packed in one 256-bit register, one fmadd instruction multiply-adds all 8 lanes, then a horizontal sum to one scalar (illustrative).</div>

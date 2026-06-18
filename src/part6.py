@@ -34,6 +34,16 @@ __m256 acc = <span class="fn">_mm256_setzero_ps</span>();             <span clas
 }
 float sum = <span class="fn">hsum_float_8</span>(acc);               <span class="cm">// 8 路水平求和 -> 标量</span></pre>
 <p>右边的 SIMD（Single Instruction Multiple Data，单指令多数据）就是来榨干那部分闲置算力的。AVX2 提供 256 位的 <span class="mono">__m256</span> 寄存器，一个正好装 8 个 float；一条 <span class="mono">_mm256_fmadd_ps</span>（fused multiply-add，乘加融合）指令，让这 8 个 <strong>lane（通道）</strong>同时各做一次 <span class="mono">acc[i] += a[i]*b[i]</span>。循环步长因此从 1 变成 8，指令数少了八分之七。ARM 的 NEON 是 128 位、一次 4 个 float，思路完全一样，只是宽度减半。</p>
+<p>把这"宽度减半"落到真代码上看最清楚——同一段点积，NEON 版只是把 8 路换成 4 路、把 <span class="mono">_mm256_*</span> 换成 <span class="mono">v*_f32</span>：</p>
+<pre class="code"><span class="cm">// NEON / ARM: 一条指令算 4 个 (vec.cpp 的 NEON 路径, 宏定义见 simd-mappings.h)</span>
+float32x4_t acc = <span class="fn">vdupq_n_f32</span>(0.0f);          <span class="cm">// 4 路 float 累加器</span>
+<span class="kw">for</span> (int i = 0; i &lt; n; i += 4) {
+    float32x4_t va = <span class="fn">vld1q_f32</span>(a + i);        <span class="cm">// 一次载 4 个 a</span>
+    float32x4_t vb = <span class="fn">vld1q_f32</span>(b + i);        <span class="cm">// 一次载 4 个 b</span>
+    acc = <span class="fn">vfmaq_f32</span>(acc, va, vb);             <span class="cm">// acc += va*vb, 4 路同时 (FMA)</span>
+}
+float sum = <span class="fn">vaddvq_f32</span>(acc);                  <span class="cm">// 4 路水平求和 -> 标量</span></pre>
+<p>逐行对一下 AVX2：<span class="mono">vdupq_n_f32(0)</span> 对应 <span class="mono">_mm256_setzero_ps</span>、<span class="mono">vld1q_f32</span> 对应 <span class="mono">_mm256_loadu_ps</span>、<span class="mono">vfmaq_f32</span> 对应 <span class="mono">_mm256_fmadd_ps</span>、<span class="mono">vaddvq_f32</span> 对应 <span class="mono">hsum_float_8</span>——名字全变了，骨架一模一样。这正是 SIMD 的可移植之处：换架构只是换一组 intrinsic，"载入一排、乘加一排、最后水平求和"这套结构岿然不动。</p>
 <p>把这"8 路并行"画出来最直观。下面追踪一次 SIMD 点积：8 对数同时乘加进 8 个累加器，循环若干轮后，再用一次<strong>水平求和</strong>（horizontal sum，hsum）把 8 个累加器合成最终的一个标量。</p>
 <div class="trace">
   <div class="tcap"><b>追踪一次 SIMD 点积</b>：8 个 float 装进一个 256 位寄存器，一条 fmadd 指令让 8 路同时乘加，最后水平求和成一个标量（示意）。</div>
@@ -221,6 +231,16 @@ __m256 acc = <span class="fn">_mm256_setzero_ps</span>();             <span clas
 }
 float sum = <span class="fn">hsum_float_8</span>(acc);               <span class="cm">// horizontal sum of 8 lanes -> scalar</span></pre>
 <p>The SIMD (Single Instruction Multiple Data) on the right exists to squeeze out that idle compute. AVX2 offers 256-bit <span class="mono">__m256</span> registers, one holding exactly 8 floats; one <span class="mono">_mm256_fmadd_ps</span> (fused multiply-add) instruction makes these 8 <strong>lanes</strong> each do one <span class="mono">acc[i] += a[i]*b[i]</span> simultaneously. The loop stride goes from 1 to 8, cutting instruction count by seven-eighths. ARM's NEON is 128-bit, 4 floats at a time - the same idea at half the width.</p>
+<p>Seeing that "half the width" in real code is clearest - the same dot product, NEON just swaps 8 lanes for 4 and <span class="mono">_mm256_*</span> for <span class="mono">v*_f32</span>:</p>
+<pre class="code"><span class="cm">// NEON / ARM: one instruction does 4 (vec.cpp NEON path; macros in simd-mappings.h)</span>
+float32x4_t acc = <span class="fn">vdupq_n_f32</span>(0.0f);          <span class="cm">// 4-lane float accumulator</span>
+<span class="kw">for</span> (int i = 0; i &lt; n; i += 4) {
+    float32x4_t va = <span class="fn">vld1q_f32</span>(a + i);        <span class="cm">// load 4 a's at once</span>
+    float32x4_t vb = <span class="fn">vld1q_f32</span>(b + i);        <span class="cm">// load 4 b's at once</span>
+    acc = <span class="fn">vfmaq_f32</span>(acc, va, vb);             <span class="cm">// acc += va*vb, 4 lanes at once (FMA)</span>
+}
+float sum = <span class="fn">vaddvq_f32</span>(acc);                  <span class="cm">// horizontal sum of 4 lanes -> scalar</span></pre>
+<p>Map it line-by-line to AVX2: <span class="mono">vdupq_n_f32(0)</span> ~ <span class="mono">_mm256_setzero_ps</span>, <span class="mono">vld1q_f32</span> ~ <span class="mono">_mm256_loadu_ps</span>, <span class="mono">vfmaq_f32</span> ~ <span class="mono">_mm256_fmadd_ps</span>, <span class="mono">vaddvq_f32</span> ~ <span class="mono">hsum_float_8</span> - all the names change, the skeleton is identical. That is SIMD's portability: switching architecture only swaps one set of intrinsics; "load a row, multiply-add a row, finally horizontal-sum" stands unchanged.</p>
 <p>Drawing this "8 lanes in parallel" is the clearest. Below we trace one SIMD dot product: 8 pairs multiply-add into 8 accumulators at once, and after a few rounds a single <strong>horizontal sum</strong> (hsum) folds the 8 accumulators into the final scalar.</p>
 <div class="trace">
   <div class="tcap"><b>Tracing one SIMD dot product</b>: 8 floats packed in one 256-bit register, one fmadd instruction multiply-adds all 8 lanes, then a horizontal sum to one scalar (illustrative).</div>
@@ -435,6 +455,17 @@ LESSON_32 = {
     C[row*N + col] = acc;                        <span class="cm">// 一格只写回一次</span>
 }</pre>
 <p>关键就在那两个 <span class="mono">__syncthreads()</span>：第一个保证"整块都搬上工作台了"才开始算，第二个保证"大家都算完了"才去覆盖下一块——少了任何一个，就会有线程读到半截数据，结果全错。而一块 tile 一旦搬进 shared memory，就被 block 里所有线程<strong>反复复用</strong>很多次，把慢的 global 访问摊薄到极低。这正是把上一课"载入一次、复用多次"的 tiling 思想搬到了 GPU 的片上内存上：CPU 复用的是 cache，GPU 复用的是 shared memory，但省访存的算盘一模一样。粗算一下复用的威力：一块 T x T 的 tile 一旦载入 shared，块内线程会把它当行/列反复用上约 T 次——也就是每个从 global 搬来的数平均被复用约 T 倍；T 取 32，慢显存的访问量就直接降到约三十分之一。（代码里的 T 是 tile 的边长，常取 16 或 32；blockDim 也设成 T 行 T 列，正好一个线程管一格。）</p>
+<p>这套骨架不是我们编的——它就是真实 <span class="mono">mmq.cuh</span>（量化矩阵乘）主循环的结构。把真实代码的核心几行抽出来对一下：</p>
+<pre class="code"><span class="cm">// 真实 mmq 主循环 (简化自 ggml-cuda/mmq.cuh mul_mat_q_process_tile)</span>
+float sum[...] = {0.0f};                          <span class="cm">// 累加器在寄存器里</span>
+<span class="kw">for</span> (int kb0 = kb0_start; kb0 &lt; kb0_stop; kb0 += blocks_per_iter) {
+    <span class="fn">load_tiles</span>(x, tile_x, offset_x + kb0, ...); <span class="cm">// 把 A 的 tile 载入 shared</span>
+    <span class="cm">// ... 把 B 的 tile 也载入 shared (tile_y) ...</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// 等整块载完</span>
+    <span class="fn">vec_dot</span>(tile_x, tile_y, sum, 0);            <span class="cm">// 块内复用、累加</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// 等大家算完再覆盖下一块</span>
+}</pre>
+<p>结构和上面的教学骨架一模一样：<strong>循环 tile -&gt; 载入 shared -&gt; __syncthreads -&gt; 累加 -&gt; __syncthreads</strong>。真实版多出来的复杂度，几乎全在 <span class="mono">load_tiles</span>（按量化格式 Q4_0/Q4_K… 各写一版解包）和 <span class="mono">vec_dot</span>（用 <span class="mono">dp4a</span> 做 int8 点积、或用 tensor core 的 <span class="mono">mma</span>）这两个被调用的函数里——而骨架本身，就是你已经看懂的那几行。</p>
 <p>把这个过程定格成一张图最直观——一个 block 把 A 的行块、B 的列块载入 shared，块内每个线程负责输出 C 的一格：</p>
 <div class="trace">
   <div class="tcap"><b>追踪一次分块矩阵乘</b>：一个 thread block 把 A 的行块、B 的列块载入 shared memory，块内每个线程算 C 的一格（As 的一行与 Bs 的一列做点积），沿 K 维循环累加（示意）。</div>
@@ -630,6 +661,17 @@ Last lesson watched the CPU backend make matmul fast with SIMD + multithreading 
     C[row*N + col] = acc;                        <span class="cm">// write each cell back just once</span>
 }</pre>
 <p>The crux is those two <span class="mono">__syncthreads()</span>: the first guarantees "the whole tile is on the bench" before any compute starts, the second guarantees "everyone is done" before overwriting the next tile - drop either and some thread reads half-loaded data and the result is all wrong. Once a tile is in shared memory it is <strong>reused</strong> many times by all threads in the block, amortizing the slow global accesses down to almost nothing. This carries last lesson's "load once, reuse many" tiling onto the GPU's on-chip memory: the CPU reuses cache, the GPU reuses shared memory, but the memory-saving arithmetic is identical. A rough sense of the payoff: once a T x T tile is in shared, the block's threads reuse it as rows/columns about T times - so each value hauled from global is reused roughly T-fold; with T = 32, slow VRAM traffic drops to about one thirtieth. (T is the tile width, often 16 or 32; blockDim is set to T x T so one thread owns exactly one cell.)</p>
+<p>This skeleton is not something we invented - it is the structure of the real <span class="mono">mmq.cuh</span> (quantized matmul) main loop. Pull out the core few lines of the real code and compare:</p>
+<pre class="code"><span class="cm">// real mmq main loop (simplified from ggml-cuda/mmq.cuh mul_mat_q_process_tile)</span>
+float sum[...] = {0.0f};                          <span class="cm">// accumulators in registers</span>
+<span class="kw">for</span> (int kb0 = kb0_start; kb0 &lt; kb0_stop; kb0 += blocks_per_iter) {
+    <span class="fn">load_tiles</span>(x, tile_x, offset_x + kb0, ...); <span class="cm">// load A's tile into shared</span>
+    <span class="cm">// ... load B's tile into shared (tile_y) too ...</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// wait for the tile to load</span>
+    <span class="fn">vec_dot</span>(tile_x, tile_y, sum, 0);            <span class="cm">// reuse in-block, accumulate</span>
+    <span class="fn">__syncthreads</span>();                          <span class="cm">// wait before overwriting next tile</span>
+}</pre>
+<p>The structure is identical to the teaching skeleton above: <strong>loop tiles -&gt; load into shared -&gt; __syncthreads -&gt; accumulate -&gt; __syncthreads</strong>. Almost all the real version's extra complexity lives inside the two called functions - <span class="mono">load_tiles</span> (a per-quant-format unpack, one for Q4_0/Q4_K/...) and <span class="mono">vec_dot</span> (int8 dot via <span class="mono">dp4a</span>, or <span class="mono">mma</span> on tensor cores) - while the skeleton itself is exactly the few lines you already understand.</p>
 <p>Freezing the process into one picture is clearest - a block loads A's row-tile and B's col-tile into shared, and each thread in the block owns one cell of the output C:</p>
 <div class="trace">
   <div class="tcap"><b>Trace one tiled matmul</b>: one thread block loads A's row-tile and B's col-tile into shared memory; each thread in the block computes one C cell (dot of an As row and a Bs col), looping and accumulating along K.</div>
@@ -829,7 +871,7 @@ handle = <span class="fn">LoadLibraryW</span>(path);</pre>
 sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu}, ...);
 <span class="cm">// 把整张计算图分派到各后端执行</span>
 <span class="fn">ggml_backend_sched_graph_compute</span>(sched, graph);</pre>
-<p>调度器拿到图后，逐个看每个算子：它的输入张量现在在哪个后端的 buffer 里？这个算子在哪个后端上算最合适（比如矩阵乘优先 GPU）？据此把算子<strong>指派</strong>给一个后端；如果某个输入还在别的设备上（算子要在 GPU 上跑、输入却还在 CPU 内存里），调度器就先插一次<strong>跨设备拷贝</strong>，把输入搬过去，再执行。整张图跑完，结果就落在该在的地方了。值得一提的是，调度器并不是把每个算子<strong>孤立</strong>地分派——跨设备拷贝很贵（又是访存，呼应 L30/L32），所以它会尽量把连续的、能在同一设备上算的算子<strong>成段</strong>地交给同一个后端，减少来回搬运。换句话说，它不只看"这个算子在哪算最快"，还看"怎么切这张图，整体的跨设备搬运最少"——这也是为什么 <span class="mono">-ngl</span> 一般是"前若干层整段放 GPU"，而不是东一层西一层地乱放。把"分派一个算子"这件事定格成一条流水看最清楚：</p>
+<p>调度器拿到图后，逐个看每个算子：它的输入张量现在在哪个后端的 buffer 里？这个算子在哪个后端上算最合适（比如矩阵乘优先 GPU）？据此把算子<strong>指派</strong>给一个后端；如果某个输入还在别的设备上（算子要在 GPU 上跑、输入却还在 CPU 内存里），调度器就先插一次<strong>跨设备拷贝</strong>，把输入搬过去，再执行。整张图跑完，结果就落在该在的地方了。值得一提的是，调度器并不是把每个算子<strong>孤立</strong>地分派——跨设备拷贝很贵（又是访存，呼应 L30/L32），所以它会尽量把连续的、能在同一设备上算的算子<strong>成段</strong>地交给同一个后端，减少来回搬运。换句话说，它不只看"这个算子在哪算最快"，还看"怎么切这张图，整体的跨设备搬运最少"——所以它倾向于把连续的、能在同一设备上算的活儿<strong>成段</strong>地交给同一个后端，而不是东一层西一层地乱切。把"分派一个算子"这件事定格成一条流水看最清楚：</p>
 <div class="trace">
   <div class="tcap"><b>追踪一次算子分派</b>：调度器看一个算子的输入在哪、挑后端、必要时跨设备拷贝、再执行写回（示意）。</div>
   <div class="stations">
@@ -855,6 +897,13 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
   </div>
 </div>
 <p>这正好把 L09/L10 那张"静态的图"接到了"动态的执行"上：图描述依赖，调度器按依赖顺序、结合每个张量的实际位置，把算子一个个落到具体硬件上跑。你平时用 <span class="mono">-ngl N</span> 把前 N 层放上 GPU、其余留 CPU，背后正是这个调度器在按层分派、并在 GPU 与 CPU 之间搬运边界处的张量。而当 GPU 显存实在放不下整个模型时，这种 CPU+GPU 混合执行往往是唯一能跑起来的办法——代价是边界处那几次跨设备拷贝，但总比完全跑不动强。这也解释了为什么 <span class="mono">-ngl</span> 调大调小，速度和显存占用会此消彼长：放上 GPU 的层越多，算得越快，但占的显存也越多、CPU-GPU 之间的搬运点也跟着变。</p>
+<p>用一张"整张图怎么被切"的图，把 <span class="mono">-ngl</span> 的效果看得更具体——以一个 32 层的模型、<span class="mono">-ngl 20</span> 为例：</p>
+<div class="cols">
+  <div class="col"><h4>第 0..19 层 -&gt; GPU</h4><p>矩阵乘等重活在显存里算；这些层的张量都待在 GPU buffer，层与层之间无需跨设备。</p></div>
+  <div class="col"><h4>第 19/20 层之间 -&gt; 跨设备拷贝</h4><p>整张图只在这一个边界上，把激活从 GPU 显存拷回 CPU 内存（调度器自动插入）。</p></div>
+  <div class="col"><h4>第 20..31 层 -&gt; CPU</h4><p>显存放不下的剩余层留在 CPU 上算，用 L31 的 SIMD + 多线程。</p></div>
+</div>
+<p>这张图也解释了为什么"分段放"比"乱放"快：把上 GPU 的层连成一段，整张图就只有一处跨设备边界、只拷一次；要是把 GPU 层和 CPU 层交替着排，每换一次设备就得拷一次，那点可怜的 PCIe 带宽很快就被拷贝吃光。调度器之所以默认"前 N 层整段上 GPU"，正是为了把这种边界压到最少。</p>
 
 <h2>其它后端一览</h2>
 <p>除了已经细看的 CPU（L31）和 CUDA（L32），ggml 还实现了一大批后端，覆盖各家硬件。它们都遵循同一套 <span class="mono">ggml_backend_i</span> 接口，所以上层代码几乎不用改，换硬件只是换一个加载进来的后端：</p>
@@ -962,7 +1011,7 @@ handle = <span class="fn">LoadLibraryW</span>(path);</pre>
 sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu}, ...);
 <span class="cm">// dispatch the whole compute graph across backends</span>
 <span class="fn">ggml_backend_sched_graph_compute</span>(sched, graph);</pre>
-<p>Given the graph, the scheduler walks each op: which backend's buffer are its input tensors in now? Which backend best suits this op (matmul prefers GPU, say)? It <strong>assigns</strong> the op to a backend accordingly; if some input is still on another device (the op runs on GPU but the input is still in CPU memory), the scheduler first inserts a <strong>cross-device copy</strong> to move the input over, then executes. When the whole graph is done, results land where they should be. Worth noting: the scheduler does not dispatch each op in <strong>isolation</strong> - cross-device copies are expensive (memory traffic again, echoing L30/L32), so it tries to give consecutive ops that can run on the same device to one backend in <strong>segments</strong>, cutting the back-and-forth. In other words, it weighs not just "where does this op run fastest" but "how to cut this graph so total cross-device movement is least" - which is also why <span class="mono">-ngl</span> typically means "put the first several layers wholesale on the GPU" rather than scattering layers around. Freezing "dispatching one op" into a flow shows it clearest:</p>
+<p>Given the graph, the scheduler walks each op: which backend's buffer are its input tensors in now? Which backend best suits this op (matmul prefers GPU, say)? It <strong>assigns</strong> the op to a backend accordingly; if some input is still on another device (the op runs on GPU but the input is still in CPU memory), the scheduler first inserts a <strong>cross-device copy</strong> to move the input over, then executes. When the whole graph is done, results land where they should be. Worth noting: the scheduler does not dispatch each op in <strong>isolation</strong> - cross-device copies are expensive (memory traffic again, echoing L30/L32), so it tries to give consecutive ops that can run on the same device to one backend in <strong>segments</strong>, cutting the back-and-forth. In other words, it weighs not just "where does this op run fastest" but "how to cut this graph so total cross-device movement is least" - so it leans toward giving consecutive work that can run on the same device to one backend in <strong>segments</strong>, rather than cutting it up layer by layer. Freezing "dispatching one op" into a flow shows it clearest:</p>
 <div class="trace">
   <div class="tcap"><b>Trace one op dispatch</b>: the scheduler checks where an op's inputs are, picks a backend, copies across devices if needed, then executes and writes back (illustrative).</div>
   <div class="stations">
@@ -988,6 +1037,13 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
   </div>
 </div>
 <p>This is exactly where L09/L10's "static graph" connects to "dynamic execution": the graph describes dependencies, and the scheduler, following them and each tensor's actual location, drops the ops one by one onto concrete hardware. When you use <span class="mono">-ngl N</span> to put the first N layers on the GPU and leave the rest on CPU, this scheduler is what dispatches by layer and shuttles boundary tensors between GPU and CPU. And when the GPU's VRAM truly cannot hold the whole model, this CPU+GPU hybrid execution is often the only way to run at all - at the cost of a few cross-device copies at the boundary, but far better than not running. It also explains why turning <span class="mono">-ngl</span> up or down trades speed against VRAM use: the more layers on the GPU, the faster it computes, but the more VRAM it takes, and the CPU-GPU handoff points shift too.</p>
+<p>One "how the whole graph is cut" picture makes <span class="mono">-ngl</span>'s effect concrete - take a 32-layer model with <span class="mono">-ngl 20</span>:</p>
+<div class="cols">
+  <div class="col"><h4>layers 0..19 -&gt; GPU</h4><p>heavy work like matmul runs in VRAM; these layers' tensors stay in GPU buffers, with no cross-device hop between layers.</p></div>
+  <div class="col"><h4>between layer 19/20 -&gt; cross-device copy</h4><p>the whole graph has just this one boundary, copying activations from GPU VRAM back to CPU RAM (the scheduler inserts it automatically).</p></div>
+  <div class="col"><h4>layers 20..31 -&gt; CPU</h4><p>the leftover layers that VRAM cannot hold run on the CPU, using L31's SIMD + multithreading.</p></div>
+</div>
+<p>This picture also explains why "place in segments" beats "scatter": chaining the GPU layers into one run leaves the whole graph with a single cross-device boundary and one copy; interleave GPU and CPU layers and every switch costs a copy, and that meager PCIe bandwidth is soon eaten by copying. The scheduler defaults to "the first N layers as one GPU run" precisely to keep such boundaries minimal.</p>
 
 <h2>A tour of the other backends</h2>
 <p>Beyond the CPU (L31) and CUDA (L32) we examined closely, ggml implements a whole crowd of backends covering everyone's hardware. They all follow the same <span class="mono">ggml_backend_i</span> interface, so upper-layer code barely changes - switching hardware just means loading a different backend:</p>
