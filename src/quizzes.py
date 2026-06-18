@@ -2114,6 +2114,67 @@ QUIZZES = {
             },
         ],
     },
+    "33-backends-dispatch.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml-backend 这层后端抽象主要解决什么问题？",
+                    "en": "What problem does the ggml-backend abstraction mainly solve?",
+                },
+                "opts": [
+                    {"zh": "给所有硬件一套统一接口，让上层计算图不必关心具体是 CPU、CUDA 还是别的", "en": "one uniform interface for all hardware, so the upper compute graph need not care whether it is CPU, CUDA, or something else"},
+                    {"zh": "让矩阵乘算得更快", "en": "making matmul compute faster"},
+                    {"zh": "把模型权重压得更小", "en": "compressing model weights smaller"},
+                    {"zh": "替代 GGUF 文件格式", "en": "replacing the GGUF file format"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端抽象的核心价值是“解耦”：计算图（L09）只描述“要算什么”，每种后端（CPU/CUDA/Metal……）去实现同一套 ggml_backend_i 接口，负责“怎么算、在哪算”。于是上层代码不必为每种硬件改一遍——这是软件工程里“面向接口编程”的经典用法。它不负责把单个算子算得更快（那是 L31/L32 的内核的事），也和量化、文件格式无关。",
+                    "en": "The core value of the backend abstraction is decoupling: the compute graph (L09) only describes 'what to compute', and each backend (CPU/CUDA/Metal...) implements the same ggml_backend_i interface, handling 'how and where'. So upper-layer code is not rewritten per hardware - the classic 'program to an interface' move. It does not make a single op faster (that is L31/L32's kernels), and is unrelated to quantization or file format.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_load_all 在运行时用 dlopen / LoadLibraryW 动态加载各后端，好处是什么？",
+                    "en": "ggml_backend_load_all dynamically loads backends at runtime via dlopen / LoadLibraryW - what is the benefit?",
+                },
+                "opts": [
+                    {"zh": "一份主程序二进制，按机器实际硬件加载对应后端，缺某个库也不会启动失败", "en": "one main binary loads the matching backend per the machine's actual hardware, and a missing library does not prevent startup"},
+                    {"zh": "让程序启动得更快", "en": "making the program start up faster"},
+                    {"zh": "把所有后端静态编进一个巨大的二进制", "en": "statically compiling all backends into one huge binary"},
+                    {"zh": "自动把模型下载到本地", "en": "automatically downloading the model locally"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "动态加载把“这台机器有哪些后端”推迟到运行时决定：每个后端是一个动态库，ggml_backend_load_all 扫描并加载能用的、登记进注册表。意义是“一个包、到处能跑”——有 CUDA 卡就加载 CUDA 后端，没有就跳过，绝不会因为缺某个库而崩。这恰恰与“静态全编进去”相反（那样会拖入一堆冲突依赖、还挑机器）。",
+                    "en": "Dynamic loading defers 'which backends this machine has' to runtime: each backend is a shared library, and ggml_backend_load_all scans, loads the usable ones, and registers them. The point is 'one package runs everywhere' - load the CUDA backend if there is a CUDA card, skip it otherwise, never crashing over a missing library. This is the opposite of 'static-link everything' (which drags in conflicting deps and is machine-picky).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_sched（调度器）做的是什么？",
+                    "en": "What does ggml_backend_sched (the scheduler) do?",
+                },
+                "opts": [
+                    {"zh": "把一张计算图的算子分派到各后端执行，并在设备之间按需拷贝张量", "en": "dispatch a compute graph's ops across backends and copy tensors between devices as needed"},
+                    {"zh": "决定模型用哪种量化格式", "en": "decide which quantization format the model uses"},
+                    {"zh": "把多个 GPU 合并成一块更大的虚拟 GPU", "en": "merge multiple GPUs into one larger virtual GPU"},
+                    {"zh": "负责把 token 采样出来", "en": "handle sampling tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "调度器把 L09/L10 的“静态图”接到“动态执行”：它逐个看算子——输入张量在哪个设备的 buffer 里、这个算子在哪个后端算最合适——据此分派，并在输入还在别的设备上时先插一次跨设备拷贝。为减少昂贵的拷贝，它倾向于把连续、同设备的算子成段分给同一后端。你用 -ngl 把前若干层放 GPU，背后就是它在按层分派、搬运边界张量。",
+                    "en": "The scheduler connects L09/L10's 'static graph' to 'dynamic execution': it walks each op - which device's buffer the inputs are in, which backend best suits the op - dispatches accordingly, and inserts a cross-device copy first when an input is still elsewhere. To cut expensive copies it tends to give consecutive same-device ops to one backend in segments. When you put the first N layers on the GPU with -ngl, this is what dispatches by layer and moves boundary tensors.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课说，加一个新后端 = 实现 ggml-backend-impl.h 里的接口（buffer 管理、supports_op、graph_compute）再注册进来，上层代码一行都不用改。请用这一课的“分层 + 抽象”视角，说说为什么 BLAS（借数学库）和 RPC（发去远程机器）也能套进同一套后端接口；再联系整个教程，举一两个别的“用一层抽象把变化挡在下面”的例子（比如 GGUF 之于权重、计算图之于算子）。",
+                "en": "This lesson says adding a new backend = implementing the interfaces in ggml-backend-impl.h (buffer management, supports_op, graph_compute) and registering it, with not one line of upper code changed. Using this lesson's 'layering + abstraction' lens, explain why BLAS (borrowing a math library) and RPC (sending to a remote machine) also fit the same backend interface; then, across the whole guide, give one or two other examples of 'using a layer of abstraction to hold change underneath' (e.g. GGUF for weights, the compute graph for ops).",
+            },
+        ],
+    },
 }
 
 

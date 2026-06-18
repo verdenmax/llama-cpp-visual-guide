@@ -45,4 +45,5 @@ CONTENT = {
     "30-eval-bench.html": part5.LESSON_30,
     "31-cpu-backend.html": part6.LESSON_31,
     "32-cuda-backend.html": part6.LESSON_32,
+    "33-backends-dispatch.html": part6.LESSON_33,
 }
