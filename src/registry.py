@@ -8,6 +8,7 @@ import part1
 import part2
 import part3
 import part4
+import part5
 
 # Filename -> {"zh": ..., "en": ...}. Keep keys in sync with shell.PAGES.
 CONTENT = {
@@ -35,4 +36,10 @@ CONTENT = {
     "22-chat-templates.html": part4.LESSON_22,
     "23-grammar.html": part4.LESSON_23,
     "24-lora-adapters.html": part4.LESSON_24,
+    "25-c-api.html": part5.LESSON_25,
+    "26-common.html": part5.LESSON_26,
+    "27-llama-cli.html": part5.LESSON_27,
+    "28-llama-server.html": part5.LESSON_28,
+    "29-quantize-tool.html": part5.LESSON_29,
+    "30-eval-bench.html": part5.LESSON_30,
 }

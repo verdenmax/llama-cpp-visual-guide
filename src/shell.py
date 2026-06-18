@@ -94,6 +94,18 @@ PAGES = [
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
     ("24-lora-adapters.html", "LoRA 适配器", "LoRA adapters",
      "第四部分 · llama 推理内部", "Part 4 · Inside llama inference"),
+    ("25-c-api.html", "C API 总览", "The C API",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("26-common.html", "common 工具层", "The common layer",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("27-llama-cli.html", "llama-cli", "llama-cli",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("28-llama-server.html", "llama-server", "llama-server",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("29-quantize-tool.html", "quantize 工具", "The quantize tool",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("30-eval-bench.html", "评测与基准", "Evaluation & benchmarks",
+     "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
 ]
 
 
@@ -576,6 +588,18 @@ SUBTITLES = {
                         "GBNF; llama_grammar; mask sampling(-inf); root rule"),
     "24-lora-adapters.html": ("LoRA 低秩增量 scale·B·A · llama_set_adapters_lora · 控制向量",
                               "LoRA low-rank delta scale*B*A; llama_set_adapters_lora; control vectors"),
+    "25-c-api.html": ("include/llama.h：句柄、调用序列、C++ RAII 包装",
+                      "include/llama.h: handles, call sequence, the C++ RAII wrappers"),
+    "26-common.html": ("common：参数解析、采样包装、下载缓存——各 tool 的共享胶水",
+                       "common: arg parsing, sampler wrapper, downloads - the shared glue for every tool"),
+    "27-llama-cli.html": ("命令行/交互外壳：跑在共享引擎上的生成主循环",
+                          "the CLI/interactive shell: a generation loop on the shared engine"),
+    "28-llama-server.html": ("HTTP + OpenAI 兼容 + slot 连续批处理：把引擎变成服务",
+                             "HTTP + OpenAI-compatible + slot continuous batching: the engine as a service"),
+    "29-quantize-tool.html": ("llama-quantize + imatrix：把模型压小，并用重要性矩阵保质量",
+                              "llama-quantize + imatrix: shrink the model, keep quality via an importance matrix"),
+    "30-eval-bench.html": ("perplexity 量质量、llama-bench 量速度：选模型/量化档的两把尺子",
+                           "perplexity for quality, llama-bench for speed: the two rulers for choosing models/quants"),
 }
 
 

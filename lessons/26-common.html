@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>26 · common 工具层 / The common layer - llama.cpp 图解教程</title>
+<meta name="description" content="第五部分 · 公共 API 与工具｜common 工具层 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="26 · common 工具层 / The common layer - llama.cpp 图解教程">
+<meta property="og:description" content="第五部分 · 公共 API 与工具｜common 工具层 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="26 · common 工具层 / The common layer - llama.cpp 图解教程">
+<meta name="twitter:description" content="第五部分 · 公共 API 与工具｜common 工具层 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第五部分 · 公共 API 与工具</span><span class="lang-en">Part 5 · Public API &amp; tools</span></span>
+    <span class="pill">26 / 30</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:86%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第五部分 · 公共 API 与工具</span><span class="lang-en">Part 5 · Public API &amp; tools</span></div>
+    <h1><span class="lang-zh">common 工具层</span><span class="lang-en">The common layer</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课（L25）我们认识了 <span class="mono">include/llama.h</span> 那套 C API——它确实能驱动整台机器，可真用起来挺"啰嗦"：填一个 <span class="mono">llama_batch</span> 要逐字段设 token/pos/seq_id；搭一条采样链要一节节 <span class="mono">llama_sampler_chain_add</span>；把命令行解析成参数、再把模型从网上拉下来，每个工具都得从头写一遍。这些反复出现的杂活，正是 <span class="mono">common/</span> 这一层要替你包掉的。
+</p>
+<p style="color:var(--muted);margin-top:.4rem"><span class="mono">common/</span> 是 llama.cpp 自带的"公共胶水层"：它把上面那些零碎的 C 调用，封装成一组顺手的 C++ helper，让 <span class="mono">llama-cli</span>、<span class="mono">llama-server</span> 这些自带工具都站在它的肩膀上，不必各写各的样板。但有件事要先说清楚：<strong>common 不是公共 API</strong>——它没有 <span class="mono">llama.h</span> 那样的 ABI 稳定承诺，只是项目"内部"给自家工具用的便利库；第三方语言绑定该直接对着 <span class="mono">llama.h</span> 写，而不是依赖 common。</p>
+<p style="color:var(--muted)">这一层到底替你包了哪些杂活？大致可分四类：把命令行解析成一个大配置，按配置把模型与上下文一次性初始化好，把采样链和语法约束包成一个顺手的采样器，以及在你只给出一个仓库名时自动下载并缓存模型文件。本课就顺着这四件事走一遍，最后再花点篇幅讲清"为什么 common 不算公共 API"，以及两个天天在用、却很少被单独提起的小帮手——日志与终端着色。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  common 夹在 <span class="mono">llama.h</span>（稳定地基）和各个 tool（楼上的房间）之间，是一层"只对内、不对外"的脚手架。它的全部价值就两个字：<strong>复用</strong>。把每个工具都要做的重复动作——解析参数、配采样器、下载模型、打日志——统统收拢到一处，工具的 <span class="mono">main()</span> 因此能瘦到几乎只剩业务逻辑。读懂 common，你就读懂了 cli/server 这些工具"短小"的秘密：不是它们做得少，而是杂活早被 common 提前包圆了。换个角度看，common 的存在让"地基"得以保持精简：凡是为了顺手、却不值得写进稳定 C API 的东西，都可以安心搁在 common 这层，将来要改也不会惊动外部用户。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把这套分层想成一家连锁餐饮：<span class="mono">llama.h</span> 是<strong>水电管网</strong>（稳定、对所有人一致），common 是<strong>中央厨房</strong>（把洗菜、切配、调酱这些每家店都要做的预处理一次做好），各个 tool 则是<strong>门店</strong>（只管按订单出菜）。门店不必各自洗菜，中央厨房也从不直接面对顾客——它只服务自家门店。这正是 common"对内不对外"的含义：它是给自家工具用的后厨，不是开给外人的接口。厨房改了刀工、换了酱料配方，受影响的只有自家门店，不会波及马路上的顾客；可水电管网若要改规格，全城接它的人都得跟着动——这正是"对内可随时调整、对外必须稳定"的分别。
+</div>
+
+<h2>一站式配置：common_params</h2>
+<p>common 的核心，是一个<strong>大配置结构体</strong> <span class="mono">common_params</span>（见 <span class="mono">common/common.h</span>）。模型路径、提示词、要生成多少 token、上下文开多大，还有一整块嵌套的采样设置，几乎所有"旋钮"都塞进这一个结构体里。它还自带一套合理的默认值，于是你只需覆盖真正关心的那几项，其余的留空也能跑起来。这样一来，工具不再到处传一大把零散参数，而是只围着这一个 <span class="mono">common_params</span> 转：解析命令行时按引用（<span class="mono">common_params &amp;</span>）往里填，初始化时再把它整个取出来用——同一个对象从头贯穿到尾，省去层层透传的麻烦。</p>
+<pre class="code"><span class="cm">// 一个大结构体装下所有旋钮 (简化自 common/common.h)</span>
+<span class="kw">struct</span> <span class="fn">common_params</span> {
+    std::string  prompt;              <span class="cm">// -p  提示词</span>
+    int32_t      n_predict;           <span class="cm">// -n  最多生成多少 token</span>
+    int32_t      n_ctx;               <span class="cm">// -c  上下文窗口大小</span>
+    common_params_sampling sampling;  <span class="cm">// 嵌套: samplers / temp / grammar</span>
+    common_params_model    model;     <span class="cm">// model.path / model.hf_repo ...</span>
+    <span class="cm">// ... 还有几十个字段</span>
+};</pre>
+<p>留意那两个<strong>嵌套子结构</strong>：<span class="mono">sampling</span>（即 <span class="mono">common_params_sampling</span>，装着采样链顺序、温度、语法等）和 <span class="mono">model</span>（即 <span class="mono">common_params_model</span>，装着本地路径 <span class="mono">model.path</span> 与 HF 仓库 <span class="mono">model.hf_repo</span>）。把相关的旋钮收进各自的小结构体，既让 <span class="mono">common_params</span> 不至于变成一锅乱炖，也方便采样、下载这些模块各取所需。</p>
+<p>有了配置，怎么把它变成跑得起来的对象？分两步。先调一次 <span class="mono">common_init()</span> 做<strong>全局初始化</strong>（起日志系统、打印 build 信息）——这步和具体模型无关，整个程序只做一次；真正干活的是 <span class="mono">common_init_from_params(params)</span>，它接过填好的 <span class="mono">common_params</span>，一次性产出一个 <span class="mono">common_init_result</span>，里面装着加载好的 model、建好的 context、配好的 sampler（分别经 <span class="mono">.model()</span> / <span class="mono">.context()</span> / <span class="mono">.sampler()</span> 取用）。之所以拆成两步，是因为全局初始化必须先于任何日志输出发生，否则早期的报错可能就被悄悄吞掉。</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>common_params（填好的配置）</h4>
+    <p>命令行解析后的结果：-m 模型、-p 提示词、-n 长度，还有整块采样设置，全在这一个结构体里。</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>common_init_from_params(params)</h4>
+    <p>内部跑的正是 L25 那条手写序列：加载模型、建上下文、搭采样链，一口气全办了。</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>common_init_result -&gt; {model, context, sampler}</h4>
+    <p>开箱即用的三件套，经 .model() / .context() / .sampler() 取出，工具直接拿去推理。</p>
+  </div></div>
+</div>
+<p>这一步的意义，是把 L25 那条容易写错的长序列——<span class="mono">llama_model_load_from_file</span> 加载、<span class="mono">llama_init_from_model</span> 建上下文、再一节节搭采样链——整个收进了 <span class="mono">common_init_from_params</span> 内部。它还顺手照看了出错与释放：加载失败时返回一个空结果让你及早发现，成功时这个 <span class="mono">common_init_result</span> 则"持有"那几个对象、析构时一并释放，你不必再手动逐个 free。工具的 <span class="mono">main()</span> 因此干净许多：填好 <span class="mono">common_params</span>，调一次初始化，就拿到了三件套，省掉一大串样板。这也呼应了 L17 的 cparams、L14 的模型加载——那些底层步骤一个没少，只是被收进了这层胶水里。</p>
+
+<h2>命令行如何变成配置</h2>
+<p><span class="mono">common_params</span> 里的字段是从哪来的？大多来自<strong>命令行</strong>。<span class="mono">common/arg.{h,cpp}</span> 把每一个命令行选项都描述成一个 <span class="mono">common_arg</span> 对象：它记着选项的名字（可同时给 <span class="mono">-m</span> 短写和 <span class="mono">--model</span> 长写）、一段帮助文本，以及一个"拿到值就往 <span class="mono">common_params</span> 里写"的回调。所有 <span class="mono">common_arg</span> 的帮助文本还会被自动汇总，拼成你敲 <span class="mono">--help</span> 时看到的那张说明表，省得另写一份文档、还总忘了同步。声明时更能用链式 builder 微调行为——<span class="mono">.set_examples()</span> 限定它属于哪些工具、<span class="mono">.set_env()</span> 允许从环境变量取值、<span class="mono">.set_excludes()</span> 把某些工具排除在外。</p>
+<pre class="code"><span class="cm">// 声明 "-m / --model" 这个选项 (简化自 common/arg.cpp)</span>
+<span class="fn">add_opt</span>(<span class="fn">common_arg</span>(
+    {<span class="st">"-m"</span>, <span class="st">"--model"</span>}, <span class="st">"FNAME"</span>, <span class="st">"model path to load"</span>,
+    [](common_params &amp; params, <span class="kw">const</span> std::string &amp; value) {
+        params.model.path = value;          <span class="cm">// 拿到值就写进 common_params</span>
+    }
+).<span class="fn">set_examples</span>({LLAMA_EXAMPLE_COMMON}).<span class="fn">set_env</span>(<span class="st">"LLAMA_ARG_MODEL"</span>));
+
+<span class="cm">// 把整条 argv 解析进 params; 第 4 个参数选哪套工具的选项集</span>
+<span class="fn">common_params_parse</span>(argc, argv, params, LLAMA_EXAMPLE_CLI);</pre>
+<p>真正把命令行"灌"进结构体的，是 <span class="mono">common_params_parse(argc, argv, params, ex)</span>：它遍历 <span class="mono">argv</span>，按名字找到对应的 <span class="mono">common_arg</span>，挨个调用回调写进 <span class="mono">params</span>。第 4 个参数 <span class="mono">ex</span> 是一个 <span class="mono">enum llama_example</span>（如 <span class="mono">LLAMA_EXAMPLE_CLI</span>、<span class="mono">LLAMA_EXAMPLE_SERVER</span>、<span class="mono">LLAMA_EXAMPLE_COMMON</span>），它决定<strong>这次解析认哪些选项</strong>——同一套机制，因此能给不同工具暴露不同的参数子集：cli 有 cli 的选项、server 有 server 的，互不打架，而标成 <span class="mono">COMMON</span> 的那批则是大家共享的基本选项。若环境变量与命令行同时给了值，命令行优先——这样在 CI 里用环境变量设默认、临时在命令行覆盖，就显得很自然。</p>
+<p>光说不够直观。下面顺着一条最小命令行 <span class="mono">-m model.gguf -p "Hi" -n 16 --temp 0.7</span>，看它怎么一步步变成 <span class="mono">common_params</span> 字段、再被交去产出三件套：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次参数解析</b>：最小命令行如何被 common_params_parse 填进结构体、再交给 common_init_from_params 产出三件套（数值为示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① argv</h5>
+      <div class="cellrow"><span class="vc">-m model.gguf</span><span class="vc">-p "Hi"</span><span class="vc">-n 16</span><span class="vc">--temp 0.7</span></div>
+      <div class="tlab">原始命令行</div></div>
+    <div class="op">common_<br>params_parse</div>
+    <div class="stn"><h5>② common_params 字段</h5>
+      <div class="cellrow"><span class="vc blue">model.path=model.gguf</span><span class="vc blue">prompt="Hi"</span><span class="vc blue">n_predict=16</span><span class="vc blue">sampling.temp=0.70</span></div>
+      <div class="tlab">每个选项写进对应字段</div></div>
+    <div class="op">common_init<br>from_params</div>
+    <div class="stn"><h5>③ 就绪</h5>
+      <div class="cellrow"><span class="vc hot">{model, ctx, sampler}</span></div>
+      <div class="tlab">开箱即用的三件套</div></div>
+  </div>
+</div>
+
+<h2>采样包装：common_sampler</h2>
+<p>采样这件事，L21 讲过它的底层是一条 <span class="mono">llama_sampler</span> 链，L23 又讲了 GBNF 语法约束。这两样本是分开的：链负责按概率挑词，语法负责"只准挑合法的词"。common 把它们<strong>裹成一个对象</strong> <span class="mono">common_sampler</span>（见 <span class="mono">common/sampling.{h,cpp}</span>）：采样链 + 语法捆在一起，对外只露出一个句柄，省得每个工具自己去操心"先过语法还是先采样"这类细节。<span class="mono">common_sampler_init(model, params.sampling)</span> 会照着 <span class="mono">params.sampling.samplers</span> 里列出的顺序（一串 <span class="mono">common_sampler_type</span>，如 <span class="mono">COMMON_SAMPLER_TYPE_TOP_K</span> / <span class="mono">TOP_P</span> / <span class="mono">TEMPERATURE</span>）把链一节节搭起来。</p>
+<div class="flow">
+  <div class="node"><div class="nt">top_k</div><div class="nd">留前 k 个</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_p</div><div class="nd">核采样</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">温度缩放</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">dist</div><div class="nd">按分布抽样</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token</div><div class="nd">选出下一个</div></div>
+</div>
+<p>用起来更省事：<span class="mono">common_sampler_sample(gsmpl, ctx, idx, grammar_first)</span> 一次调用，就把"取 logits、过语法掩码、走完整条链、挑出 token"全办了；选完再用 <span class="mono">common_sampler_accept(...)</span> 把这个 token 喂回去，更新重复惩罚和语法状态。<span class="mono">llama-cli</span>、<span class="mono">llama-server</span> 用的都是<strong>这一层</strong>，而不是直接碰 L21 那套裸 <span class="mono">llama_sampler_*</span>。上图只画了默认链里的几节（真实默认还含 penalties、dry、min_p 等），但顺序的道理一样：先一层层筛掉不要的候选，最后按分布抽一个。</p>
+<pre class="code"><span class="cm">// cli/server 都用这层, 不直接碰裸 llama_sampler_* (简化自 common/sampling.h)</span>
+common_sampler * smpl = <span class="fn">common_sampler_init</span>(model, params.sampling);
+<span class="cm">// ... 每步 ...</span>
+llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);   <span class="cm">// 取分-&gt;过语法-&gt;采样, 一步到位</span>
+<span class="fn">common_sampler_accept</span>(smpl, id, <span class="cm">/*is_generated=*/</span> <span class="kw">true</span>); <span class="cm">// 反馈: 更新惩罚与语法状态</span></pre>
+<p>注意这是个<strong>每步都要走一遍</strong>的循环：每生成一个 token，就 <span class="mono">common_sampler_sample</span> 选一个、再 <span class="mono">common_sampler_accept</span> 反馈一次，如此往复，直到遇上结束符或写满预定长度。<span class="mono">accept</span> 这一步至关重要——重复惩罚要靠它记住"已经出过哪些词"，语法状态也要靠它推进到下一个合法位置。参数里的 <span class="mono">grammar_first</span> 则控制"语法掩码"先于还是后于其它采样器生效：多数情况下用默认即可，只有当语法很严、又想让温度等先发挥作用时才需要调整。</p>
+<div class="card detail">
+  <div class="tag">🔬 细节 / 源码对应</div>
+  <span class="mono">common_sampler</span> 不是另起炉灶，而是<strong>薄薄一层壳</strong>：内部仍是 L21 那条 <span class="mono">llama_sampler</span> 链，只是额外捆上语法、候选缓冲和一点状态管理。需要时还能用 <span class="mono">common_sampler_get(gsmpl)</span> 把底层那条裸 <span class="mono">llama_sampler</span> 链取回来。换句话说，它和 <span class="mono">llama_sampler_*</span> 不是二选一，而是"上层便利 + 下层内核"的关系——和 common 整体之于 <span class="mono">llama.h</span> 的关系如出一辙。日常使用几乎不必直接碰那条裸链，但知道它"随时能拆开"这一点，会在你要做特殊采样时留出一条后路。
+</div>
+
+<h2>下载与缓存</h2>
+<p>还有一桩重复的杂活：弄到模型文件本身。<span class="mono">common/download.{h,cpp}</span> 让你能直接写 <span class="mono">-hf user/repo:tag</span> 从 Hugging Face（一个公开的模型托管站）拉模型，省去"先手动下载、再用 <span class="mono">-m</span> 指路"那两步。第一步是 <span class="mono">common_download_split_repo_tag("repo:tag")</span>，把 <span class="mono">repo:tag</span> 这种写法拆成仓库名和标签两段——标签常用来挑某一种量化（如 <span class="mono">Q4_K_M</span>）；接着按这个信息去 HF 上把文件下载下来，并在本地建一份缓存。遇到被切成多片的大模型（多个 <span class="mono">.gguf</span> 分卷），它也会把各片一并取齐。</p>
+<div class="flow">
+  <div class="node"><div class="nt">-hf user/repo:tag</div><div class="nd">命令行写法</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">split_repo_tag</div><div class="nd">拆出 repo 与 tag</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">HF 下载</div><div class="nd">首次才联网</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">本地缓存</div><div class="nd">~/.cache/llama.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">model.path</div><div class="nd">当成本地文件用</div></div>
+</div>
+<p>这条流水线最关键的一步是<strong>先查缓存</strong>：真正联网下载前，它会先看本地是否已有这个文件、且与远端版本一致，若有就直接跳过下载。所以上图里"HF 下载"那一格，其实只有首次运行才真的会走，之后都被缓存短路掉了。</p>
+<p>缓存是关键：模型只在<strong>第一次</strong>用到时才下载，落进本地缓存目录后，以后每次启动都直接命中、秒开。缓存默认在 <span class="mono">~/.cache/llama.cpp/</span>（可用环境变量 <span class="mono">LLAMA_CACHE</span> 覆盖）；<span class="mono">common_list_cached_models()</span> 能列出已经缓存的模型；下载过程则由 <span class="mono">common_download_callback</span>（带 <span class="mono">on_start</span> / <span class="mono">on_update</span> / <span class="mono">on_done</span> 三个回调，配合 <span class="mono">common_download_progress</span>）驱动那条进度条。这份缓存还是各工具<strong>共享</strong>的：cli、server、bench 指向同一个仓库时，命中的都是同一份本地副本，不会各下一遍。</p>
+<div class="card spark">
+  <div class="tag">💡 动手试试</div>
+  动手试一下：第一次跑 <span class="mono">llama-cli -hf &lt;user&gt;/&lt;repo&gt;</span> 会看到一段下载进度，之后再跑同一个就瞬间启动——因为文件已经躺在 <span class="mono">~/.cache/llama.cpp/</span> 里了。想把缓存搬到大硬盘？设一个 <span class="mono">LLAMA_CACHE=/path/to/dir</span> 即可；想知道缓存了哪些，去那个目录翻一翻、或在代码里调 <span class="mono">common_list_cached_models()</span>。这套"下一次就免下载"的机制，正是 common 把"弄到模型"这桩杂活也一并包圆的体现：你只管写 <span class="mono">-hf</span>，下载、命名、缓存、复用，它都替你想好了。当然，第一次仍要联网、也得留足磁盘空间；跑通一次之后，就再不必为"模型在哪"操心了。
+</div>
+
+<h2>深入：边界与两个小帮手</h2>
+<p>最后用两个折叠，补两个常被问到的点：为什么反复强调"common 不是公共 API"，以及那些不起眼、却天天在用的小工具（日志与终端）。这两点，一个关乎"边界"——你到底该依赖哪一层，一个关乎"手感"——调试时是谁在默默帮你，放在一起正好给本课收个尾。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> 为什么说 common 不算"公共 API"？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">include/llama.h</span> 是有 ABI 稳定承诺的对外契约（L25），各语言绑定都照着它写；而 <span class="mono">common/</span> 没有这种承诺——它的结构体布局、函数签名会随项目需要随时改动，因为它本就是<strong>给自家工具用的内部便利库</strong>，不在"对外保证"的范围里。所以一条实用的分界是：写第三方绑定（Python/Go/Rust）请直接对着 <span class="mono">llama.h</span>，把 common 当成"可以参考、但别依赖"的示例；只有当你给 llama.cpp <strong>贡献自带工具</strong>（往 <span class="mono">tools/</span> 或 <span class="mono">examples/</span> 里加东西）时，才该站上 common 的肩膀。分清这条线，能帮你躲开"绑定依赖了 common，下次一更新就编不过"的坑。</p>
+    <p>一个简单的判断法：如果你的代码只要 <span class="mono">#include "llama.h"</span> 就够用，就别去 include common 里的头文件；只有当你在写自带工具、确实想复用参数解析或采样封装时，才把 common 一起编进来。这条线也解释了为什么本课开头一再强调它——把"对外稳定"和"对内便利"分清楚，是用好整个项目的前提。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> log 与 console：两个不起眼的帮手 <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">common/log.{h,cpp}</span> 提供<strong>分级日志</strong>：<span class="mono">LOG_INF</span> / <span class="mono">LOG_WRN</span> / <span class="mono">LOG_ERR</span> / <span class="mono">LOG_DBG</span> 分别对应信息、警告、错误、调试四档，底层由一个带后台线程的 <span class="mono">common_log</span> 统一输出（异步打印，不拖慢主线程）。调试时把日志级别调高、多打几行 <span class="mono">LOG_DBG</span>，就能看清模型加载、批次、采样每一步到底发生了什么，比到处插 <span class="mono">printf</span> 干净得多。日志级别可用 <span class="mono">-v</span> 或环境变量调节，无需重新编译。</p>
+    <p><span class="mono">common/console.{h,cpp}</span> 则管<strong>终端交互与着色</strong>：<span class="mono">console::set_display(...)</span> 切换不同的显示类别（提示、用户输入、错误等各有颜色），<span class="mono">console::readline(...)</span> 处理一行输入（含多行与 UTF-8）。<span class="mono">llama-cli</span> 里那个带颜色、能正常敲中文的交互界面，就是靠它撑起来的。这两个小工具谈不上"核心"，却实实在在让工具用着顺手、调着省心——也是 common"把杂活包圆"的一部分。调试交互式会话时，颜色能正常显示、退格与中文输入都不串位，靠的正是这层不起眼的封装。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li><span class="mono">common/</span> 是 llama.cpp 自带工具的<strong>共享胶水层</strong>，把裸 C API 包成顺手的 C++；它<strong>不是</strong>公共 API（无 ABI 稳定承诺），第三方绑定应直接用 <span class="mono">llama.h</span>。</li>
+    <li><span class="mono">common_params</span> 一个大结构体装下所有旋钮；<span class="mono">common_init()</span> 做全局初始化，<span class="mono">common_init_from_params(params)</span> 产出 <span class="mono">common_init_result</span>（model + context + sampler）。</li>
+    <li>命令行：每个选项是一个 <span class="mono">common_arg</span>（链式 <span class="mono">.set_examples/.set_env/.set_excludes</span>）；<span class="mono">common_params_parse(argc, argv, params, ex)</span> 按 <span class="mono">enum llama_example</span> 把 argv 填进 <span class="mono">common_params</span>。</li>
+    <li>采样：<span class="mono">common_sampler</span> 把 L21 的 <span class="mono">llama_sampler</span> 链 + L23 的 GBNF 语法裹成一个对象；<span class="mono">common_sampler_init</span> 按 <span class="mono">samplers</span> 顺序建链，<span class="mono">common_sampler_sample</span> 一步采样。cli/server 用这层、不用裸采样器。</li>
+    <li>下载：<span class="mono">-hf user/repo:tag</span> 经 <span class="mono">common_download_split_repo_tag</span> + HF 缓存变成本地文件；首次下载、之后命中 <span class="mono">~/.cache/llama.cpp/</span>。</li>
+    <li>小帮手：<span class="mono">common/log</span> 给分级日志（<span class="mono">LOG_INF/WRN/ERR/DBG</span>，异步输出），<span class="mono">common/console</span> 管终端着色与交互输入——调试时省心不少。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  common 的设计哲学，一句话：<strong>复用胜过重写</strong>。它没有发明任何新机制，只是把每个工具都要做的重复动作——填参数、配采样、下模型、打日志——抽到一处，让 cli/server 的 <span class="mono">main()</span> 短到一眼能读完。但它刻意<strong>不</strong>把自己伪装成对外接口：稳定契约留给 <span class="mono">llama.h</span>，common 只做"对内顺手"。这条"对外稳定、对内便利"的分工，和你在 L25 见到的"稳定的表面 + 自由的内部"是同一套思路——只不过这次，common 站在了"便利"的那一端。看懂这层，第五部分接下来的 cli 与 server，就只是 common 之上各搭各的楼了。把这一层吃透，你会发现后面的工具课大多是在看"如何组合 common 的零件"，而不是又一套全新机制。说到底，common 教给我们的，是一种"把重复的杂活抽出来、把稳定的承诺留在边界上"的工程素养——这份在"对外稳定"与"对内便利"之间拿捏分寸的眼光，比记住任何单个函数名都更值得带走。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. common 是 llama.cpp 公共 API 的一部分吗？</div>
+  <ol class="opts">
+    <li>是：第三方语言绑定都应该直接依赖 common</li>
+    <li>是：它和 include/llama.h 一样是对外稳定契约</li>
+    <li>不是：它是给自家工具用的内部共享库，没有 ABI 稳定承诺</li>
+    <li>算半个：取决于编译时是否开启某个开关</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。common 是工具共享的内部便利库，结构体布局与签名会随项目需要改动，没有 ABI 稳定承诺；对外稳定契约是 include/llama.h，第三方绑定应直接对着它写。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. 谁负责把命令行 argv 变成填好的 common_params？</div>
+  <ol class="opts">
+    <li>没有谁，main() 里手写一大堆 if-else 分支</li>
+    <li>common_init()：它在全局初始化时顺便解析命令行</li>
+    <li>common_sampler_init：它解析所有采样相关的参数</li>
+    <li>common_params_parse：按 enum llama_example 选定选项集，逐个调用 common_arg 的回调写入字段</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。common_params_parse(argc, argv, params, ex) 遍历 argv、按名字匹配 common_arg、调用回调写进 common_params；第 4 个参数 ex（enum llama_example）决定这次认哪套选项。common_init() 只做全局初始化（日志、build 信息）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. llama-cli / llama-server 做采样时，用的是哪一层？</div>
+  <ol class="opts">
+    <li>Python 绑定里实现的采样器</li>
+    <li>common_sampler：它把 L21 的 llama_sampler 链和 L23 的 GBNF 语法裹成一个对象</li>
+    <li>直接用裸 llama_sampler_*，完全不经过 common</li>
+    <li>每个工具各自手写一条独立的采样链</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。cli/server 用的是 common_sampler 这层：common_sampler_init 按 params.sampling.samplers 的顺序建链，common_sampler_sample 一步完成取分、过语法、采样。需要时还能用 common_sampler_get 取回底层裸 llama_sampler 链。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>假设你要为 llama.cpp 写一个 Rust 绑定：你会依赖 common，还是只用 include/llama.h？结合 common“对内不对外”、没有 ABI 稳定承诺这两点，说说你的理由。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson (L25) we met the C API in <span class="mono">include/llama.h</span> - it really can drive the whole machine, but using it is rather "verbose": filling one <span class="mono">llama_batch</span> means setting token/pos/seq_id field by field; building a sampler chain means adding it node by node with <span class="mono">llama_sampler_chain_add</span>; parsing the command line into params and pulling a model off the network - every tool writes all of this from scratch. Those repeated chores are exactly what the <span class="mono">common/</span> layer packages away for you.
+</p>
+<p style="color:var(--muted);margin-top:.4rem"><span class="mono">common/</span> is llama.cpp's built-in "shared glue layer": it wraps those scattered C calls into a set of handy C++ helpers, so bundled tools like <span class="mono">llama-cli</span> and <span class="mono">llama-server</span> all stand on its shoulders instead of each writing their own boilerplate. But one thing must be clear up front: <strong>common is not the public API</strong> - it carries no ABI-stability promise like <span class="mono">llama.h</span> does, it is just an internal convenience library for the project's own tools; third-party language bindings should write against <span class="mono">llama.h</span> directly rather than depend on common.</p>
+<p style="color:var(--muted)">So what chores does this layer actually package? Roughly four kinds: parse the command line into one big config, initialize the model and context from that config in one shot, wrap the sampler chain and grammar constraint into one handy sampler, and download and cache the model file when you hand it only a repo name. This lesson walks those four things in turn, then spends a little time making clear "why common is not the public API", plus two small helpers used every day yet rarely mentioned on their own - logging and terminal coloring.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  common sits between <span class="mono">llama.h</span> (the stable foundation) and each tool (the rooms upstairs), a layer of scaffolding that faces inward only, never outward. Its whole value is one word: <strong>reuse</strong>. Gather the repeated actions every tool needs - parse args, configure samplers, download models, print logs - into one place, and a tool's <span class="mono">main()</span> shrinks to almost nothing but business logic. Understand common and you understand the secret behind how "small" cli/server look: not that they do less, but that the chores were packaged up ahead of time by common. Seen another way, common lets the "foundation" stay lean: anything handy to have but not worth freezing into the stable C API can sit safely up here in common, free to change later without disturbing outside users.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the layering as a restaurant chain: <span class="mono">llama.h</span> is the <strong>plumbing and wiring</strong> (stable, identical for everyone), common is the <strong>central kitchen</strong> (it does the washing, chopping, and sauce-prep every branch would otherwise repeat), and each tool is a <strong>storefront</strong> (just plate up to order). The storefronts never wash vegetables themselves, and the central kitchen never faces customers directly - it only serves the chain's own branches. That is what common's "inward, not outward" means: it is the back kitchen for the project's own tools, not an interface opened to outsiders. If the kitchen changes its knife work or swaps a sauce recipe, only the chain's own branches feel it, never the customers on the street; but if the plumbing changes spec, everyone in the city wired to it must follow - exactly the split between "freely adjustable inward, necessarily stable outward".
+</div>
+
+<h2>One-stop config: common_params</h2>
+<p>At common's core is one <strong>big config struct</strong>, <span class="mono">common_params</span> (see <span class="mono">common/common.h</span>). The model path, the prompt, how many tokens to generate, how large the context is, plus a whole nested block of sampling settings - nearly every "knob" is packed into this one struct. It also carries a set of sane defaults, so you only override the few things you actually care about and leave the rest to run as-is. So a tool no longer passes a fistful of scattered parameters around; it just revolves around this single <span class="mono">common_params</span>: fill it by reference (<span class="mono">common_params &amp;</span>) while parsing the command line, then pull the whole thing out at init time - one object threaded end to end, sparing you layers of pass-through.</p>
+<pre class="code"><span class="cm">// one big struct holds every knob (simplified from common/common.h)</span>
+<span class="kw">struct</span> <span class="fn">common_params</span> {
+    std::string  prompt;              <span class="cm">// -p  the prompt</span>
+    int32_t      n_predict;           <span class="cm">// -n  how many tokens to generate</span>
+    int32_t      n_ctx;               <span class="cm">// -c  context window size</span>
+    common_params_sampling sampling;  <span class="cm">// nested: samplers / temp / grammar</span>
+    common_params_model    model;     <span class="cm">// model.path / model.hf_repo ...</span>
+    <span class="cm">// ... dozens more fields</span>
+};</pre>
+<p>Note the two <strong>nested sub-structs</strong>: <span class="mono">sampling</span> (that is <span class="mono">common_params_sampling</span>, holding the sampler-chain order, temperature, grammar, and so on) and <span class="mono">model</span> (that is <span class="mono">common_params_model</span>, holding the local <span class="mono">model.path</span> and the HF <span class="mono">model.hf_repo</span>). Tucking related knobs into their own little structs keeps <span class="mono">common_params</span> from turning into one big stew, and lets modules like sampling and download each take just what they need.</p>
+<p>With the config in hand, how does it become runnable objects? In two steps. First call <span class="mono">common_init()</span> once for <strong>global init</strong> (start the logging system, print build info) - this step is model-independent and runs once per program; the real work is done by <span class="mono">common_init_from_params(params)</span>, which takes the filled <span class="mono">common_params</span> and produces, in one shot, a <span class="mono">common_init_result</span> holding the loaded model, the built context, and the configured sampler (taken via <span class="mono">.model()</span> / <span class="mono">.context()</span> / <span class="mono">.sampler()</span>). The two steps are split because global init must happen before any logging, or early errors could be swallowed silently.</p>
+<div class="vflow">
+  <div class="step"><div class="num">1</div><div class="sc">
+    <h4>common_params (the filled config)</h4>
+    <p>The result of parsing the command line: -m model, -p prompt, -n length, plus the whole sampling block, all in this one struct.</p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div class="sc">
+    <h4>common_init_from_params(params)</h4>
+    <p>Inside, it runs exactly L25's hand-written sequence: load the model, build the context, build the sampler chain - all at once.</p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div class="sc">
+    <h4>common_init_result -&gt; {model, context, sampler}</h4>
+    <p>The ready-to-use trio, taken via .model() / .context() / .sampler(), handed straight to inference.</p>
+  </div></div>
+</div>
+<p>The point of this step is that L25's long, easy-to-misfire sequence - <span class="mono">llama_model_load_from_file</span> to load, <span class="mono">llama_init_from_model</span> to build the context, then the sampler chain node by node - is folded entirely inside <span class="mono">common_init_from_params</span>. It also looks after errors and cleanup along the way: on a failed load it returns an empty result so you notice early, and on success the <span class="mono">common_init_result</span> "owns" those objects and frees them together on destruction, so you need not free each one by hand. A tool's <span class="mono">main()</span> is much cleaner for it: fill <span class="mono">common_params</span>, call init once, and the trio is ready, sparing you a long stretch of boilerplate. This echoes L17's cparams and L14's model loading - none of those low-level steps are gone, they are just tucked into this glue layer.</p>
+
+<h2>How the command line becomes config</h2>
+<p>Where do the fields in <span class="mono">common_params</span> come from? Mostly from the <strong>command line</strong>. <span class="mono">common/arg.{h,cpp}</span> describes each command-line option as a <span class="mono">common_arg</span> object: it records the option's names (a short <span class="mono">-m</span> and a long <span class="mono">--model</span> at once), a line of help text, and a callback that "writes the value into <span class="mono">common_params</span>". The help text of every <span class="mono">common_arg</span> is also gathered automatically into the table you see when you type <span class="mono">--help</span>, sparing a separate document that always drifts out of sync. At declaration you can further tune behavior with chainable builders - <span class="mono">.set_examples()</span> limits which tools it belongs to, <span class="mono">.set_env()</span> lets it read from an environment variable, <span class="mono">.set_excludes()</span> rules certain tools out.</p>
+<pre class="code"><span class="cm">// declare the "-m / --model" option (simplified from common/arg.cpp)</span>
+<span class="fn">add_opt</span>(<span class="fn">common_arg</span>(
+    {<span class="st">"-m"</span>, <span class="st">"--model"</span>}, <span class="st">"FNAME"</span>, <span class="st">"model path to load"</span>,
+    [](common_params &amp; params, <span class="kw">const</span> std::string &amp; value) {
+        params.model.path = value;          <span class="cm">// the value goes into common_params</span>
+    }
+).<span class="fn">set_examples</span>({LLAMA_EXAMPLE_COMMON}).<span class="fn">set_env</span>(<span class="st">"LLAMA_ARG_MODEL"</span>));
+
+<span class="cm">// parse the whole argv into params; the 4th arg picks which tool's option set</span>
+<span class="fn">common_params_parse</span>(argc, argv, params, LLAMA_EXAMPLE_CLI);</pre>
+<p>What actually "pours" the command line into the struct is <span class="mono">common_params_parse(argc, argv, params, ex)</span>: it walks <span class="mono">argv</span>, finds the matching <span class="mono">common_arg</span> by name, and calls each callback to write into <span class="mono">params</span>. The 4th argument <span class="mono">ex</span> is an <span class="mono">enum llama_example</span> (like <span class="mono">LLAMA_EXAMPLE_CLI</span>, <span class="mono">LLAMA_EXAMPLE_SERVER</span>, <span class="mono">LLAMA_EXAMPLE_COMMON</span>) that decides <strong>which options this parse recognizes</strong> - one mechanism, so it can expose different parameter subsets to different tools: cli has cli's options, server has server's, with no clashes, while the ones marked <span class="mono">COMMON</span> are the shared basics everyone gets. When an environment variable and the command line both supply a value, the command line wins - so setting defaults via env in CI and overriding on the command line ad hoc feels natural.</p>
+<p>Words alone are not concrete enough. Below we follow one minimal command line, <span class="mono">-m model.gguf -p "Hi" -n 16 --temp 0.7</span>, and watch it turn step by step into <span class="mono">common_params</span> fields, then get handed off to produce the trio:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one arg parse</b>: how a minimal command line is filled into the struct by common_params_parse, then handed to common_init_from_params to produce the trio (values are illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) argv</h5>
+      <div class="cellrow"><span class="vc">-m model.gguf</span><span class="vc">-p "Hi"</span><span class="vc">-n 16</span><span class="vc">--temp 0.7</span></div>
+      <div class="tlab">raw command line</div></div>
+    <div class="op">common_<br>params_parse</div>
+    <div class="stn"><h5>(2) common_params fields</h5>
+      <div class="cellrow"><span class="vc blue">model.path=model.gguf</span><span class="vc blue">prompt="Hi"</span><span class="vc blue">n_predict=16</span><span class="vc blue">sampling.temp=0.70</span></div>
+      <div class="tlab">each option written to its field</div></div>
+    <div class="op">common_init<br>from_params</div>
+    <div class="stn"><h5>(3) ready</h5>
+      <div class="cellrow"><span class="vc hot">{model, ctx, sampler}</span></div>
+      <div class="tlab">the ready-to-use trio</div></div>
+  </div>
+</div>
+
+<h2>The sampler wrapper: common_sampler</h2>
+<p>As for sampling, L21 covered how its underlying form is a <span class="mono">llama_sampler</span> chain, and L23 covered GBNF grammar constraints. These two were separate by nature: the chain picks words by probability, the grammar enforces "only legal words allowed". common <strong>wraps them into one object</strong>, <span class="mono">common_sampler</span> (see <span class="mono">common/sampling.{h,cpp}</span>): the sampler chain plus the grammar bundled together, exposing only one handle outward, so each tool need not fuss over details like "apply the grammar before or after sampling". <span class="mono">common_sampler_init(model, params.sampling)</span> builds the chain node by node, following the order listed in <span class="mono">params.sampling.samplers</span> (a list of <span class="mono">common_sampler_type</span>, like <span class="mono">COMMON_SAMPLER_TYPE_TOP_K</span> / <span class="mono">TOP_P</span> / <span class="mono">TEMPERATURE</span>).</p>
+<div class="flow">
+  <div class="node"><div class="nt">top_k</div><div class="nd">keep top k</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">top_p</div><div class="nd">nucleus</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">temp</div><div class="nd">temperature scale</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">dist</div><div class="nd">sample by dist</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">token</div><div class="nd">pick the next</div></div>
+</div>
+<p>Using it is tidier: <span class="mono">common_sampler_sample(gsmpl, ctx, idx, grammar_first)</span> does "take logits, apply the grammar mask, run the whole chain, pick a token" in one call; afterward <span class="mono">common_sampler_accept(...)</span> feeds the token back to update repetition penalties and grammar state. <span class="mono">llama-cli</span> and <span class="mono">llama-server</span> both use <strong>this layer</strong>, not the raw <span class="mono">llama_sampler_*</span> from L21. The diagram draws only a few nodes of the default chain (the real default also includes penalties, dry, min_p, and more), but the logic of the order is the same: sieve out unwanted candidates layer by layer, then draw one by distribution at the end.</p>
+<pre class="code"><span class="cm">// cli/server use this layer, not raw llama_sampler_* (simplified from common/sampling.h)</span>
+common_sampler * smpl = <span class="fn">common_sampler_init</span>(model, params.sampling);
+<span class="cm">// ... each step ...</span>
+llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);   <span class="cm">// logits-&gt;grammar-&gt;sample in one call</span>
+<span class="fn">common_sampler_accept</span>(smpl, id, <span class="cm">/*is_generated=*/</span> <span class="kw">true</span>); <span class="cm">// feedback: update penalties and grammar state</span></pre>
+<p>Note this is a loop you run <strong>every step</strong>: for each generated token you <span class="mono">common_sampler_sample</span> to pick one, then <span class="mono">common_sampler_accept</span> to feed it back, over and over until an end token or the planned length is reached. That <span class="mono">accept</span> step matters - the repetition penalty relies on it to remember "which words already appeared", and the grammar state relies on it to advance to the next legal position. The <span class="mono">grammar_first</span> argument controls whether the "grammar mask" applies before or after the other samplers: the default is fine most of the time, and you only adjust it when the grammar is strict yet you still want temperature and friends to act first.</p>
+<div class="card detail">
+  <div class="tag">🔬 Details / source</div>
+  <span class="mono">common_sampler</span> does not start from scratch; it is a <strong>thin shell</strong>: inside is still L21's <span class="mono">llama_sampler</span> chain, just bundled with the grammar, a candidate buffer, and a little state management. When needed you can even call <span class="mono">common_sampler_get(gsmpl)</span> to get the underlying raw <span class="mono">llama_sampler</span> chain back. In other words, it and <span class="mono">llama_sampler_*</span> are not an either-or but an "upper-level convenience plus lower-level core" relationship - exactly like common as a whole relates to <span class="mono">llama.h</span>. In everyday use you hardly ever touch that raw chain directly, but knowing it "can be opened up any time" leaves you an escape hatch when you need some special sampling.
+</div>
+
+<h2>Download and cache</h2>
+<p>There is one more repeated chore: getting the model file itself. <span class="mono">common/download.{h,cpp}</span> lets you write <span class="mono">-hf user/repo:tag</span> to pull a model straight from Hugging Face (a public model-hosting site), sparing the two-step dance of "download by hand, then point <span class="mono">-m</span> at it". The first step is <span class="mono">common_download_split_repo_tag("repo:tag")</span>, which splits the <span class="mono">repo:tag</span> form into a repo name and a tag - the tag often picks a particular quantization (like <span class="mono">Q4_K_M</span>); then it downloads the file from HF using that info and builds a local cache. For a big model split into several shards (multiple <span class="mono">.gguf</span> parts) it fetches all the parts together too.</p>
+<div class="flow">
+  <div class="node"><div class="nt">-hf user/repo:tag</div><div class="nd">command-line form</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">split_repo_tag</div><div class="nd">split repo and tag</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">HF download</div><div class="nd">network on first run</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node"><div class="nt">local cache</div><div class="nd">~/.cache/llama.cpp</div></div>
+  <div class="arrow">-&gt;</div>
+  <div class="node hl"><div class="nt">model.path</div><div class="nd">use as a local file</div></div>
+</div>
+<p>The key step on this pipeline is to <strong>check the cache first</strong>: before any real network download, it looks at whether the file already exists locally and matches the remote version, and if so it skips the download entirely. So the "HF download" box above really only runs on the very first run; later runs are short-circuited by the cache.</p>
+<p>The cache is the key: a model downloads only the <strong>first</strong> time it is used, and once it lands in the local cache directory, every later start hits it directly and opens instantly. The cache defaults to <span class="mono">~/.cache/llama.cpp/</span> (overridable via the <span class="mono">LLAMA_CACHE</span> environment variable); <span class="mono">common_list_cached_models()</span> lists the already-cached models; and the download itself is driven by <span class="mono">common_download_callback</span> (with three callbacks <span class="mono">on_start</span> / <span class="mono">on_update</span> / <span class="mono">on_done</span>, paired with <span class="mono">common_download_progress</span>) that powers the progress bar. This cache is also <strong>shared</strong> across tools: when cli, server, and bench point at the same repo, they all hit the same local copy rather than each downloading their own.</p>
+<div class="card spark">
+  <div class="tag">💡 Hands-on</div>
+  Try it: the first run of <span class="mono">llama-cli -hf &lt;user&gt;/&lt;repo&gt;</span> shows a download progress bar, and running the same one again starts instantly - because the file already sits in <span class="mono">~/.cache/llama.cpp/</span>. Want to move the cache to a bigger disk? Set <span class="mono">LLAMA_CACHE=/path/to/dir</span>. Want to see what is cached? Browse that directory, or call <span class="mono">common_list_cached_models()</span> in code. This "no download next time" mechanism is common packaging up the "get the model" chore too: you just write <span class="mono">-hf</span>, and downloading, naming, caching, and reuse are all handled for you. Of course the first time still needs the network and enough disk space; once it has run through once, you never worry about "where the model is" again.
+</div>
+
+<h2>Deep dive: the boundary and two small helpers</h2>
+<p>Finally, two folds for two often-asked points: why we keep stressing that "common is not the public API", and those unglamorous little utilities used every day (logging and the terminal). One is about the "boundary" - which layer you should actually depend on - and the other about the "feel" - who quietly helps you while debugging - and together they round off the lesson.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why does common not count as a "public API"? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">include/llama.h</span> is the outward contract with an ABI-stability promise (L25), and every language binding writes against it; <span class="mono">common/</span> carries no such promise - its struct layouts and function signatures change whenever the project needs, because it is an <strong>internal convenience library for the project's own tools</strong>, outside the "outward guarantee". So a practical dividing line is: for third-party bindings (Python/Go/Rust) write against <span class="mono">llama.h</span> directly and treat common as "fine to read, but do not depend on" sample code; only when you <strong>contribute a bundled tool</strong> to llama.cpp (adding something under <span class="mono">tools/</span> or <span class="mono">examples/</span>) should you stand on common's shoulders. Drawing this line keeps you clear of the trap where "a binding depended on common, and the next update no longer compiles".</p>
+    <p>A simple test: if your code only needs <span class="mono">#include "llama.h"</span>, do not reach for common's headers; pull common in only when you are writing a bundled tool and genuinely want to reuse the arg parsing or the sampler wrapper. This line also explains why the lesson stresses it from the start - keeping "stable outward" and "convenient inward" apart is the prerequisite for using the whole project well.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> log and console: two unglamorous helpers <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p><span class="mono">common/log.{h,cpp}</span> provides <strong>leveled logging</strong>: <span class="mono">LOG_INF</span> / <span class="mono">LOG_WRN</span> / <span class="mono">LOG_ERR</span> / <span class="mono">LOG_DBG</span> map to info, warning, error, and debug, all emitted through a <span class="mono">common_log</span> backed by a worker thread (asynchronous printing, so the main thread is not slowed). When debugging, raise the log level and print a few more <span class="mono">LOG_DBG</span> lines, and you can see exactly what happens at each step of model loading, batching, and sampling - far cleaner than scattering <span class="mono">printf</span> everywhere. The log level can be tuned with <span class="mono">-v</span> or an environment variable, no recompile needed.</p>
+    <p><span class="mono">common/console.{h,cpp}</span> handles <strong>terminal interaction and coloring</strong>: <span class="mono">console::set_display(...)</span> switches display categories (prompt, user input, error, each with its own color), and <span class="mono">console::readline(...)</span> handles a line of input (including multi-line and UTF-8). The colored, input-capable interactive interface in <span class="mono">llama-cli</span> is held up by exactly this. Neither tool is "core", yet both genuinely make the tools pleasant to use and easy to debug - also part of common "packaging the chores". When you debug an interactive session, the colors showing correctly and backspace and UTF-8 input not garbling all come from this unglamorous wrapper.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li><span class="mono">common/</span> is the <strong>shared glue layer</strong> for llama.cpp's bundled tools, wrapping the raw C API into handy C++; it is <strong>not</strong> the public API (no ABI-stability promise), and third-party bindings should use <span class="mono">llama.h</span> directly.</li>
+    <li><span class="mono">common_params</span> is one big struct holding every knob; <span class="mono">common_init()</span> does global init, and <span class="mono">common_init_from_params(params)</span> produces a <span class="mono">common_init_result</span> (model + context + sampler).</li>
+    <li>Command line: each option is a <span class="mono">common_arg</span> (chainable <span class="mono">.set_examples/.set_env/.set_excludes</span>); <span class="mono">common_params_parse(argc, argv, params, ex)</span> fills argv into <span class="mono">common_params</span> per <span class="mono">enum llama_example</span>.</li>
+    <li>Sampling: <span class="mono">common_sampler</span> wraps L21's <span class="mono">llama_sampler</span> chain plus L23's GBNF grammar into one object; <span class="mono">common_sampler_init</span> builds the chain in <span class="mono">samplers</span> order, and <span class="mono">common_sampler_sample</span> samples in one step. cli/server use this layer, not the raw sampler.</li>
+    <li>Download: <span class="mono">-hf user/repo:tag</span> becomes a local file via <span class="mono">common_download_split_repo_tag</span> + the HF cache; first run downloads, later runs hit <span class="mono">~/.cache/llama.cpp/</span>.</li>
+    <li>Small helpers: <span class="mono">common/log</span> gives leveled logging (<span class="mono">LOG_INF/WRN/ERR/DBG</span>, async), and <span class="mono">common/console</span> handles terminal coloring and interactive input - a real relief when debugging.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  common's design philosophy in a phrase: <strong>reuse over rewrite</strong>. It invents no new mechanism; it just lifts the actions every tool repeats - fill params, configure sampling, download models, print logs - into one place, so cli/server's <span class="mono">main()</span> shrinks to something you can read at a glance. But it deliberately does <strong>not</strong> disguise itself as an outward interface: the stable contract is left to <span class="mono">llama.h</span>, and common only does "handy on the inside". This split of "stable outward, convenient inward" is the same thinking as L25's "stable surface plus free interior" - only this time, common stands on the "convenient" end. Grasp this layer and Part 5's coming cli and server are just buildings each raised on top of common. Master it and you will find the coming tool lessons are mostly about "how to assemble common's parts", not yet another brand-new mechanism. In the end, what common teaches is a kind of engineering taste - "lift the repeated chores out, keep the stable promise at the boundary" - and that sense of where to draw the line between "stable outward" and "convenient inward" is worth more than memorizing any single function name.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. Is common part of llama.cpp's public API?</div>
+  <ol class="opts">
+    <li>Yes: third-party language bindings should all depend on common directly</li>
+    <li>Yes: like include/llama.h, it is a stable outward contract</li>
+    <li>No: it is an internal shared library for the project's own tools, with no ABI-stability promise</li>
+    <li>Half: it depends on a compile-time switch</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. common is a tool-shared internal convenience library; its layouts and signatures change as the project needs, with no ABI-stability promise. The stable outward contract is include/llama.h, which third-party bindings should target directly.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Who turns the command-line argv into a filled common_params?</div>
+  <ol class="opts">
+    <li>Nobody; main() hand-writes a big pile of if-else branches</li>
+    <li>common_init(): it parses the command line as part of global init</li>
+    <li>common_sampler_init: it parses all sampling-related arguments</li>
+    <li>common_params_parse: it picks the option set by enum llama_example and calls each common_arg callback to write fields</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common_params_parse(argc, argv, params, ex) walks argv, matches a common_arg by name, and calls callbacks to write into common_params; the 4th arg ex (enum llama_example) decides which option set applies. common_init() only does global init (logging, build info).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. When llama-cli / llama-server sample, which layer do they use?</div>
+  <ol class="opts">
+    <li>the sampler implemented in the Python bindings</li>
+    <li>common_sampler: it wraps L21's llama_sampler chain and L23's GBNF grammar into one object</li>
+    <li>the raw llama_sampler_* directly, bypassing common entirely</li>
+    <li>each tool hand-writes its own separate sampler chain</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. cli/server use the common_sampler layer: common_sampler_init builds the chain in params.sampling.samplers order, and common_sampler_sample does logits, grammar, and sampling in one step. You can still recover the raw llama_sampler chain via common_sampler_get when needed.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>Say you are writing a Rust binding for llama.cpp: would you depend on common, or use include/llama.h only? Argue from common being inward-facing and carrying no ABI-stability promise.</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="25-c-api.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">C API 总览</span><span class="lang-en">The C API</span></div></a><a class="next" href="27-llama-cli.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">llama-cli</span><span class="lang-en">llama-cli</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

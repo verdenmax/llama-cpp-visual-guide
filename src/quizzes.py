@@ -1626,6 +1626,372 @@ QUIZZES = {
             },
         ],
     },
+    "25-c-api.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "llama_model 和 llama_context，哪个能被多个会话安全共享？",
+                    "en": "Of llama_model and llama_context, which can be safely shared across sessions?",
+                },
+                "opts": [
+                    {"zh": "llama_model：加载后只读，多个 context 可共用一份", "en": "llama_model: read-only after load, many contexts can share one copy"},
+                    {"zh": "llama_context：它装着会话状态，最适合共享", "en": "llama_context: it holds session state, best for sharing"},
+                    {"zh": "两个都不能共享，必须各自独立", "en": "neither can be shared, each must be independent"},
+                    {"zh": "两个都能随便共享，无所谓", "en": "both can be shared freely, it does not matter"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "llama_model 是只读知识（权重加载后不变），能被多个 context 共享，加载一次到处推理；llama_context 装的是每会话私有状态（KV cache、计算缓冲、采样位置），必须一个会话一个。",
+                    "en": "llama_model is read-only knowledge (weights never change after load), shareable across contexts - load once, infer in many places; llama_context holds per-session private state (KV cache, compute buffers, sampling position), so it must be one per session.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在典型调用序列里，tokenize 之后、sample 之前，缺了哪一步？",
+                    "en": "In the typical call sequence, what step sits between tokenize and sample?",
+                },
+                "opts": [
+                    {"zh": "decode 一遍计算图、取出 logits（llama_decode -> llama_get_logits）", "en": "decode the graph once and read the logits (llama_decode -> llama_get_logits)"},
+                    {"zh": "直接释放模型", "en": "free the model directly"},
+                    {"zh": "再加载一次词表", "en": "load the vocab again"},
+                    {"zh": "重新初始化后端", "en": "reinitialize the backend"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "顺序是 tokenize -> decode -> get_logits -> sample：分词得到 token 后，必须先 llama_decode 跑一遍计算图、用 llama_get_logits 取出每个 token 的分数，采样链才有分数可挑。",
+                    "en": "The order is tokenize -> decode -> get_logits -> sample: after tokenizing, you must llama_decode the graph and read per-token scores via llama_get_logits before the sampler chain has anything to pick from.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在 C++ 里想让句柄自动释放，最省心的做法是？",
+                    "en": "In C++, the tidiest way to release handles automatically is?",
+                },
+                "opts": [
+                    {"zh": "用 include/llama-cpp.h 的 _ptr 别名（unique_ptr，带匹配的 _free 删除器）", "en": "use include/llama-cpp.h's _ptr aliases (unique_ptr with matching _free deleters)"},
+                    {"zh": "什么都不做，句柄会被垃圾回收", "en": "do nothing, handles are garbage-collected"},
+                    {"zh": "在每个函数末尾手写 llama_free，绝不会忘", "en": "hand-write llama_free at the end of every function, never forgetting"},
+                    {"zh": "调用 llama_backend_free 一次性清掉所有句柄", "en": "call llama_backend_free to wipe all handles at once"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "include/llama-cpp.h 给每个句柄定义了 unique_ptr 别名（llama_model_ptr 等），删除器会调用匹配的 _free，句柄一出作用域就自动释放，不怕漏放或顺序写反。C/C++ 都没有 GC，手动 _free 容易出错。",
+                    "en": "include/llama-cpp.h defines a unique_ptr alias per handle (llama_model_ptr etc.) whose deleter calls the matching _free, so a handle frees the moment it leaves scope - no missed frees or wrong order. C/C++ has no GC, and manual _free is error-prone.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 llama.cpp 对外暴露的是 C 接口而不是 C++ 类？结合 ABI 稳定性和跨语言绑定（Python/Go/Rust/Node）说说 opaque 句柄起了什么作用。",
+                "en": "Why does llama.cpp expose a C interface rather than C++ classes? Drawing on ABI stability and cross-language bindings (Python/Go/Rust/Node), explain what the opaque handles buy you.",
+            },
+        ],
+    },
+    "26-common.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "common 是 llama.cpp 公共 API 的一部分吗？",
+                    "en": "Is common part of llama.cpp's public API?",
+                },
+                "opts": [
+                    {"zh": "不是：它是给自家工具用的内部共享库，没有 ABI 稳定承诺", "en": "No: it is an internal shared library for the project's own tools, with no ABI-stability promise"},
+                    {"zh": "是：它和 include/llama.h 一样是对外稳定契约", "en": "Yes: like include/llama.h, it is a stable outward contract"},
+                    {"zh": "是：第三方语言绑定都应该直接依赖 common", "en": "Yes: third-party language bindings should all depend on common directly"},
+                    {"zh": "算半个：取决于编译时是否开启某个开关", "en": "Half: it depends on a compile-time switch"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "common 是工具共享的内部便利库，结构体布局与签名会随项目需要改动，没有 ABI 稳定承诺；对外稳定契约是 include/llama.h，第三方绑定应直接对着它写。",
+                    "en": "common is a tool-shared internal convenience library; its layouts and signatures change as the project needs, with no ABI-stability promise. The stable outward contract is include/llama.h, which third-party bindings should target directly.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "谁负责把命令行 argv 变成填好的 common_params？",
+                    "en": "Who turns the command-line argv into a filled common_params?",
+                },
+                "opts": [
+                    {"zh": "common_params_parse：按 enum llama_example 选定选项集，逐个调用 common_arg 的回调写入字段", "en": "common_params_parse: it picks the option set by enum llama_example and calls each common_arg callback to write fields"},
+                    {"zh": "common_init()：它在全局初始化时顺便解析命令行", "en": "common_init(): it parses the command line as part of global init"},
+                    {"zh": "common_sampler_init：它解析所有采样相关的参数", "en": "common_sampler_init: it parses all sampling-related arguments"},
+                    {"zh": "没有谁，main() 里手写一大堆 if-else 分支", "en": "Nobody; main() hand-writes a big pile of if-else branches"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "common_params_parse(argc, argv, params, ex) 遍历 argv、按名字匹配 common_arg、调用回调写进 common_params；第 4 个参数 ex（enum llama_example）决定这次认哪套选项。common_init() 只做全局初始化（日志、build 信息）。",
+                    "en": "common_params_parse(argc, argv, params, ex) walks argv, matches a common_arg by name, and calls callbacks to write into common_params; the 4th arg ex (enum llama_example) decides which option set applies. common_init() only does global init (logging, build info).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli / llama-server 做采样时，用的是哪一层？",
+                    "en": "When llama-cli / llama-server sample, which layer do they use?",
+                },
+                "opts": [
+                    {"zh": "common_sampler：它把 L21 的 llama_sampler 链和 L23 的 GBNF 语法裹成一个对象", "en": "common_sampler: it wraps L21's llama_sampler chain and L23's GBNF grammar into one object"},
+                    {"zh": "直接用裸 llama_sampler_*，完全不经过 common", "en": "the raw llama_sampler_* directly, bypassing common entirely"},
+                    {"zh": "每个工具各自手写一条独立的采样链", "en": "each tool hand-writes its own separate sampler chain"},
+                    {"zh": "Python 绑定里实现的采样器", "en": "the sampler implemented in the Python bindings"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "cli/server 用的是 common_sampler 这层：common_sampler_init 按 params.sampling.samplers 的顺序建链，common_sampler_sample 一步完成取分、过语法、采样。需要时还能用 common_sampler_get 取回底层裸 llama_sampler 链。",
+                    "en": "cli/server use the common_sampler layer: common_sampler_init builds the chain in params.sampling.samplers order, and common_sampler_sample does logits, grammar, and sampling in one step. You can still recover the raw llama_sampler chain via common_sampler_get when needed.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "假设你要为 llama.cpp 写一个 Rust 绑定：你会依赖 common，还是只用 include/llama.h？结合 common“对内不对外”、没有 ABI 稳定承诺这两点，说说你的理由。",
+                "en": "Say you are writing a Rust binding for llama.cpp: would you depend on common, or use include/llama.h only? Argue from common being inward-facing and carrying no ABI-stability promise.",
+            },
+        ],
+    },
+    "27-llama-cli.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "现代 llama-cli 内部复用了哪个组件的引擎？",
+                    "en": "Which component's engine does a modern llama-cli reuse internally?",
+                },
+                "opts": [
+                    {"zh": "server-context（server_context）：cli #include server-context.h 并链接 server-context，与 server 同引擎、异壳", "en": "server-context (server_context): cli #includes server-context.h and links server-context, sharing server's engine with a different shell"},
+                    {"zh": "它有一份完全独立的裸 llama_decode 主循环，与 server 无关", "en": "it has a fully standalone bare llama_decode main loop, unrelated to server"},
+                    {"zh": "Python 绑定提供的引擎", "en": "an engine provided by the Python bindings"},
+                    {"zh": "ggml 的计算图执行器，绕过 llama 层", "en": "ggml's graph executor, bypassing the llama layer"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "现代 cli 不再自带裸主循环：cli.cpp #include 了 server-common.h / server-context.h / server-task.h，CMake 也链接 server-context，直接复用 server 的 server_context（slot/task）。cli 与 server 是“同引擎、异壳”。",
+                    "en": "A modern cli no longer carries its own bare loop: cli.cpp #includes server-common.h / server-context.h / server-task.h and CMake links server-context, reusing server's server_context (slot/task). cli and server are 'same engine, different shells'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli 的生成主循环靠什么停下来？",
+                    "en": "What makes llama-cli's generation main loop stop?",
+                },
+                "opts": [
+                    {"zh": "三者之一：n_predict 写满、模型吐出 EOG 结束符、或交互模式下命中反向提示（antiprompt）", "en": "any of three: n_predict filled, the model emits an EOG token, or a reverse prompt (antiprompt) is hit in interactive mode"},
+                    {"zh": "只有一种：必须等模型自己吐出 EOG", "en": "only one: it must wait for the model to emit EOG"},
+                    {"zh": "固定生成 2048 个 token 后无条件停止", "en": "it always stops unconditionally after exactly 2048 tokens"},
+                    {"zh": "由操作系统的定时器中断决定", "en": "an operating-system timer interrupt decides"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "三个停止条件：n_predict 计数归零（你设的长度上限）、llama_vocab_is_eog 判定的结束符（模型自己喊停）、交互模式下命中你设的反向提示。忘了设 -n 又遇上模型不吐 EOG，就可能一直生成。",
+                    "en": "Three stop conditions: n_predict counting to zero (your length cap), an end-of-generation token detected by llama_vocab_is_eog (the model stopping itself), or hitting your reverse prompt in interactive mode. Forget -n and meet a model that will not emit EOG, and it may run forever.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-cli 怎么把命令行变成内部配置？",
+                    "en": "How does llama-cli turn the command line into internal config?",
+                },
+                "opts": [
+                    {"zh": "common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) 把 argv 填进 common_params（L26）", "en": "common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) fills argv into common_params (L26)"},
+                    {"zh": "cli 自己手写一大堆 if-else 直接解析 argv", "en": "cli hand-writes a big pile of if-else to parse argv itself"},
+                    {"zh": "从一个 JSON 配置文件读取，命令行被忽略", "en": "it reads a JSON config file; the command line is ignored"},
+                    {"zh": "llama_model_load_from_file 顺便解析命令行", "en": "llama_model_load_from_file parses the command line along the way"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "cli 复用 common 的参数解析：common_params_parse 按第 4 个参数 LLAMA_EXAMPLE_CLI 选定 cli 的选项集，逐个调用 common_arg 回调把 argv 写进 common_params，再交给 common_init_from_params 产出 model+ctx+sampler。",
+                    "en": "cli reuses common's arg parsing: common_params_parse picks cli's option set via the 4th argument LLAMA_EXAMPLE_CLI, calls each common_arg callback to write argv into common_params, then hands it to common_init_from_params to produce model+ctx+sampler.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "既然 cli 和 server 复用同一台 server_context 引擎、只是外壳不同，试着说说：把“引擎”与“外壳”分开，对维护和加新特性各有什么好处？如果要再写一个 gRPC 版的 llama 服务，你会怎么搭？",
+                "en": "Since cli and server reuse the same server_context engine and differ only in shell, explain: what does separating 'engine' from 'shell' buy you for maintenance and for adding features? If you had to write a gRPC version of a llama service, how would you structure it?",
+            },
+        ],
+    },
+    "28-llama-server.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "连续批处理（continuous batching）的核心做法是什么？",
+                    "en": "What is the core mechanism of continuous batching?",
+                },
+                "opts": [
+                    {"zh": "把多个活跃 slot 的 token 用 common_batch_add(..., {slot.id}) 拼进同一个 batch，一次 llama_decode 同时推进所有序列", "en": "pack many active slots' tokens into one batch via common_batch_add(..., {slot.id}), and one llama_decode advances all sequences at once"},
+                    {"zh": "为每条请求开一个独立进程，各自加载一份权重并行跑", "en": "spawn an independent process per request, each loading its own weights and running in parallel"},
+                    {"zh": "把请求排成队列，GPU 严格一条接一条地处理", "en": "queue the requests and have the GPU process them strictly one after another"},
+                    {"zh": "把模型权重复制 N 份到显存，每份服务一条请求", "en": "copy the model weights N times into VRAM, one copy per request"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "连续批处理把处于 prefill / decode 的多个 slot 的 token 用 common_batch_add 打上各自的 seq_id 拼进同一 batch，一次 llama_decode 借注意力掩码同时推进所有活跃序列——一次前向、服务多人，这是 server 高吞吐的核心。复制权重/多进程恰恰是它要避免的。",
+                    "en": "Continuous batching tags each active slot's token with its seq_id via common_batch_add and packs them into one batch; one llama_decode then advances all active sequences using the attention mask - one forward, serve many, the heart of server throughput. Copying weights / many processes is exactly what it avoids.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "server 的 slot 数量由哪个参数决定？",
+                    "en": "Which parameter sets server's number of slots?",
+                },
+                "opts": [
+                    {"zh": "--parallel N（源码里的 n_parallel）", "en": "--parallel N (n_parallel in the source)"},
+                    {"zh": "--ctx-size / -c", "en": "--ctx-size / -c"},
+                    {"zh": "--threads / -t", "en": "--threads / -t"},
+                    {"zh": "--n-predict / -n", "en": "--n-predict / -n"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "--parallel N 开 N 个 slot（n_parallel），每个 slot 是一条独立并行序列，有自己的 seq_id + KV + 状态机。-c 设的是总上下文（再切给各 slot 成 n_ctx_slot），-t 是线程数，-n 是生成长度，都不决定 slot 数。",
+                    "en": "--parallel N opens N slots (n_parallel), each an independent parallel sequence with its own seq_id + KV + state machine. -c sets the total context (divided among slots as n_ctx_slot), -t is thread count, -n is generation length - none set the slot count.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-server 怎么做到兼容 OpenAI 客户端？",
+                    "en": "How does llama-server stay compatible with OpenAI clients?",
+                },
+                "opts": [
+                    {"zh": "server-chat 在 OpenAI 的 schema 与引擎内部表示间转换，暴露 /v1/chat/completions 等端点", "en": "server-chat converts between OpenAI's schema and the engine's internal representation, exposing endpoints like /v1/chat/completions"},
+                    {"zh": "它把请求转发给 OpenAI 的云端服务器", "en": "it forwards requests to OpenAI's cloud servers"},
+                    {"zh": "它要求客户端改用 llama.cpp 专有协议", "en": "it requires clients to switch to a llama.cpp proprietary protocol"},
+                    {"zh": "靠 llama.h 的 C API 直接说 HTTP", "en": "the llama.h C API speaks HTTP directly"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "server-chat 负责把 OpenAI 的 JSON schema（messages、tools 等）与引擎内部表示来回转换，并暴露 /v1/chat/completions 等与 OpenAI 一致的端点；于是现成的 OpenAI 客户端/SDK 只要把 base URL 指向 llama-server 就能用，无需改协议、更不经过 OpenAI 云端。",
+                    "en": "server-chat converts between OpenAI's JSON schema (messages, tools, ...) and the engine's internal representation and exposes OpenAI-identical endpoints like /v1/chat/completions; an existing OpenAI client/SDK just points its base URL at llama-server, with no protocol change and no detour through OpenAI's cloud.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "为什么 server 用“一份权重 + 多 slot + 连续批处理”，而不是“多进程、每进程一份权重”？请从显存占用和吞吐两个角度说明，并谈谈这套设计的代价（比如延迟、公平、实现复杂度）。",
+                "en": "Why does server use 'one set of weights + many slots + continuous batching' instead of 'many processes, one set of weights each'? Argue from VRAM usage and throughput, and discuss the costs of this design (e.g. latency, fairness, implementation complexity).",
+            },
+        ],
+    },
+    "29-quantize-tool.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "imatrix（重要性矩阵）是做什么用的？",
+                    "en": "What is the imatrix (importance matrix) for?",
+                },
+                "opts": [
+                    {"zh": "记录每个权重列的重要性（激活幅度），量化时把精度优先留给重要的列", "en": "records each weight column's importance (activation magnitude) so quantize keeps precision for important columns first"},
+                    {"zh": "把模型权重再压缩一倍，不损失任何精度", "en": "compresses the weights another 2x with zero precision loss"},
+                    {"zh": "记录每个 token 的生成概率，用于采样", "en": "records each token's generation probability for sampling"},
+                    {"zh": "存储模型的超参数（层数、维度等）", "en": "stores the model's hyperparameters (layers, dims, etc.)"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "imatrix 用校准文本跑模型、由 collect_imatrix 累计每个权重张量每列的激活幅度，得出哪些列“重要”。量化时把它喂进去（--imatrix），同样比特下精度优先留给重要列、误差推给不重要列，整体困惑度更低。它不额外压缩、也与采样/超参无关。",
+                    "en": "imatrix runs the model on calibration text and collect_imatrix accumulates each weight tensor's per-column activation magnitude, telling which columns are 'important'. Fed in at quantize time (--imatrix), at the same bits it keeps precision for important columns and pushes error onto unimportant ones, lowering overall perplexity. It does not compress further and is unrelated to sampling/hyperparameters.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "不真的压缩，只想试算量化后体积，用哪个旗标？",
+                    "en": "Which flag trial-computes the quantized size without actually compressing?",
+                },
+                "opts": [
+                    {"zh": "--dry-run（对应 params.dry_run）", "en": "--dry-run (params.dry_run)"},
+                    {"zh": "--keep-split", "en": "--keep-split"},
+                    {"zh": "--imatrix", "en": "--imatrix"},
+                    {"zh": "--output-tensor-type", "en": "--output-tensor-type"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "--dry-run（params.dry_run）只计算并打印量化后的最终体积、并不真的压，方便你在选档位时快速对比几个档位的体积。--keep-split 保持分片，--imatrix 喂重要性矩阵，--output-tensor-type 按张量定精度，都不是“只试算体积”。",
+                    "en": "--dry-run (params.dry_run) only computes and prints the final quantized size without really compressing, handy for comparing a few levels' sizes when choosing. --keep-split keeps shards, --imatrix feeds the importance matrix, --output-tensor-type sets per-tensor precision - none merely trial-compute size.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "L06/L12 和这一课（L29）的分工是什么？",
+                    "en": "How do L06/L12 and this lesson (L29) divide up?",
+                },
+                "opts": [
+                    {"zh": "L06/L12 讲量化的原理与字节布局；L29 讲怎么用工具压、以及 imatrix 怎么更高质量地压", "en": "L06/L12 cover quantization's principle and byte layout; L29 covers how to compress with the tool and how imatrix compresses with higher quality"},
+                    {"zh": "完全重复，L29 只是把前面再讲一遍", "en": "they fully overlap; L29 just repeats the earlier lessons"},
+                    {"zh": "L06/L12 讲工具用法，L29 讲底层数学", "en": "L06/L12 cover tool usage, L29 covers the underlying math"},
+                    {"zh": "L29 讲采样，和量化无关", "en": "L29 covers sampling, unrelated to quantization"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "L06/L12 是“懂原理”（为什么能压、各格式字节怎么排）；L29 是“会操作”（llama-quantize 一键压、各档位取舍、imatrix 用校准数据把同样比特花得更聪明）。两者互补，不重复。",
+                    "en": "L06/L12 is 'understand the principle' (why compression works, how each format's bytes are laid out); L29 is 'operate the tool' (one-command llama-quantize, level trade-offs, imatrix spending the same bits more cleverly via calibration data). They are complementary, not repetitive.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "你有一张 8GB 显存的显卡，想跑一个 13B 模型。结合这一课的“先看显存、再看用途、超低比特认 imatrix”，说说你会怎么选量化档位？为什么很多人说“同样大小宁可选大模型的低档量化”？",
+                "en": "You have an 8GB GPU and want to run a 13B model. Using this lesson's 'VRAM first, then use, ultra-low-bit demands imatrix', explain how you would pick a quant level. Why do many say 'at the same size, prefer a bigger model's lower level'?",
+            },
+        ],
+    },
+    "30-eval-bench.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "困惑度（perplexity）怎么算，越高好还是越低好？",
+                    "en": "How is perplexity computed, and is higher or lower better?",
+                },
+                "opts": [
+                    {"zh": "PPL = exp(平均负 log 概率)，越低越好（模型对真实文本越不“惊讶”）", "en": "PPL = exp(mean negative log probability), lower is better (the model is less 'surprised' by real text)"},
+                    {"zh": "PPL = 平均 token 数，越高越好", "en": "PPL = average token count, higher is better"},
+                    {"zh": "PPL = 每秒生成 token 数，越高越好", "en": "PPL = tokens generated per second, higher is better"},
+                    {"zh": "PPL = 模型参数量，越低越好", "en": "PPL = the model's parameter count, lower is better"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "困惑度对每步取模型给“真实下一词”的负 log 概率（惊讶度），求平均再取 exp：PPL = exp(平均负 log 概率)。越低表示模型对真实文本越自信、预测越准，所以越低越好。它量的是质量，不是速度（速度由 llama-bench 量）。",
+                    "en": "Perplexity takes, per step, the model's negative log probability of the 'real next word' (surprise), averages it, then exp's: PPL = exp(mean negative log prob). Lower means the model is more confident and accurate on real text, so lower is better. It measures quality, not speed (speed is llama-bench).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama-bench 的 pp 和 tg 分别量什么？",
+                    "en": "What do llama-bench's pp and tg each measure?",
+                },
+                "opts": [
+                    {"zh": "pp = prefill（读 prompt）吞吐；tg = decode（逐字生成）吞吐", "en": "pp = prefill (reading the prompt) throughput; tg = decode (token-by-token generation) throughput"},
+                    {"zh": "pp = 困惑度；tg = 准确率", "en": "pp = perplexity; tg = accuracy"},
+                    {"zh": "pp = 参数量；tg = 模型体积", "en": "pp = parameter count; tg = model size"},
+                    {"zh": "pp 和 tg 是同一个数的两种叫法", "en": "pp and tg are two names for the same number"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "pp（prompt processing，n_prompt）测一次性喂入 prompt 的 prefill 吞吐，并行度高、通常很快；tg（token generation，n_gen）测逐字 decode 的吞吐，每步依赖上一步、通常慢一截。两者性能特征不同（prefill 算力密集、decode 访存密集），所以要分开测。",
+                    "en": "pp (prompt processing, n_prompt) measures the prefill throughput of feeding the prompt at once - highly parallel, usually fast; tg (token generation, n_gen) measures token-by-token decode throughput - each step waits on the last, usually slower. Their performance characteristics differ (prefill compute-bound, decode memory-bound), so they are measured separately.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "选量化档为什么要同时看 ppl 和 bench？",
+                    "en": "Why look at both ppl and bench when choosing a quant level?",
+                },
+                "opts": [
+                    {"zh": "因为这是“质量 vs 速度”的取舍——只看一头会被误导", "en": "because it is a 'quality vs speed' trade-off - looking at only one misleads"},
+                    {"zh": "因为 ppl 和 bench 其实是同一个指标", "en": "because ppl and bench are actually the same metric"},
+                    {"zh": "因为 bench 能算出准确的困惑度", "en": "because bench can compute exact perplexity"},
+                    {"zh": "因为只有两个都看才能下载模型", "en": "because you can only download a model if you look at both"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "量化是一笔交易：换来更小体积和更快速度（bench 量到），代价是质量略降（ppl 量到）。只看速度会一路压到模型变笨，只看质量又享受不到量化的好处。把质量（ppl，越低越好）和速度（bench，越高越好）并排看，才能判断这笔交易划不划算。",
+                    "en": "Quantization is a trade: you gain smaller size and more speed (measured by bench) at the cost of slightly lower quality (measured by ppl). Speed only leads you to compress until the model is dumb; quality only and you miss quantization's gains. Reading quality (ppl, lower better) and speed (bench, higher better) side by side is the only way to judge whether the trade is worth it.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "你把一个模型从 fp16 量化到 Q4_K_M，发现 PPL 从 6.0 涨到 6.2、tg 吞吐翻倍。结合“两把尺子”和上一课的量化知识，说说你会不会采用这个量化档？还需要哪些信息才能更好地决定？",
+                "en": "You quantize a model from fp16 to Q4_K_M and find PPL rises from 6.0 to 6.2 while tg throughput doubles. Using the 'two rulers' and last lesson's quantization knowledge, would you adopt this quant level? What more information would help you decide better?",
+            },
+        ],
+    },
 }
 
 
