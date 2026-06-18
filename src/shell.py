@@ -112,6 +112,8 @@ PAGES = [
      "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
     ("33-backends-dispatch.html", "后端调度", "Backends & dispatch",
      "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
+    ("34-speculative-decoding.html", "投机解码", "Speculative decoding",
+     "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
 ]
 
 
@@ -612,6 +614,8 @@ SUBTITLES = {
                              "ggml-cuda: thread grid, tiled matmul, the memory hierarchy"),
     "33-backends-dispatch.html": ("ggml-backend：抽象层、注册与动态加载、调度、其它后端一览",
                                   "ggml-backend: the abstraction, registry & dynamic load, scheduling, the backend zoo"),
+    "34-speculative-decoding.html": ("draft model / n-gram 提候选 · target 并行验证 · 接受率",
+                                     "draft model / n-gram propose, target verifies in parallel, acceptance rate"),
 }
 
 

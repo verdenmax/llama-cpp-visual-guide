@@ -2175,6 +2175,67 @@ QUIZZES = {
             },
         ],
     },
+    "34-speculative-decoding.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "投机解码为什么能加速 decode？",
+                    "en": "Why can speculative decoding speed up decode?",
+                },
+                "opts": [
+                    {"zh": "decode 是访存密集（带宽瓶颈），一次前向并行验证 K 个 token 和生成 1 个几乎一样快", "en": "decode is memory-bound (bandwidth-bottlenecked), so one forward pass verifying K tokens is about as fast as generating 1"},
+                    {"zh": "草稿模型比 target 模型算得更准", "en": "the draft model computes more accurately than the target model"},
+                    {"zh": "它把模型权重压缩得更小", "en": "it compresses the model weights smaller"},
+                    {"zh": "它跳过了一部分注意力计算", "en": "it skips part of the attention computation"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "decode 阶段大部分时间花在把几 GB 权重从显存搬进来（L30/L32 的 memory-bound），算力有富余。所以一次 llama_decode 顺手并行验证 K 个候选 token，和只生成 1 个相比，额外成本极小。投机解码就是用一个小模型/n-gram 先猜一串、大模型一次前向并行验证，把串行的 N 步压成少数几次——省的是“等数据”的时间，不是“算”的量。",
+                    "en": "In decode most time goes to hauling several GB of weights in from VRAM (the memory-bound point of L30/L32), with compute to spare. So one llama_decode verifying K candidate tokens in parallel costs almost nothing extra versus generating just 1. Speculative decoding has a small model / n-gram guess a run, then the big model verify it in one parallel pass, compressing N serial steps into a few - saving 'waiting for data' time, not the amount of 'computing'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "投机解码会不会改变输出质量？为什么？",
+                    "en": "Does speculative decoding change output quality? Why?",
+                },
+                "opts": [
+                    {"zh": "不会——数学上等价于直接从 target 采样，草稿只影响速度、不参与最终决策", "en": "no - it is mathematically equivalent to sampling from the target; the draft affects only speed, not the final decision"},
+                    {"zh": "会变好，因为草稿模型补充了细节", "en": "it gets better, because the draft model adds detail"},
+                    {"zh": "会变差，因为用小模型替代了大模型", "en": "it gets worse, because a small model replaces the big one"},
+                    {"zh": "看运气，有时好有时坏", "en": "it is random, sometimes better sometimes worse"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "被接受的 token 都是 target 自己也会给出的（验证通过）；被拒位置用的是 target 自己的预测（bonus）。草稿只在“提议”环节出现，提议得好不好只影响接受率（速度），完全不决定“最终选哪个 token”。贪心下逐位必须精确匹配；带温度采样下 llama.cpp 在每个位置照常从 target 采一个 token、只有草稿和它完全相同才接受——发出去的永远是 target 自己采的那个，所以分布天然不变。所以开不开投机，输出分布完全一致——只换速度，不换质量。",
+                    "en": "Accepted tokens are ones the target itself would give (they passed verification); rejected positions use the target's own prediction (the bonus). The draft appears only in 'proposing', and how well it proposes affects only the acceptance rate (speed), never 'which token is final'. Greedy requires exact per-position matches; under temperature sampling llama.cpp samples a token from the target at each position as usual and accepts the draft only on an exact match with it - what is emitted is always the target's own sample, so the distribution is unchanged by construction. So the output distribution is identical whether speculation is on or off - trading only speed, not quality.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "什么情况下投机解码反而会变慢？",
+                    "en": "When does speculative decoding get slower instead?",
+                },
+                "opts": [
+                    {"zh": "接受率低时——草稿老被拒，每轮白跑一遍小模型，得不偿失", "en": "when the acceptance rate is low - the draft keeps getting rejected, wasting a small-model run each round"},
+                    {"zh": "序列太短时", "en": "when the sequence is too short"},
+                    {"zh": "显存太大时", "en": "when there is too much VRAM"},
+                    {"zh": "永远不会变慢", "en": "it never gets slower"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "加速比由接受率决定：平均接受 m 个 -> 每次前向推进约 m+1 个 token。接受率低时草稿老被拒，等于每轮都白跑一遍草稿模型、还多搬一次草稿 token 的 KV，反而更慢。所以任务越“可预测”（代码、翻译、改写）越划算，越“发散”（创意写作、高温采样）越容易亏。实用判断：看 llama.cpp 打印的接受率，低于约 0.3 就考虑关掉——别猜，去量（L30）。",
+                    "en": "The speedup is set by the acceptance rate: m accepted on average -> each forward advances about m+1 tokens. When acceptance is low the draft keeps being rejected, so each round wastes a draft-model run plus extra KV for the draft tokens, making it slower. So the more 'predictable' the task (code, translation, rewriting) the more it pays; the more 'divergent' (creative writing, high-temperature sampling) the easier it loses. Practical test: watch llama.cpp's printed acceptance rate; below about 0.3, consider turning it off - do not guess, measure (L30).",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "投机解码的精髓是“提议 + 验证”：用一个便宜的近似（小模型/n-gram）先猜，再用昂贵但权威的本体（target）一次并行验证、猜错也不亏。请说说这个模式和计算机系统里的其它“投机”有什么共性（比如 CPU 分支预测、数据库乐观锁、预取）；再想想：为什么它必须满足“验证比生成便宜”才划算？如果验证和生成一样贵，这套还成立吗？",
+                "en": "Speculative decoding's essence is 'propose + verify': a cheap approximation (small model / n-gram) guesses first, then the expensive but authoritative original (the target) verifies in one parallel pass, losing nothing if wrong. Discuss what this pattern shares with other 'speculation' in computer systems (e.g. CPU branch prediction, database optimistic locking, prefetch); then consider: why must 'verifying is cheaper than generating' hold for it to pay off? If verifying were as expensive as generating, would the scheme still work?",
+            },
+        ],
+    },
 }
 
 
