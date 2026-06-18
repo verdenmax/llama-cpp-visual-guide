@@ -106,6 +106,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("30-eval-bench.html", "评测与基准", "Evaluation & benchmarks",
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
+    ("31-cpu-backend.html", "CPU 后端", "The CPU backend",
+     "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
 ]
 
 
@@ -600,6 +602,8 @@ SUBTITLES = {
                               "llama-quantize + imatrix: shrink the model, keep quality via an importance matrix"),
     "30-eval-bench.html": ("perplexity 量质量、llama-bench 量速度：选模型/量化档的两把尺子",
                            "perplexity for quality, llama-bench for speed: the two rulers for choosing models/quants"),
+    "31-cpu-backend.html": ("ggml-cpu：从标量到 SIMD、量化点积、多线程",
+                            "ggml-cpu: scalar to SIMD, quantized dot product, multithreading"),
 }
 
 

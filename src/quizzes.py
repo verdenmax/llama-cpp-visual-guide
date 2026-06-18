@@ -1992,6 +1992,67 @@ QUIZZES = {
             },
         ],
     },
+    "31-cpu-backend.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "AVX2 的 SIMD 点积相对“标量一个一个乘”，加速主要来自哪里？",
+                    "en": "Where does AVX2 SIMD dot product's speedup over 'scalar, one multiply at a time' mainly come from?",
+                },
+                "opts": [
+                    {"zh": "一条指令同时对一排（如 8 个 float）做乘加，占满本来闲置的宽向量单元", "en": "one instruction does multiply-add on a whole row (e.g. 8 floats) at once, filling the otherwise-idle wide vector units"},
+                    {"zh": "它把浮点改成更低精度，所以结果不一样但更快", "en": "it switches floats to lower precision, so results differ but it is faster"},
+                    {"zh": "它跳过了一部分乘加、少算了一些项", "en": "it skips some multiply-adds, computing fewer terms"},
+                    {"zh": "它把计算搬到了 GPU 上", "en": "it moves the computation onto the GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "SIMD 是数据并行：同样的乘加次数，但一条指令（如 _mm256_fmadd_ps）同时处理 8 路，把核内本来闲着的宽向量单元用满。它不改变结果（标量参考版是正确性基准，向量版必须逐位对齐），也不跳过任何项、更不搬到 GPU——只是把“一次一个”变成“一次一排”。",
+                    "en": "SIMD is data parallelism: the same number of multiply-adds, but one instruction (e.g. _mm256_fmadd_ps) handles 8 lanes at once, filling the core's otherwise-idle wide vector units. It does not change results (the scalar reference is the correctness baseline; the vector version must match bit for bit), skips nothing, and does not offload to the GPU - it just turns 'one at a time' into 'a row at once'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在量化点积 vec_dot_q4_0_q8_0 里，为什么要先把 4-bit 权重“解包”再算？",
+                    "en": "In the quantized dot product vec_dot_q4_0_q8_0, why 'unpack' the 4-bit weights before computing?",
+                },
+                "opts": [
+                    {"zh": "因为 SIMD 指令按字节/整型通道工作，4-bit 必须先还原成 int8 才能喂进向量乘加", "en": "because SIMD instructions work on byte/int lanes, so 4-bit must first be expanded to int8 to feed the vector multiply-add"},
+                    {"zh": "因为解包能让权重变得更准确", "en": "because unpacking makes the weights more accurate"},
+                    {"zh": "因为不解包就无法把模型载入内存", "en": "because without unpacking the model cannot be loaded into memory"},
+                    {"zh": "因为解包是为了把权重重新写回磁盘", "en": "because unpacking exists to write the weights back to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "权重以 4-bit 紧凑存储（省内存），但硬件的向量乘加按字节/整型通道工作，没有“4-bit 通道”。所以内核先用掩码取低 4 位、移位取高 4 位，把每个值还原成 int8（再减 8 偏移到有符号区间），才能用 _mm256_* 做整型点积。解包不改变数值精度，只是换个能被 SIMD 处理的摆放方式。",
+                    "en": "Weights are stored compactly at 4-bit (saving memory), but the hardware's vector multiply-add works on byte/int lanes - there is no '4-bit lane'. So the kernel masks the low nibble and shifts the high nibble to restore each value to int8 (then subtracts 8 to shift into the signed range) before doing an integer dot product with _mm256_*. Unpacking changes no numeric precision; it just re-lays-out the data into a form SIMD can process.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 把一次大矩阵乘切给多个线程时，靠的是什么性质？",
+                    "en": "When ggml splits one big matmul across threads, what property does it rely on?",
+                },
+                "opts": [
+                    {"zh": "输出各行的计算彼此独立、无依赖，所以可以任意切分给各线程并行", "en": "each output row's computation is independent with no dependencies, so it can be split freely across threads in parallel"},
+                    {"zh": "所有线程都算同一行，最后投票取多数", "en": "all threads compute the same row and vote for the majority at the end"},
+                    {"zh": "后一行必须等前一行算完，所以线程要排队", "en": "a later row must wait for the earlier row, so threads queue up"},
+                    {"zh": "线程数必须等于矩阵的行数", "en": "the thread count must equal the matrix's row count"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "能不能并行，先看“有没有依赖”。矩阵乘里各输出行互不依赖（算第 5 行不需要第 3 行的结果），所以可以把行平均分给 N 个线程、各算各的、最后汇合。每个算子用 params->ith/nth 算出“我负责哪几行”。若行间有依赖（如归约要先看全行），切分就得加同步、收益打折——这条判断在 L32 的 GPU 上同样适用。",
+                    "en": "Whether you can parallelize comes down to 'are there dependencies'. In matmul the output rows are mutually independent (row 5 does not need row 3's result), so rows can be split evenly among N threads, each computing its own, then merged. Each op uses params->ith/nth to work out 'which rows are mine'. If rows had dependencies (e.g. a reduction must see the whole row first), splitting needs synchronization and the payoff drops - the same test applies to the GPU in L32.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课说 CPU 性能优化常常不是“想出更聪明的算法”，而是“把本来就有、却闲着的硬件用起来”。用 SIMD、多线程、tiling 三招各举一例，说明它们分别在“占满”哪一种闲置资源；再想想：如果一个算子是“访存密集”而不是“算力密集”，这三招里哪一招最关键？",
+                "en": "This lesson says CPU optimization is often not 'invent a cleverer algorithm' but 'put to use hardware you already have sitting idle'. Using SIMD, multithreading, and tiling, give one example each of which idle resource they 'fill'; then consider: if an op is 'memory-bound' rather than 'compute-bound', which of the three matters most?",
+            },
+        ],
+    },
 }
 
 
