@@ -1992,6 +1992,189 @@ QUIZZES = {
             },
         ],
     },
+    "31-cpu-backend.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "AVX2 的 SIMD 点积相对“标量一个一个乘”，加速主要来自哪里？",
+                    "en": "Where does AVX2 SIMD dot product's speedup over 'scalar, one multiply at a time' mainly come from?",
+                },
+                "opts": [
+                    {"zh": "一条指令同时对一排（如 8 个 float）做乘加，占满本来闲置的宽向量单元", "en": "one instruction does multiply-add on a whole row (e.g. 8 floats) at once, filling the otherwise-idle wide vector units"},
+                    {"zh": "它把浮点改成更低精度，所以结果不一样但更快", "en": "it switches floats to lower precision, so results differ but it is faster"},
+                    {"zh": "它跳过了一部分乘加、少算了一些项", "en": "it skips some multiply-adds, computing fewer terms"},
+                    {"zh": "它把计算搬到了 GPU 上", "en": "it moves the computation onto the GPU"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "SIMD 是数据并行：同样的乘加次数，但一条指令（如 _mm256_fmadd_ps）同时处理 8 路，把核内本来闲着的宽向量单元用满。它不改变结果（标量参考版是正确性基准，向量版必须逐位对齐），也不跳过任何项、更不搬到 GPU——只是把“一次一个”变成“一次一排”。",
+                    "en": "SIMD is data parallelism: the same number of multiply-adds, but one instruction (e.g. _mm256_fmadd_ps) handles 8 lanes at once, filling the core's otherwise-idle wide vector units. It does not change results (the scalar reference is the correctness baseline; the vector version must match bit for bit), skips nothing, and does not offload to the GPU - it just turns 'one at a time' into 'a row at once'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "在量化点积 vec_dot_q4_0_q8_0 里，为什么要先把 4-bit 权重“解包”再算？",
+                    "en": "In the quantized dot product vec_dot_q4_0_q8_0, why 'unpack' the 4-bit weights before computing?",
+                },
+                "opts": [
+                    {"zh": "因为 SIMD 指令按字节/整型通道工作，4-bit 必须先还原成 int8 才能喂进向量乘加", "en": "because SIMD instructions work on byte/int lanes, so 4-bit must first be expanded to int8 to feed the vector multiply-add"},
+                    {"zh": "因为解包能让权重变得更准确", "en": "because unpacking makes the weights more accurate"},
+                    {"zh": "因为不解包就无法把模型载入内存", "en": "because without unpacking the model cannot be loaded into memory"},
+                    {"zh": "因为解包是为了把权重重新写回磁盘", "en": "because unpacking exists to write the weights back to disk"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "权重以 4-bit 紧凑存储（省内存），但硬件的向量乘加按字节/整型通道工作，没有“4-bit 通道”。所以内核先用掩码取低 4 位、移位取高 4 位，把每个值还原成 int8（再减 8 偏移到有符号区间），才能用 _mm256_* 做整型点积。解包不改变数值精度，只是换个能被 SIMD 处理的摆放方式。",
+                    "en": "Weights are stored compactly at 4-bit (saving memory), but the hardware's vector multiply-add works on byte/int lanes - there is no '4-bit lane'. So the kernel masks the low nibble and shifts the high nibble to restore each value to int8 (then subtracts 8 to shift into the signed range) before doing an integer dot product with _mm256_*. Unpacking changes no numeric precision; it just re-lays-out the data into a form SIMD can process.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 把一次大矩阵乘切给多个线程时，靠的是什么性质？",
+                    "en": "When ggml splits one big matmul across threads, what property does it rely on?",
+                },
+                "opts": [
+                    {"zh": "输出各行的计算彼此独立、无依赖，所以可以任意切分给各线程并行", "en": "each output row's computation is independent with no dependencies, so it can be split freely across threads in parallel"},
+                    {"zh": "所有线程都算同一行，最后投票取多数", "en": "all threads compute the same row and vote for the majority at the end"},
+                    {"zh": "后一行必须等前一行算完，所以线程要排队", "en": "a later row must wait for the earlier row, so threads queue up"},
+                    {"zh": "线程数必须等于矩阵的行数", "en": "the thread count must equal the matrix's row count"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "能不能并行，先看“有没有依赖”。矩阵乘里各输出行互不依赖（算第 5 行不需要第 3 行的结果），所以可以把行平均分给 N 个线程、各算各的、最后汇合。每个算子用 params->ith/nth 算出“我负责哪几行”。若行间有依赖（如归约要先看全行），切分就得加同步、收益打折——这条判断在 L32 的 GPU 上同样适用。",
+                    "en": "Whether you can parallelize comes down to 'are there dependencies'. In matmul the output rows are mutually independent (row 5 does not need row 3's result), so rows can be split evenly among N threads, each computing its own, then merged. Each op uses params->ith/nth to work out 'which rows are mine'. If rows had dependencies (e.g. a reduction must see the whole row first), splitting needs synchronization and the payoff drops - the same test applies to the GPU in L32.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课说 CPU 性能优化常常不是“想出更聪明的算法”，而是“把本来就有、却闲着的硬件用起来”。用 SIMD、多线程、tiling 三招各举一例，说明它们分别在“占满”哪一种闲置资源；再想想：如果一个算子是“访存密集”而不是“算力密集”，这三招里哪一招最关键？",
+                "en": "This lesson says CPU optimization is often not 'invent a cleverer algorithm' but 'put to use hardware you already have sitting idle'. Using SIMD, multithreading, and tiling, give one example each of which idle resource they 'fill'; then consider: if an op is 'memory-bound' rather than 'compute-bound', which of the three matters most?",
+            },
+        ],
+    },
+    "32-cuda-backend.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "CUDA kernel 里 blockIdx.x * blockDim.x + threadIdx.x 算的是什么？",
+                    "en": "In a CUDA kernel, what does blockIdx.x * blockDim.x + threadIdx.x compute?",
+                },
+                "opts": [
+                    {"zh": "当前线程在所有线程里的全局唯一编号（用它落到自己负责的数据上）", "en": "the current thread's globally unique index across all threads (used to land on its own data)"},
+                    {"zh": "这次 kernel 一共启动了多少个线程", "en": "how many threads this kernel launched in total"},
+                    {"zh": "shared memory 的大小（字节）", "en": "the size of shared memory in bytes"},
+                    {"zh": "当前 GPU 的计算能力（compute capability）", "en": "the current GPU's compute capability"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "blockIdx.x 是“第几个 block”、blockDim.x 是“每个 block 多少线程”、threadIdx.x 是“block 内第几个线程”，三者组合成一个全局唯一的线程号 tid。这几乎是每个 CUDA kernel 的第一行——所有线程跑同一份代码，只靠各自不同的 tid 落到不同数据上（SIMT）。数据比线程多时，再配 grid-stride 循环让每个线程隔 stride 多算几个。",
+                    "en": "blockIdx.x is 'which block', blockDim.x is 'threads per block', threadIdx.x is 'which thread within the block'; together they form a globally unique thread id tid. This is the first line of almost every CUDA kernel - all threads run the same code, landing on different data only through their different tid (SIMT). When data exceeds threads, a grid-stride loop lets each thread handle a few more, hopping by stride.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "分块矩阵乘把 A、B 的小块先搬进 __shared__，主要是为了什么？",
+                    "en": "In tiled matmul, why first load small tiles of A and B into __shared__?",
+                },
+                "opts": [
+                    {"zh": "让一个 block 的线程在快内存上反复复用这块数据，少碰慢的 global 显存", "en": "so a block's threads reuse that data in fast memory, touching slow global VRAM less"},
+                    {"zh": "因为 global 显存装不下整个矩阵", "en": "because global VRAM cannot hold the whole matrix"},
+                    {"zh": "因为 __shared__ 是唯一能做乘法的内存", "en": "because __shared__ is the only memory that can do multiplication"},
+                    {"zh": "为了把结果永久保存下来", "en": "to store the result permanently"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素写法里每个线程各自去 global 读一整行/一整列，相邻线程大量重复读、把带宽浪费光，瓶颈是“等数据”。分块让 block 内线程合作把一小块搬进片上的 shared memory（快一两个数量级），然后大家在这块快内存上反复取数；一块 T×T 的 tile 平均被复用约 T 倍，慢显存访问量大幅下降。这正是 L31 的“载入一次、复用多次”搬到了 GPU——CPU 复用 cache，GPU 复用 shared memory。",
+                    "en": "In the naive version each thread reads a whole row/column from global, neighboring threads duplicating reads and wasting bandwidth, so the bottleneck is 'waiting for data'. Tiling has the block's threads cooperatively load a small tile into on-chip shared memory (one-to-two orders faster), then reuse it repeatedly; a T x T tile is reused about T-fold, slashing slow global traffic. This is L31's 'load once, reuse many' moved to the GPU - the CPU reuses cache, the GPU reuses shared memory.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "flash attention 把 softmax 和矩阵乘融合成一个 kernel，主要省下了什么？",
+                    "en": "Flash attention fuses softmax and matmul into one kernel - what does it mainly save?",
+                },
+                "opts": [
+                    {"zh": "不必把巨大的 N×N 注意力分数矩阵写回显存再读回来，省显存与带宽", "en": "not writing the huge N x N attention-score matrix back to VRAM and reading it again - saving VRAM and bandwidth"},
+                    {"zh": "省掉了 softmax 里的指数运算", "en": "eliminating the exponential in softmax"},
+                    {"zh": "把注意力的计算量从 N×N 降到 N", "en": "reducing attention's compute from N x N down to N"},
+                    {"zh": "不再需要 Q、K、V 三个矩阵", "en": "no longer needing the Q, K, V matrices"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素注意力会先把 N×N 的分数矩阵整个算出来、写回显存，再读回做 softmax、再读回乘 V——把 N×N 在显存里写一遍读三遍，带宽全耗在这。flash attention 用“在线 softmax”分块地边算边修正，永不物化整个 N×N，只写出最终输出 O。注意：计算量并没变少（仍要算那些分数），省的是最贵的访存；序列越长省得越多，所以它对长上下文尤其关键。",
+                    "en": "Naive attention computes the whole N x N score matrix, writes it to VRAM, reads it back for softmax, reads it again to multiply V - writing N x N once and reading it three times burns the bandwidth. Flash attention uses an 'online softmax' to compute and correct tile by tile, never materializing the full N x N, writing out only the final O. Note: the compute is not reduced (those scores are still computed); what is saved is the costliest memory traffic, and the longer the sequence the more it saves - so it is especially key for long context.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课反复出现一个判断：很多内核是“访存密集”而非“算力密集”，瓶颈在带宽而非算力。请用这一课的三件事——分块矩阵乘（tiling 进 shared）、显存三级层级、flash attention（算子融合）——各说明一次它们是怎么和“带宽瓶颈”较劲的；再回想 L31 的 CPU tiling，说说 GPU 和 CPU 在“省访存”这件事上到底是不是同一个思路。",
+                "en": "One judgment recurs in this lesson: many kernels are 'memory-bound', not 'compute-bound' - the bottleneck is bandwidth, not compute. Using this lesson's three things - tiled matmul (tiling into shared), the three-level memory hierarchy, and flash attention (op fusion) - explain once each how they fight the 'bandwidth bottleneck'; then recall L31's CPU tiling and say whether the GPU and CPU are really following the same idea when it comes to 'saving memory traffic'.",
+            },
+        ],
+    },
+    "33-backends-dispatch.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "ggml-backend 这层后端抽象主要解决什么问题？",
+                    "en": "What problem does the ggml-backend abstraction mainly solve?",
+                },
+                "opts": [
+                    {"zh": "给所有硬件一套统一接口，让上层计算图不必关心具体是 CPU、CUDA 还是别的", "en": "one uniform interface for all hardware, so the upper compute graph need not care whether it is CPU, CUDA, or something else"},
+                    {"zh": "让矩阵乘算得更快", "en": "making matmul compute faster"},
+                    {"zh": "把模型权重压得更小", "en": "compressing model weights smaller"},
+                    {"zh": "替代 GGUF 文件格式", "en": "replacing the GGUF file format"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "后端抽象的核心价值是“解耦”：计算图（L09）只描述“要算什么”，每种后端（CPU/CUDA/Metal……）去实现同一套 ggml_backend_i 接口，负责“怎么算、在哪算”。于是上层代码不必为每种硬件改一遍——这是软件工程里“面向接口编程”的经典用法。它不负责把单个算子算得更快（那是 L31/L32 的内核的事），也和量化、文件格式无关。",
+                    "en": "The core value of the backend abstraction is decoupling: the compute graph (L09) only describes 'what to compute', and each backend (CPU/CUDA/Metal...) implements the same ggml_backend_i interface, handling 'how and where'. So upper-layer code is not rewritten per hardware - the classic 'program to an interface' move. It does not make a single op faster (that is L31/L32's kernels), and is unrelated to quantization or file format.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_load_all 在运行时用 dlopen / LoadLibraryW 动态加载各后端，好处是什么？",
+                    "en": "ggml_backend_load_all dynamically loads backends at runtime via dlopen / LoadLibraryW - what is the benefit?",
+                },
+                "opts": [
+                    {"zh": "一份主程序二进制，按机器实际硬件加载对应后端，缺某个库也不会启动失败", "en": "one main binary loads the matching backend per the machine's actual hardware, and a missing library does not prevent startup"},
+                    {"zh": "让程序启动得更快", "en": "making the program start up faster"},
+                    {"zh": "把所有后端静态编进一个巨大的二进制", "en": "statically compiling all backends into one huge binary"},
+                    {"zh": "自动把模型下载到本地", "en": "automatically downloading the model locally"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "动态加载把“这台机器有哪些后端”推迟到运行时决定：每个后端是一个动态库，ggml_backend_load_all 扫描并加载能用的、登记进注册表。意义是“一个包、到处能跑”——有 CUDA 卡就加载 CUDA 后端，没有就跳过，绝不会因为缺某个库而崩。这恰恰与“静态全编进去”相反（那样会拖入一堆冲突依赖、还挑机器）。",
+                    "en": "Dynamic loading defers 'which backends this machine has' to runtime: each backend is a shared library, and ggml_backend_load_all scans, loads the usable ones, and registers them. The point is 'one package runs everywhere' - load the CUDA backend if there is a CUDA card, skip it otherwise, never crashing over a missing library. This is the opposite of 'static-link everything' (which drags in conflicting deps and is machine-picky).",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_backend_sched（调度器）做的是什么？",
+                    "en": "What does ggml_backend_sched (the scheduler) do?",
+                },
+                "opts": [
+                    {"zh": "把一张计算图的算子分派到各后端执行，并在设备之间按需拷贝张量", "en": "dispatch a compute graph's ops across backends and copy tensors between devices as needed"},
+                    {"zh": "决定模型用哪种量化格式", "en": "decide which quantization format the model uses"},
+                    {"zh": "把多个 GPU 合并成一块更大的虚拟 GPU", "en": "merge multiple GPUs into one larger virtual GPU"},
+                    {"zh": "负责把 token 采样出来", "en": "handle sampling tokens"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "调度器把 L09/L10 的“静态图”接到“动态执行”：它逐个看算子——输入张量在哪个设备的 buffer 里、这个算子在哪个后端算最合适——据此分派，并在输入还在别的设备上时先插一次跨设备拷贝。为减少昂贵的拷贝，它倾向于把连续、同设备的算子成段分给同一后端。你用 -ngl 把前若干层放 GPU，背后就是它在按层分派、搬运边界张量。",
+                    "en": "The scheduler connects L09/L10's 'static graph' to 'dynamic execution': it walks each op - which device's buffer the inputs are in, which backend best suits the op - dispatches accordingly, and inserts a cross-device copy first when an input is still elsewhere. To cut expensive copies it tends to give consecutive same-device ops to one backend in segments. When you put the first N layers on the GPU with -ngl, this is what dispatches by layer and moves boundary tensors.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课说，加一个新后端 = 实现 ggml-backend-impl.h 里的接口（buffer 管理、supports_op、graph_compute）再注册进来，上层代码一行都不用改。请用这一课的“分层 + 抽象”视角，说说为什么 BLAS（借数学库）和 RPC（发去远程机器）也能套进同一套后端接口；再联系整个教程，举一两个别的“用一层抽象把变化挡在下面”的例子（比如 GGUF 之于权重、计算图之于算子）。",
+                "en": "This lesson says adding a new backend = implementing the interfaces in ggml-backend-impl.h (buffer management, supports_op, graph_compute) and registering it, with not one line of upper code changed. Using this lesson's 'layering + abstraction' lens, explain why BLAS (borrowing a math library) and RPC (sending to a remote machine) also fit the same backend interface; then, across the whole guide, give one or two other examples of 'using a layer of abstraction to hold change underneath' (e.g. GGUF for weights, the compute graph for ops).",
+            },
+        ],
+    },
 }
 
 

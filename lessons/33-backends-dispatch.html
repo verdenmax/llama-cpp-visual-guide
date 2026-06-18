@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>33 · 后端调度 / Backends &amp; dispatch - llama.cpp 图解教程</title>
+<meta name="description" content="第六部分 · 底层内核｜后端调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="33 · 后端调度 / Backends &amp; dispatch - llama.cpp 图解教程">
+<meta property="og:description" content="第六部分 · 底层内核｜后端调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="33 · 后端调度 / Backends &amp; dispatch - llama.cpp 图解教程">
+<meta name="twitter:description" content="第六部分 · 底层内核｜后端调度 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+}
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
+
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第六部分 · 底层内核</span><span class="lang-en">Part 6 · Low-level kernels</span></span>
+    <span class="pill">33 / 33</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第六部分 · 底层内核</span><span class="lang-en">Part 6 · Low-level kernels</span></div>
+    <h1><span class="lang-zh">后端调度</span><span class="lang-en">Backends &amp; dispatch</span></h1>
+  </div>
+  <div class="lang-zh">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+前两课分别看了 CPU（L31）和 CUDA（L32）各自怎么把算子算出来。可现实里，一台机器上常常同时有 CPU 和一块或多块 GPU——ggml 怎么把它们统一管起来，又怎么决定每个算子该交给谁算？这一课看 <span class="mono">ggml-backend</span> 这层后端抽象：它是第六部分的收束，也是把前面所有"怎么算"接回"在哪算"的关键一环。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">想想 L09/L10 那张计算图：一串算子，从输入流到输出。现在问题来了——这串算子里，有的最好在 GPU 上算（矩阵乘），有的可能留在 CPU 更省事；张量还可能这会儿在显存、那会儿在内存。谁来决定每个算子去哪、谁来在设备之间搬张量？答案就是 ggml 的后端抽象层和调度器。这一课会看它怎么用一套统一接口屏蔽硬件差异、怎么在运行时动态加载后端、怎么把一张图分派下去执行。举个最贴近的场景：你用一块显存不太够的显卡跑一个大模型，于是把一部分层放 GPU、剩下的留 CPU——这时每跑一遍模型，数据都要在 CPU 和 GPU 之间来回过好几道，靠的全是这一课要讲的后端与调度。理解了它，你才真正明白 <span class="mono">-ngl</span> 这个参数背后到底发生了什么。</p>
+<p style="color:var(--muted)">路线图：先看后端抽象（统一接口），再看注册与动态加载（一份二进制按硬件挑后端），然后是调度器（把图的算子分派到各后端、并按需搬张量），最后扫一眼 ggml 支持的其它后端。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  后端抽象解决的是一个朴素却关键的问题：让上层代码<strong>不必关心硬件</strong>。计算图（L09）只管"要算什么"，至于某个算子最终落在 CPU、CUDA 还是 Metal 上，由各后端的实现去管。这层抽象就像给所有硬件套了一个统一插座：上层对着插座写一次，换什么"电器"（后端）都能插上。把"算什么"和"在哪算"解耦，正是 ggml 能同时支持十来种硬件、还能让它们协同工作的根本。这一课不再钻某一种硬件的内核（那是 L31/L32 的事），而是退到更高一层，看这套"管理 + 调度"的骨架。说得再直白点：前两课像"显微镜"，凑近看一种硬件的内核长什么样；这一课像"地图"，俯瞰所有硬件是怎么被统一接进来、又怎么协同的。两种视角缺一不可——没有显微镜，你不懂性能到底从哪来；没有地图，你不懂这一堆五花八门的硬件怎么被同一份代码驱动。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  把计算图想成一叠<strong>工单</strong>（每张是一个算子），后端就是各种<strong>工种的师傅</strong>（CPU 师傅、GPU 师傅……）。<span class="mono">ggml_backend_sched</span> 则是<strong>调度工头</strong>：他拿起每张工单，看看这活儿谁最合适、需要的料（输入张量）现在在谁手里，然后派给对应的师傅；要是料在 CPU 师傅手上、活儿却要 GPU 师傅做，工头就先把料搬过去。上层只管把一叠工单交给工头，至于具体派给谁、料怎么搬，全由这套抽象 + 调度兜住——这也是为什么你用 llama.cpp 时，只要用 <span class="mono">-ngl</span> 指定把几层放上 GPU，剩下的派活、搬料就全由这位"工头"在后台替你打理好了——你根本不用操心哪个算子具体跑在哪、张量又在什么时候被搬到哪里。
+</div>
+
+<h2>后端抽象：给所有硬件一个统一接口</h2>
+<p>一个 <span class="mono">ggml_backend</span> 代表"一个能跑算子的设备"，它打包了三样东西：一个 <strong>device</strong>（设备句柄）、一套 <strong>buffer</strong>（在该设备上分配/读写张量的内存）、以及一组<strong>算子实现</strong>（这块硬件怎么算 matmul、softmax……）。每种后端（CPU、CUDA、Metal……）都去实现同一套接口（<span class="mono">ggml-backend-impl.h</span> 里的 <span class="mono">ggml_backend_i</span>），于是上层的计算图只需对着这个抽象写，完全不用管底下到底是哪种硬件。这里的 <span class="mono">buffer</span> 是个容易被忽略的关键：一个张量的数据到底躺在 CPU 内存还是 GPU 显存里，就由它决定；同一个张量在 CPU buffer 和 GPU buffer 里是两份不同的内存，后面调度器跨设备搬的，正是这些 buffer 里的数据。设备还带一个类型，方便上层"按需要挑"：</p>
+<pre class="code"><span class="cm">// 设备类型 (ggml-backend.h)</span>
+<span class="kw">enum</span> ggml_backend_dev_type {
+    GGML_BACKEND_DEVICE_TYPE_CPU,    <span class="cm">// CPU</span>
+    GGML_BACKEND_DEVICE_TYPE_GPU,    <span class="cm">// 独立 GPU</span>
+    GGML_BACKEND_DEVICE_TYPE_ACCEL,  <span class="cm">// 加速器 (配合 CPU 用, 如 BLAS/AMX)</span>
+    <span class="cm">// ... 实际还有 IGPU(集成显卡) / META 等</span>
+};
+<span class="cm">// 挑一个 GPU 设备; 没有就回退到 CPU (用法见 ggml-backend-reg.cpp)</span>
+ggml_backend_dev_t dev = <span class="fn">ggml_backend_dev_by_type</span>(GGML_BACKEND_DEVICE_TYPE_GPU);
+<span class="kw">if</span> (!dev) dev = <span class="fn">ggml_backend_dev_by_type</span>(GGML_BACKEND_DEVICE_TYPE_CPU);</pre>
+<p>这套设计的好处，在 L31/L32 已经体现过一半：上层调 <span class="mono">matmul</span> 时根本不写"用 AVX2 还是 CUDA"，那是各后端实现里的事。后端抽象把这件事正式化——计算图（L09/L10）描述"做什么"，后端负责"怎么做、在哪做"。图和硬件之间彻底解耦：</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">上层</span><span class="name">计算图 / 模型</span></div><div class="ld">只描述算子和依赖 (L09/L10), 不关心硬件</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">中间</span><span class="name">ggml-backend 抽象</span></div><div class="ld">统一接口: device + buffer + 一组算子实现 (impl.h 里的几套接口)</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">底层</span><span class="name">各后端</span></div><div class="ld">CPU / CUDA / Metal / Vulkan ... 各自实现同一套接口</div></div>
+</div>
+
+<h2>注册与动态加载：一份二进制，按硬件挑后端</h2>
+<p>抽象有了，可程序怎么知道这台机器上有哪些后端？答案是<strong>运行时动态加载</strong>。每个后端编译成一个动态库（.so/.dll），程序启动时调 <span class="mono">ggml_backend_load_all()</span> 去扫描、把能用的后端库一个个加载进来、登记进一张注册表。底层真正干活的是 <span class="mono">dl_load_library</span>：</p>
+<pre class="code"><span class="cm">// 运行时加载所有可用后端 (ggml-backend-reg.cpp)</span>
+<span class="kw">void</span> <span class="fn">ggml_backend_load_all</span>();   <span class="cm">// 扫描并加载 cuda/metal/vulkan... 动态库</span>
+
+<span class="cm">// 底层加载单个库 (ggml-backend-dl.cpp), 跨平台两套</span>
+<span class="cm">// POSIX:</span>
+handle = <span class="fn">dlopen</span>(path, RTLD_NOW | RTLD_LOCAL);
+<span class="cm">// Windows:</span>
+handle = <span class="fn">LoadLibraryW</span>(path);</pre>
+<p>加载完，程序就能问注册表"现在有几个后端、几个设备"：<span class="mono">ggml_backend_reg_count()</span>、<span class="mono">ggml_backend_dev_count()</span>，再用上一节的 <span class="mono">ggml_backend_dev_by_type</span> 挑设备。这套动态加载的意义很实在：<strong>一份主程序二进制，按机器实际硬件在运行时加载对应后端</strong>——有 CUDA 卡就加载 CUDA 后端，没有就不加载，绝不会因为缺少某个库而启动失败。你可以把注册表想成一本"电话簿"：每加载进一个后端，它就在簿子上登记一条"我是谁、我有哪些设备、怎么找到我"。上层要用 GPU 时，不是直接去认 CUDA，而是翻这本簿子按类型查——正是这层间接，让"上层不认识具体硬件"能真正成立。</p>
+<div class="card detail">
+  <div class="tag">🔬 为什么用动态加载</div>
+  换个角度想：如果把所有后端都<strong>静态</strong>编进一个二进制，那它就得同时链接 CUDA、Vulkan、Metal、SYCL…… 一堆庞大又互相冲突的依赖，而且换台没有这些库的机器就跑不起来。动态加载把这件事推迟到运行时：发布一份精简的主程序，到了用户机器上，<strong>有什么硬件就加载什么后端</strong>。这也是为什么 llama.cpp 的预编译包能做到"一个包、到处能跑"——CUDA 后端在没有 N 卡的机器上只是没被加载，而不是让整个程序崩掉。
+</div>
+
+<h2>调度：把一张图的算子分派到各后端</h2>
+<p>有了多个后端，最后一个问题是：一张计算图（L09/L10）里的算子，谁来决定每个去哪个后端算、又在后端之间搬张量？这就是 <span class="mono">ggml_backend_sched</span>（调度器）的活儿。它的两个主要接口是：</p>
+<pre class="code"><span class="cm">// 建调度器, 交给它一组后端 (ggml-backend.h)</span>
+sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu}, ...);
+<span class="cm">// 把整张计算图分派到各后端执行</span>
+<span class="fn">ggml_backend_sched_graph_compute</span>(sched, graph);</pre>
+<p>调度器拿到图后，逐个看每个算子：它的输入张量现在在哪个后端的 buffer 里？这个算子在哪个后端上算最合适（比如矩阵乘优先 GPU）？据此把算子<strong>指派</strong>给一个后端；如果某个输入还在别的设备上（算子要在 GPU 上跑、输入却还在 CPU 内存里），调度器就先插一次<strong>跨设备拷贝</strong>，把输入搬过去，再执行。整张图跑完，结果就落在该在的地方了。值得一提的是，调度器并不是把每个算子<strong>孤立</strong>地分派——跨设备拷贝很贵（又是访存，呼应 L30/L32），所以它会尽量把连续的、能在同一设备上算的算子<strong>成段</strong>地交给同一个后端，减少来回搬运。换句话说，它不只看"这个算子在哪算最快"，还看"怎么切这张图，整体的跨设备搬运最少"——这也是为什么 <span class="mono">-ngl</span> 一般是"前若干层整段放 GPU"，而不是东一层西一层地乱放。把"分派一个算子"这件事定格成一条流水看最清楚：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次算子分派</b>：调度器看一个算子的输入在哪、挑后端、必要时跨设备拷贝、再执行写回（示意）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 取算子</h5>
+      <div class="cellrow"><span class="vc">graph 里一个 op</span></div>
+      <div class="tlab">如一次 matmul</div></div>
+    <div class="op">看输入<br>在哪</div>
+    <div class="stn"><h5>② 查位置</h5>
+      <div class="cellrow"><span class="vc">输入在哪个 buffer</span></div>
+      <div class="tlab">CPU 内存? 显存?</div></div>
+    <div class="op">挑<br>后端</div>
+    <div class="stn"><h5>③ 选后端</h5>
+      <div class="cellrow"><span class="vc blue">输入在 GPU -> 派 GPU</span></div>
+      <div class="tlab">就近、最合适</div></div>
+    <div class="op">必要时<br>拷贝</div>
+    <div class="stn"><h5>④ 搬张量</h5>
+      <div class="cellrow"><span class="vc">跨设备拷贝输入</span></div>
+      <div class="tlab">若输入在别处</div></div>
+    <div class="op">执行<br>写回</div>
+    <div class="stn"><h5>⑤ 算并写回</h5>
+      <div class="cellrow"><span class="vc hot">该后端执行 -> 输出</span></div>
+      <div class="tlab">结果留在该设备</div></div>
+  </div>
+</div>
+<p>这正好把 L09/L10 那张"静态的图"接到了"动态的执行"上：图描述依赖，调度器按依赖顺序、结合每个张量的实际位置，把算子一个个落到具体硬件上跑。你平时用 <span class="mono">-ngl N</span> 把前 N 层放上 GPU、其余留 CPU，背后正是这个调度器在按层分派、并在 GPU 与 CPU 之间搬运边界处的张量。而当 GPU 显存实在放不下整个模型时，这种 CPU+GPU 混合执行往往是唯一能跑起来的办法——代价是边界处那几次跨设备拷贝，但总比完全跑不动强。这也解释了为什么 <span class="mono">-ngl</span> 调大调小，速度和显存占用会此消彼长：放上 GPU 的层越多，算得越快，但占的显存也越多、CPU-GPU 之间的搬运点也跟着变。</p>
+
+<h2>其它后端一览</h2>
+<p>除了已经细看的 CPU（L31）和 CUDA（L32），ggml 还实现了一大批后端，覆盖各家硬件。它们都遵循同一套 <span class="mono">ggml_backend_i</span> 接口，所以上层代码几乎不用改，换硬件只是换一个加载进来的后端：</p>
+<table class="t">
+  <tr><th>后端</th><th>面向的硬件 / 平台</th><th>典型场景</th></tr>
+  <tr><td><span class="mono">Metal</span></td><td>Apple GPU（macOS / iOS）</td><td>苹果设备上的首选 GPU 后端</td></tr>
+  <tr><td><span class="mono">Vulkan</span></td><td>跨平台 GPU</td><td>不限厂商的通用 GPU 加速</td></tr>
+  <tr><td><span class="mono">SYCL</span></td><td>Intel GPU</td><td>Intel 独显 / 集显</td></tr>
+  <tr><td><span class="mono">HIP</span></td><td>AMD GPU</td><td>A 卡（对标 CUDA）</td></tr>
+  <tr><td><span class="mono">CANN</span></td><td>华为昇腾 NPU</td><td>昇腾加速卡</td></tr>
+  <tr><td><span class="mono">OpenCL</span></td><td>跨平台（含移动 GPU）</td><td>移动 / 嵌入式（如高通 Adreno）</td></tr>
+  <tr><td><span class="mono">BLAS</span></td><td>CPU（借现成数学库）</td><td>用 BLAS 库加速 CPU 矩阵乘</td></tr>
+  <tr><td><span class="mono">RPC</span></td><td>远程机器 / 进程</td><td>把算子发到另一台机器上跑</td></tr>
+</table>
+<p>这张表最能说明后端抽象的价值：从苹果的 Metal 到华为的 CANN、从本机 GPU 到远程的 RPC，硬件天差地别，但对上层而言都只是"一个实现了 <span class="mono">ggml_backend_i</span> 的设备"。想支持一种新硬件，本质上就是再写一份后端实现、注册进来——上层的模型代码一行都不用动。事实上，这些后端里有不少是社区或硬件厂商贡献的：正因为接口是统一的，华为能自己来写 CANN、Intel 能来写 SYCL，而不必去动 ggml 的核心。一个好的抽象接口，等于给整个生态开了一扇"你来适配硬件、我保证上层不变"的门——这也是开源项目能在短时间里支持这么多硬件的组织学原因。</p>
+
+<h2>深入：特殊后端与如何加一个后端</h2>
+<p>最后两个折叠：看两个"不太像 GPU"的特殊后端，以及加一个新后端大致要实现什么。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> BLAS 和 RPC 这种"特殊后端"是什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>大多数后端对应一种"算力硬件"，但有两个例外很有意思。<strong>BLAS 后端</strong>并不直接写 kernel，而是把矩阵乘转交给系统里现成的高性能 BLAS 数学库（如 OpenBLAS、MKL）去算——相当于"借别人造好的轮子"，在某些 CPU 上比 ggml 自带的实现还快。<strong>RPC 后端</strong>更特别：它根本不在本地算，而是把算子通过网络<strong>发到另一台机器（或进程）</strong>上跑，再把结果取回来。有了它，你可以把一个单机装不下的大模型，拆到好几台机器的显存里分布式地跑。这两个后端都套着同一层 <span class="mono">ggml_backend_i</span> 接口，所以对上层来说，"借数学库"和"发去远程"与"在本地 GPU 上算"没有任何区别——这正是抽象的威力。顺便说，正因为有 RPC 这种后端，"在一台机器上调度、把重活发到另一台或多台去跑"这类玩法才成为可能；而 BLAS 后端则提醒我们：所谓"后端"未必对应一种新硬件，也可以只是"换一套更快的算法实现"。抽象层只关心"你能不能实现这套接口"，至于你背后到底是一块芯片、一个数学库、还是一根网线，它一概不问。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 加一个新后端大致要实现什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>想给 ggml 加一种新硬件，核心就是去实现 <span class="mono">ggml-backend-impl.h</span> 里定义的那几套接口（设备接口 + 后端接口），主要包括几类：<strong>buffer 管理</strong>（怎么在这块硬件上分配内存、把张量数据拷进拷出）、<strong>算子支持查询</strong>（<span class="mono">supports_op</span>：这个后端能不能算某个算子——不能的就让调度器回退给别的后端）、以及<strong>跑计算图</strong>（<span class="mono">graph_compute</span>：把分给我的这串算子真正算出来）。实现完、再注册进注册表，上层的模型和调度器就能立刻用上它，完全不用改。这套"定义好接口、谁都能往里插"的设计，正是 ggml 能在这么短时间里长出十几种后端的原因——也是软件工程里"面向接口编程"最实在的一个例子。</p>
+  </div>
+</details>
+
+<p>第六部分到这里就收束了。从 L31 的 CPU 指令（标量、SIMD、多线程）、L32 的 CUDA 线程（grid/block、分块、显存层级），到这一课的后端抽象与调度，"一个算子最终怎么落到硬件上算"这条线，算是从头讲透了。再往上回看：模型（第四部分）描述要算什么，计算图（第三部分）把它组织成依赖，后端（这一部分）把图落到具体硬件——三层一接，llama.cpp 跑模型的全貌就清楚了。下一站第七部分，我们去看一些进阶专题。学到这里，你已经把 llama.cpp 从"一个能跑模型的黑盒"，拆成了"一摞看得懂的层"——这本身就是啃源码最大的收获：再复杂的系统也不是一团乱麻，而是一层层抽象垒起来的，每一层只解决一个问题、只对上一层暴露一个干净的接口。把这套眼光带走，你以后去读任何一个大项目，都会比从前从容得多。</p>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>后端抽象 <span class="mono">ggml_backend</span> = 一个能跑算子的设备（device + buffer + 一组算子实现），各后端实现同一套 <span class="mono">ggml_backend_i</span>，上层计算图不关心硬件。</li>
+    <li>注册与动态加载：<span class="mono">ggml_backend_load_all</span> 运行时用 <span class="mono">dlopen</span> / <span class="mono">LoadLibraryW</span> 加载各后端动态库——一份二进制按实际硬件挑后端。</li>
+    <li>调度 <span class="mono">ggml_backend_sched</span>：把一张计算图（L09/L10）的算子分派到各后端，并在设备之间按需拷贝张量。</li>
+    <li>其它后端：Metal / Vulkan / SYCL / HIP / CANN / OpenCL / BLAS / RPC——同一接口，覆盖从苹果到华为、从本机到远程。</li>
+    <li>加新后端 = 实现 <span class="mono">ggml-backend-impl.h</span> 的接口（buffer、<span class="mono">supports_op</span>、<span class="mono">graph_compute</span>）并注册。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  这一课其实在讲软件工程里一个最经典的招式：<strong>用一层抽象，把"变化的部分"和"不变的部分"隔开</strong>。硬件年年在变（新 GPU、新 NPU、新指令集），但"计算图描述要算什么"这件事是稳定的。ggml 在这两者之间插了 <span class="mono">ggml_backend</span> 这层接口：上面的模型代码十年不用动，下面的硬件想加就加。L31/L32 让你看到了"内核怎么把硬件用满"，这一课让你看到"框架怎么把一堆不同的硬件统一管起来"——前者是深度，后者是广度，合起来才是 llama.cpp 能既快又到处能跑的全部秘密。带着这套"分层 + 抽象"的眼光回看整个教程，你会发现它处处都是：tokenizer 之于文本、GGUF 之于权重、计算图之于算子、后端之于硬件——每一层都在把复杂藏进一个干净的接口后面。
+</div>
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. ggml-backend 这层后端抽象主要解决什么问题？</div>
+  <ol class="opts">
+    <li>把模型权重压得更小</li>
+    <li>替代 GGUF 文件格式</li>
+    <li>给所有硬件一套统一接口，让上层计算图不必关心具体是 CPU、CUDA 还是别的</li>
+    <li>让矩阵乘算得更快</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。后端抽象的核心价值是“解耦”：计算图（L09）只描述“要算什么”，每种后端（CPU/CUDA/Metal……）去实现同一套 ggml_backend_i 接口，负责“怎么算、在哪算”。于是上层代码不必为每种硬件改一遍——这是软件工程里“面向接口编程”的经典用法。它不负责把单个算子算得更快（那是 L31/L32 的内核的事），也和量化、文件格式无关。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml_backend_load_all 在运行时用 dlopen / LoadLibraryW 动态加载各后端，好处是什么？</div>
+  <ol class="opts">
+    <li>让程序启动得更快</li>
+    <li>一份主程序二进制，按机器实际硬件加载对应后端，缺某个库也不会启动失败</li>
+    <li>自动把模型下载到本地</li>
+    <li>把所有后端静态编进一个巨大的二进制</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：B</strong>。动态加载把“这台机器有哪些后端”推迟到运行时决定：每个后端是一个动态库，ggml_backend_load_all 扫描并加载能用的、登记进注册表。意义是“一个包、到处能跑”——有 CUDA 卡就加载 CUDA 后端，没有就跳过，绝不会因为缺某个库而崩。这恰恰与“静态全编进去”相反（那样会拖入一堆冲突依赖、还挑机器）。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. ggml_backend_sched（调度器）做的是什么？</div>
+  <ol class="opts">
+    <li>把多个 GPU 合并成一块更大的虚拟 GPU</li>
+    <li>负责把 token 采样出来</li>
+    <li>决定模型用哪种量化格式</li>
+    <li>把一张计算图的算子分派到各后端执行，并在设备之间按需拷贝张量</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。调度器把 L09/L10 的“静态图”接到“动态执行”：它逐个看算子——输入张量在哪个设备的 buffer 里、这个算子在哪个后端算最合适——据此分派，并在输入还在别的设备上时先插一次跨设备拷贝。为减少昂贵的拷贝，它倾向于把连续、同设备的算子成段分给同一后端。你用 -ngl 把前若干层放 GPU，背后就是它在按层分派、搬运边界张量。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>这一课说，加一个新后端 = 实现 ggml-backend-impl.h 里的接口（buffer 管理、supports_op、graph_compute）再注册进来，上层代码一行都不用改。请用这一课的“分层 + 抽象”视角，说说为什么 BLAS（借数学库）和 RPC（发去远程机器）也能套进同一套后端接口；再联系整个教程，举一两个别的“用一层抽象把变化挡在下面”的例子（比如 GGUF 之于权重、计算图之于算子）。</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The last two lessons watched CPU (L31) and CUDA (L32) each compute ops on their own. But in reality a machine often has a CPU and one or more GPUs at once - how does ggml manage them uniformly, and how does it decide which op goes to whom? This lesson looks at the <span class="mono">ggml-backend</span> abstraction: the close of Part 6, and the key link tying all the earlier "how to compute" back to "where to compute".
+</p>
+<p style="color:var(--muted);margin-top:.4rem">Recall the compute graph from L09/L10: a chain of ops flowing from input to output. Now the question: within that chain, some ops are best on the GPU (matmul), some are simpler left on the CPU; and a tensor may be in VRAM now, in RAM later. Who decides where each op goes, and who moves tensors between devices? The answer is ggml's backend abstraction and scheduler. This lesson sees how it hides hardware differences behind one uniform interface, how it loads backends dynamically at runtime, and how it dispatches a whole graph for execution. A most relatable scenario: you run a big model on a card whose VRAM is a bit short, so you put some layers on the GPU and leave the rest on the CPU - now every pass of the model shuttles data back and forth between CPU and GPU several times, all riding on the backend and scheduler this lesson covers. Understand it and you truly see what happens behind that <span class="mono">-ngl</span> flag.</p>
+<p style="color:var(--muted)">Roadmap: first the backend abstraction (one uniform interface), then registry and dynamic loading (one binary picks backends by hardware), then the scheduler (dispatch a graph's ops to backends and move tensors as needed), and finally a quick tour of the other backends ggml supports.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The backend abstraction solves a plain but crucial problem: letting upper-layer code <strong>not care about hardware</strong>. The compute graph (L09) only says "what to compute"; whether a given op ends up on CPU, CUDA, or Metal is each backend's implementation's business. This abstraction is like fitting all hardware with one universal socket: the upper layer writes to the socket once, and any "appliance" (backend) plugs in. Decoupling "what to compute" from "where to compute" is exactly what lets ggml support a dozen kinds of hardware at once and have them work together. This lesson no longer digs into one hardware's kernels (that was L31/L32) but steps up a level to the "manage + schedule" skeleton. Put more plainly: the last two lessons were a "microscope", peering up close at what one hardware's kernel looks like; this lesson is a "map", looking down on how all the hardware is unified and made to cooperate. Both views are indispensable - without the microscope you do not see where performance comes from; without the map you do not see how this motley pile of hardware is driven by one codebase.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Picture the compute graph as a stack of <strong>work orders</strong> (each one an op), and backends as <strong>tradespeople</strong> of various crafts (a CPU hand, a GPU hand, ...). <span class="mono">ggml_backend_sched</span> is the <strong>dispatching foreman</strong>: he picks up each order, sees who suits the job and where the materials (input tensors) currently are, then assigns it to the right hand; if the materials are with the CPU hand but the job needs the GPU hand, he moves them over first. The upper layer just hands the foreman a stack of orders; who gets each one and how materials move is all absorbed by this abstraction + scheduler - which is why, using llama.cpp, you only set <span class="mono">-ngl</span> for how many layers go on the GPU, and the rest - assigning the jobs, moving the materials - is quietly handled for you by this "foreman" in the background; you never have to worry which op runs where, or when a tensor gets moved.
+</div>
+
+<h2>The backend abstraction: one uniform interface for all hardware</h2>
+<p>A <span class="mono">ggml_backend</span> represents "a device that can run ops", bundling three things: a <strong>device</strong> handle, a set of <strong>buffers</strong> (memory to allocate/read/write tensors on that device), and a set of <strong>op implementations</strong> (how this hardware computes matmul, softmax, ...). Every backend (CPU, CUDA, Metal, ...) implements the same interface (<span class="mono">ggml_backend_i</span> in <span class="mono">ggml-backend-impl.h</span>), so the upper compute graph only writes to this abstraction and never minds which hardware is underneath. The <span class="mono">buffer</span> here is an easily-overlooked key: it decides whether a tensor's data sits in CPU RAM or GPU VRAM; the same tensor is two different chunks of memory in a CPU buffer versus a GPU buffer, and what the scheduler later moves across devices is exactly the data in these buffers. Devices also carry a type, so the upper layer can "pick by need":</p>
+<pre class="code"><span class="cm">// device types (ggml-backend.h)</span>
+<span class="kw">enum</span> ggml_backend_dev_type {
+    GGML_BACKEND_DEVICE_TYPE_CPU,    <span class="cm">// CPU</span>
+    GGML_BACKEND_DEVICE_TYPE_GPU,    <span class="cm">// discrete GPU</span>
+    GGML_BACKEND_DEVICE_TYPE_ACCEL,  <span class="cm">// accelerator (used with the CPU, e.g. BLAS/AMX)</span>
+    <span class="cm">// ... also IGPU (integrated GPU) / META, etc.</span>
+};
+<span class="cm">// pick a GPU device; fall back to CPU if none (usage in ggml-backend-reg.cpp)</span>
+ggml_backend_dev_t dev = <span class="fn">ggml_backend_dev_by_type</span>(GGML_BACKEND_DEVICE_TYPE_GPU);
+<span class="kw">if</span> (!dev) dev = <span class="fn">ggml_backend_dev_by_type</span>(GGML_BACKEND_DEVICE_TYPE_CPU);</pre>
+<p>Half the payoff of this design already showed up in L31/L32: when the upper layer calls <span class="mono">matmul</span> it never writes "AVX2 or CUDA" - that lives inside each backend's implementation. The backend abstraction formalizes this: the compute graph (L09/L10) describes "what to do", the backend handles "how and where". Graph and hardware are fully decoupled:</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">top</span><span class="name">compute graph / model</span></div><div class="ld">describes ops and dependencies only (L09/L10), hardware-agnostic</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">middle</span><span class="name">ggml-backend abstraction</span></div><div class="ld">uniform interface: device + buffer + a set of op impls (the interfaces in impl.h)</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">bottom</span><span class="name">backends</span></div><div class="ld">CPU / CUDA / Metal / Vulkan ... each implements the same interface</div></div>
+</div>
+
+<h2>Registry and dynamic loading: one binary, backends by hardware</h2>
+<p>We have the abstraction, but how does the program know which backends this machine has? The answer is <strong>runtime dynamic loading</strong>. Each backend compiles to a shared library (.so/.dll); at startup the program calls <span class="mono">ggml_backend_load_all()</span> to scan and load the usable backend libraries one by one and register them in a registry. The low-level worker is <span class="mono">dl_load_library</span>:</p>
+<pre class="code"><span class="cm">// load all available backends at runtime (ggml-backend-reg.cpp)</span>
+<span class="kw">void</span> <span class="fn">ggml_backend_load_all</span>();   <span class="cm">// scan and load cuda/metal/vulkan... shared libs</span>
+
+<span class="cm">// low-level single-library load (ggml-backend-dl.cpp), two platform paths</span>
+<span class="cm">// POSIX:</span>
+handle = <span class="fn">dlopen</span>(path, RTLD_NOW | RTLD_LOCAL);
+<span class="cm">// Windows:</span>
+handle = <span class="fn">LoadLibraryW</span>(path);</pre>
+<p>Once loaded, the program can ask the registry "how many backends, how many devices now": <span class="mono">ggml_backend_reg_count()</span>, <span class="mono">ggml_backend_dev_count()</span>, then pick a device with last section's <span class="mono">ggml_backend_dev_by_type</span>. The point of this dynamic loading is concrete: <strong>one main binary loads the matching backend at runtime per the machine's actual hardware</strong> - load the CUDA backend if there is a CUDA card, skip it otherwise, never failing to start over a missing library. Think of the registry as a "phone book": each loaded backend writes one entry - "who I am, what devices I have, how to reach me". When the upper layer wants a GPU, it does not go straight to CUDA but looks it up in the book by type - it is exactly this indirection that lets "the upper layer not know the concrete hardware" actually hold.</p>
+<div class="card detail">
+  <div class="tag">🔬 Why dynamic loading</div>
+  Flip it around: if all backends were compiled <strong>statically</strong> into one binary, that binary would have to link CUDA, Vulkan, Metal, SYCL... a pile of huge, mutually conflicting dependencies, and would not run on a machine lacking those libraries. Dynamic loading defers this to runtime: ship one slim main program, and on the user's machine <strong>load whatever backend matches whatever hardware is present</strong>. This is why llama.cpp's prebuilt packages can be "one package, runs everywhere" - on a machine with no NVIDIA card the CUDA backend is simply not loaded, rather than crashing the whole program.
+</div>
+
+<h2>Scheduling: dispatching a graph's ops across backends</h2>
+<p>With several backends, the last question is: in one compute graph (L09/L10), who decides which backend each op runs on, and who moves tensors between backends? That is <span class="mono">ggml_backend_sched</span>'s (the scheduler's) job. Its two main interfaces:</p>
+<pre class="code"><span class="cm">// build a scheduler, hand it a set of backends (ggml-backend.h)</span>
+sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu}, ...);
+<span class="cm">// dispatch the whole compute graph across backends</span>
+<span class="fn">ggml_backend_sched_graph_compute</span>(sched, graph);</pre>
+<p>Given the graph, the scheduler walks each op: which backend's buffer are its input tensors in now? Which backend best suits this op (matmul prefers GPU, say)? It <strong>assigns</strong> the op to a backend accordingly; if some input is still on another device (the op runs on GPU but the input is still in CPU memory), the scheduler first inserts a <strong>cross-device copy</strong> to move the input over, then executes. When the whole graph is done, results land where they should be. Worth noting: the scheduler does not dispatch each op in <strong>isolation</strong> - cross-device copies are expensive (memory traffic again, echoing L30/L32), so it tries to give consecutive ops that can run on the same device to one backend in <strong>segments</strong>, cutting the back-and-forth. In other words, it weighs not just "where does this op run fastest" but "how to cut this graph so total cross-device movement is least" - which is also why <span class="mono">-ngl</span> typically means "put the first several layers wholesale on the GPU" rather than scattering layers around. Freezing "dispatching one op" into a flow shows it clearest:</p>
+<div class="trace">
+  <div class="tcap"><b>Trace one op dispatch</b>: the scheduler checks where an op's inputs are, picks a backend, copies across devices if needed, then executes and writes back (illustrative).</div>
+  <div class="stations">
+    <div class="stn"><h5>1 take op</h5>
+      <div class="cellrow"><span class="vc">an op in the graph</span></div>
+      <div class="tlab">e.g. a matmul</div></div>
+    <div class="op">where are<br>inputs</div>
+    <div class="stn"><h5>2 locate</h5>
+      <div class="cellrow"><span class="vc">which buffer</span></div>
+      <div class="tlab">CPU RAM? VRAM?</div></div>
+    <div class="op">pick<br>backend</div>
+    <div class="stn"><h5>3 select</h5>
+      <div class="cellrow"><span class="vc blue">inputs on GPU -> GPU</span></div>
+      <div class="tlab">nearest, fittest</div></div>
+    <div class="op">copy if<br>needed</div>
+    <div class="stn"><h5>4 move</h5>
+      <div class="cellrow"><span class="vc">cross-device copy</span></div>
+      <div class="tlab">if input elsewhere</div></div>
+    <div class="op">run +<br>write</div>
+    <div class="stn"><h5>5 compute</h5>
+      <div class="cellrow"><span class="vc hot">backend runs -> output</span></div>
+      <div class="tlab">result stays there</div></div>
+  </div>
+</div>
+<p>This is exactly where L09/L10's "static graph" connects to "dynamic execution": the graph describes dependencies, and the scheduler, following them and each tensor's actual location, drops the ops one by one onto concrete hardware. When you use <span class="mono">-ngl N</span> to put the first N layers on the GPU and leave the rest on CPU, this scheduler is what dispatches by layer and shuttles boundary tensors between GPU and CPU. And when the GPU's VRAM truly cannot hold the whole model, this CPU+GPU hybrid execution is often the only way to run at all - at the cost of a few cross-device copies at the boundary, but far better than not running. It also explains why turning <span class="mono">-ngl</span> up or down trades speed against VRAM use: the more layers on the GPU, the faster it computes, but the more VRAM it takes, and the CPU-GPU handoff points shift too.</p>
+
+<h2>A tour of the other backends</h2>
+<p>Beyond the CPU (L31) and CUDA (L32) we examined closely, ggml implements a whole crowd of backends covering everyone's hardware. They all follow the same <span class="mono">ggml_backend_i</span> interface, so upper-layer code barely changes - switching hardware just means loading a different backend:</p>
+<table class="t">
+  <tr><th>Backend</th><th>Target hardware / platform</th><th>Typical use</th></tr>
+  <tr><td><span class="mono">Metal</span></td><td>Apple GPU (macOS / iOS)</td><td>the go-to GPU backend on Apple devices</td></tr>
+  <tr><td><span class="mono">Vulkan</span></td><td>cross-platform GPU</td><td>vendor-agnostic general GPU acceleration</td></tr>
+  <tr><td><span class="mono">SYCL</span></td><td>Intel GPU</td><td>Intel discrete / integrated graphics</td></tr>
+  <tr><td><span class="mono">HIP</span></td><td>AMD GPU</td><td>AMD cards (CUDA's counterpart)</td></tr>
+  <tr><td><span class="mono">CANN</span></td><td>Huawei Ascend NPU</td><td>Ascend accelerator cards</td></tr>
+  <tr><td><span class="mono">OpenCL</span></td><td>cross-platform (incl. mobile GPU)</td><td>mobile / embedded (e.g. Qualcomm Adreno)</td></tr>
+  <tr><td><span class="mono">BLAS</span></td><td>CPU (borrowing a math library)</td><td>accelerate CPU matmul via a BLAS library</td></tr>
+  <tr><td><span class="mono">RPC</span></td><td>remote machine / process</td><td>send ops to another machine to run</td></tr>
+</table>
+<p>This table best shows the value of the backend abstraction: from Apple's Metal to Huawei's CANN, from a local GPU to remote RPC, the hardware is worlds apart, yet to the upper layer each is just "a device implementing <span class="mono">ggml_backend_i</span>". Supporting a new piece of hardware is essentially writing one more backend implementation and registering it - not a single line of the upper model code needs to change. In fact, many of these backends were contributed by the community or hardware vendors: precisely because the interface is uniform, Huawei can write CANN themselves and Intel can write SYCL, without touching ggml's core. A good abstract interface opens a door for the whole ecosystem - "you adapt the hardware, I guarantee the upper layer stays put" - and that is the organizational reason an open-source project can support so much hardware so fast.</p>
+
+<h2>Deeper: special backends and how to add one</h2>
+<p>Two last folds: two "not very GPU-like" special backends, and roughly what adding a new backend takes.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> What are "special backends" like BLAS and RPC? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Most backends correspond to a piece of "compute hardware", but two exceptions are interesting. The <strong>BLAS backend</strong> does not write kernels itself; it hands matmul off to an existing high-performance BLAS math library on the system (OpenBLAS, MKL) - "borrowing someone else's ready-made wheel", and on some CPUs faster than ggml's own implementation. The <strong>RPC backend</strong> is more unusual: it does not compute locally at all but <strong>sends ops over the network to another machine (or process)</strong> to run, then fetches the results back. With it you can split a model too big for one machine across several machines' VRAM and run it distributed. Both wear the same <span class="mono">ggml_backend_i</span> interface, so to the upper layer "borrow a math library" and "send it remote" are no different from "compute on a local GPU" - exactly the power of abstraction. By the way, it is precisely because of a backend like RPC that tricks like "schedule on one machine and send the heavy work to another, or several others" become possible; and the BLAS backend reminds us that a "backend" need not correspond to new hardware at all - it can just be "a faster algorithm implementation". The abstraction only cares "can you implement this interface"; whether behind you is a chip, a math library, or a network cable, it never asks.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> What does adding a new backend take? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>To add a new piece of hardware to ggml, the core is implementing the interfaces defined in <span class="mono">ggml-backend-impl.h</span> (a device interface + a backend interface), mainly a few categories: <strong>buffer management</strong> (how to allocate memory on this hardware and copy tensor data in and out), <strong>op-support query</strong> (<span class="mono">supports_op</span>: can this backend compute a given op - if not, the scheduler falls back to another backend), and <strong>running the graph</strong> (<span class="mono">graph_compute</span>: actually compute the chain of ops assigned to me). Implement these, register it, and the upper model and scheduler can use it immediately with no changes. This "define the interface, anyone can plug in" design is why ggml grew a dozen backends in so short a time - and one of the most concrete examples of "program to an interface" in software engineering.</p>
+  </div>
+</details>
+
+<p>Part 6 closes here. From L31's CPU instructions (scalar, SIMD, multithreading), through L32's CUDA threads (grid/block, tiling, the memory hierarchy), to this lesson's backend abstraction and scheduling, the thread of "how one op finally lands on hardware to compute" has been told end to end. Zooming back out: the model (Part 4) describes what to compute, the compute graph (Part 3) organizes it into dependencies, and the backend (this part) lands the graph on concrete hardware - join the three layers and the whole picture of how llama.cpp runs a model is clear. Next stop, Part 7, where we look at some advanced topics. By here, you have taken llama.cpp from "a black box that runs models" to "a stack of legible layers" - and that is the biggest reward of reading source: however complex, a system is never a tangle but a stack of abstractions, each solving one problem and exposing one clean interface to the layer above. Carry this lens away and you will read any large project far more calmly than before.</p>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>The backend abstraction <span class="mono">ggml_backend</span> = a device that can run ops (device + buffer + a set of op impls); every backend implements the same <span class="mono">ggml_backend_i</span>, and the upper compute graph ignores hardware.</li>
+    <li>Registry and dynamic loading: <span class="mono">ggml_backend_load_all</span> uses <span class="mono">dlopen</span> / <span class="mono">LoadLibraryW</span> at runtime to load backend shared libs - one binary picks backends by actual hardware.</li>
+    <li>The scheduler <span class="mono">ggml_backend_sched</span>: dispatches a compute graph's (L09/L10) ops across backends and copies tensors between devices as needed.</li>
+    <li>Other backends: Metal / Vulkan / SYCL / HIP / CANN / OpenCL / BLAS / RPC - one interface, covering Apple to Huawei, local to remote.</li>
+    <li>Adding a backend = implement the <span class="mono">ggml-backend-impl.h</span> interfaces (buffer, <span class="mono">supports_op</span>, <span class="mono">graph_compute</span>) and register it.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  This lesson is really about one of software engineering's most classic moves: <strong>use a layer of abstraction to separate "what changes" from "what stays"</strong>. Hardware changes every year (new GPUs, new NPUs, new instruction sets), but "the compute graph describes what to compute" is stable. ggml inserts the <span class="mono">ggml_backend</span> interface between the two: the model code above need not change for a decade, and hardware below can be added at will. L31/L32 showed you "how a kernel fills the hardware"; this lesson showed you "how the framework unifies a crowd of different hardware" - the former is depth, the latter breadth, and together they are the whole secret of llama.cpp being both fast and runnable everywhere. Carry this "layering + abstraction" lens back over the whole guide and you will see it everywhere: the tokenizer for text, GGUF for weights, the compute graph for ops, the backend for hardware - each layer hiding complexity behind a clean interface.
+</div>
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What problem does the ggml-backend abstraction mainly solve?</div>
+  <ol class="opts">
+    <li>compressing model weights smaller</li>
+    <li>replacing the GGUF file format</li>
+    <li>one uniform interface for all hardware, so the upper compute graph need not care whether it is CPU, CUDA, or something else</li>
+    <li>making matmul compute faster</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The core value of the backend abstraction is decoupling: the compute graph (L09) only describes 'what to compute', and each backend (CPU/CUDA/Metal...) implements the same ggml_backend_i interface, handling 'how and where'. So upper-layer code is not rewritten per hardware - the classic 'program to an interface' move. It does not make a single op faster (that is L31/L32's kernels), and is unrelated to quantization or file format.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml_backend_load_all dynamically loads backends at runtime via dlopen / LoadLibraryW - what is the benefit?</div>
+  <ol class="opts">
+    <li>making the program start up faster</li>
+    <li>one main binary loads the matching backend per the machine's actual hardware, and a missing library does not prevent startup</li>
+    <li>automatically downloading the model locally</li>
+    <li>statically compiling all backends into one huge binary</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Dynamic loading defers 'which backends this machine has' to runtime: each backend is a shared library, and ggml_backend_load_all scans, loads the usable ones, and registers them. The point is 'one package runs everywhere' - load the CUDA backend if there is a CUDA card, skip it otherwise, never crashing over a missing library. This is the opposite of 'static-link everything' (which drags in conflicting deps and is machine-picky).</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. What does ggml_backend_sched (the scheduler) do?</div>
+  <ol class="opts">
+    <li>merge multiple GPUs into one larger virtual GPU</li>
+    <li>handle sampling tokens</li>
+    <li>decide which quantization format the model uses</li>
+    <li>dispatch a compute graph's ops across backends and copy tensors between devices as needed</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The scheduler connects L09/L10's 'static graph' to 'dynamic execution': it walks each op - which device's buffer the inputs are in, which backend best suits the op - dispatches accordingly, and inserts a cross-device copy first when an input is still elsewhere. To cut expensive copies it tends to give consecutive same-device ops to one backend in segments. When you put the first N layers on the GPU with -ngl, this is what dispatches by layer and moves boundary tensors.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>This lesson says adding a new backend = implementing the interfaces in ggml-backend-impl.h (buffer management, supports_op, graph_compute) and registering it, with not one line of upper code changed. Using this lesson's 'layering + abstraction' lens, explain why BLAS (borrowing a math library) and RPC (sending to a remote machine) also fit the same backend interface; then, across the whole guide, give one or two other examples of 'using a layer of abstraction to hold change underneath' (e.g. GGUF for weights, the compute graph for ops).</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="32-cuda-backend.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">CUDA 后端</span><span class="lang-en">The CUDA backend</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
+}
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>
