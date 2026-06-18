@@ -376,3 +376,396 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
 </div>
 """,
 }
+
+LESSON_32 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+上一课看了 CPU 后端怎么靠 SIMD + 多线程把矩阵乘算快（L31）。可真正让大模型推理"飞"起来的，往往是 GPU——它不靠几个强核取胜，而靠<strong>成千上万个线程同时算</strong>。这一课钻进 ggml 的 CUDA 后端（<span class="mono">ggml/src/ggml-cuda/</span>），看它怎么把这么多线程组织起来：一次矩阵乘是怎么拆成 block 和 thread 的协作，又怎么靠片上的高速内存把它们喂饱。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">单看一个 GPU 线程，它弱得可怜——主频比 CPU 还低，一次只算一格。GPU 的强，全在"数量"：几千个线程一起上，吞吐就压倒性地高。所以 GPU 内核的全部手艺，归根到底就两件事：把活儿切成成千上万个互不依赖的小块（让线程都有事干），再想办法让数据离线程足够近（别让它们饿着等显存）。这一课会读一段真实的 CUDA kernel 骨架，再看这一课的主角——分块矩阵乘，然后是显存层级，最后用概念的方式看一眼 flash attention。</p>
+<p style="color:var(--muted)">路线图：先认识 CUDA 的执行模型（grid / block / thread / warp），再看分块矩阵乘怎么用片上 shared memory 复用数据，接着理解显存的三级层级与"搬数据比算还贵"，最后看 flash attention 为什么要把多个算子融合成一个 kernel。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  GPU 的性能秘诀，和 CPU（L31）是同一套母题、只是推到极致：<strong>海量并行</strong>（成千上万个线程同时算，而不是几个核）+ <strong>喂得饱</strong>（用片上高速内存复用数据，别让线程干等显存）。CPU 那只"8 头机械臂"（SIMD）在 GPU 上变成了一整座体育场的几千只手；但手越多，"备料"的压力越大——这就是为什么 GPU 内核里最关键的代码，往往不是"怎么算"，而是"怎么把数据搬进那块小而快的 shared memory、让一个 block 里的线程反复复用"。抓住"并行铺满 + 数据搬近"这两件事，满屏的 <span class="mono">blockIdx</span>、<span class="mono">__shared__</span>、<span class="mono">__syncthreads</span> 就都有了主线。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  上一课的 CPU 像几位<strong>老师傅</strong>，每人配一只 8 头机械臂，活儿精、人少；GPU 则像一座<strong>体育场里的几千名普通工人</strong>。单个工人慢，但几千人同时开工，总吞吐惊人——前提是你能把活儿拆成几千份谁也不等谁的小任务，还得喂得上料。每个班组（block）面前有一张<strong>小而快的工作台</strong>（shared memory），但料仓（global 显存）在很远的地方。聪明的做法是：班组先合力把一批料从料仓搬上工作台，然后大家在工作台上反复取用、互不打扰，算完再搬下一批。GPU 内核的全部技巧，几乎都在"怎么用好这张小工作台"上——这正是下面分块矩阵乘要讲的。
+</div>
+
+<h2>CUDA 执行模型：grid / block / thread</h2>
+<p>CUDA 把成千上万个线程组织成三层：一次 kernel 启动是一个 <strong>grid（网格）</strong>，grid 切成很多 <strong>block（线程块）</strong>，每个 block 里又有几十到上千个 <strong>thread（线程）</strong>。还有一个绕不开的概念 <strong>warp</strong>：每 32 个线程编成一组、步调完全一致地执行同一条指令（这套模型叫 SIMT，单指令多线程）。同一个 block 里的线程能共享一块片上的 <span class="mono">__shared__</span> 内存、还能用 <span class="mono">__syncthreads()</span> 互相等一等；不同 block 之间则基本各管各的、不保证谁先谁后。</p>
+<p>先看一个最简单的真实 kernel：把每个元素乘上一个 scale。它正好展示了 GPU 最基本的写法——<strong>先算出"我是谁"，再只算我那一份</strong>：</p>
+<pre class="code"><span class="cm">// 真实 CUDA kernel: 每个线程算输出的一个/几个元素 (简化自 ggml-cuda/scale.cu)</span>
+<span class="kw">__global__</span> void <span class="fn">scale_f32</span>(const float* x, float* dst, float scale, int64_t n) {
+    int64_t tid    = blockIdx.x * blockDim.x + threadIdx.x;  <span class="cm">// 全局唯一线程号</span>
+    int64_t stride = blockDim.x * gridDim.x;                 <span class="cm">// 一轮覆盖的线程总数</span>
+    <span class="kw">for</span> (int64_t i = tid; i &lt; n; i += stride)             <span class="cm">// grid-stride 循环</span>
+        dst[i] = scale * x[i];                              <span class="cm">// 各线程各算各的, 无依赖</span>
+}
+<span class="cm">// 启动: 指定 grid 和 block 大小</span>
+<span class="fn">scale_f32</span>&lt;&lt;&lt;num_blocks, 256&gt;&gt;&gt;(x, dst, scale, n);   <span class="cm">// 256 = 每个 block 的线程数</span></pre>
+<p>逐行看：<span class="mono">blockIdx.x * blockDim.x + threadIdx.x</span> 把"第几个 block、block 里第几个线程"换算成一个全局唯一的线程号 <span class="mono">tid</span>——这几乎是每个 CUDA kernel 的第一行。<span class="mono">stride</span> 是一轮里所有线程加起来能覆盖的元素数；当数据比线程还多时，用这个 <strong>grid-stride 循环</strong>让每个线程隔 <span class="mono">stride</span> 跳着多算几个。最关键的一点：所有线程跑的是<strong>同一份代码</strong>，只靠各自不同的 <span class="mono">tid</span> 落到不同的数据上——这就是 SIMT。启动时那串 <span class="mono">&lt;&lt;&lt;num_blocks, 256&gt;&gt;&gt;</span> 三尖括号语法，指定这次要起多少个 block、每个 block 多少线程。还有一点容易忽略却很关键：GPU 起的线程数往往<strong>远超</strong>它的物理核数（动辄几万），这不是浪费，而是 GPU 藏延迟的看家本领。当一批线程卡在等显存时，硬件立刻切去跑另一批就绪的线程，让计算单元一刻不闲。所以"线程多到用不完"恰恰是好事：它把访存的等待时间，用别的线程的计算填满了——这也解释了为什么 GPU 偏爱"小任务、海量并行"，而不像 CPU 那样靠少数强核。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">grid</span><span class="name">网格</span></div><div class="ld">一次 kernel 启动 = 一个 grid, 含成百上千个 block</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">block</span><span class="name">线程块</span></div><div class="ld">含几十~上千个线程, 共享一块片上 shared memory, 能用 __syncthreads 互等</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">thread</span><span class="name">线程</span></div><div class="ld">最小执行单位, 算自己那一格; 每 32 个线程组成一个 warp, 步调一致</div></div>
+</div>
+
+<h2>分块矩阵乘：GPU 内核的心脏</h2>
+<p>矩阵乘是大模型里最重的算子，GPU 上把它写快的关键又是 tiling（分块）——和 L31 的 CPU 分块同一个思路，但这里分进的是 <strong>shared memory</strong>。先想想朴素写法的毛病：让每个线程独立去算 C 的一格，它得把 A 的一整行、B 的一整列从 global 显存（很慢）读一遍。相邻线程读的数据大量重叠，却各读各的，把本就紧张的显存带宽白白浪费掉——瓶颈又是"等数据"，不是"算"。举个直观的数：朴素版算一个 N x N 的输出，要从慢显存里读约 N 的三次方 量级的数据（每算一格都重新扫一整行 A 和一整列 B，相邻线程之间大量重复读）；机器真正擅长的乘加明明很快，结果大把时间都耗在了"等数据"上。这正是 tiling 要解决的核心矛盾。</p>
+<p>分块的解法是让一个 block 的线程<strong>合作</strong>：先一起把 A 的一小块、B 的一小块从 global 搬进 block 共享的 <span class="mono">__shared__</span>（片上、快一两个数量级），用 <span class="mono">__syncthreads()</span> 等大家都搬完，然后 block 内每个线程都在这块快内存上反复取数、算自己负责的那一格，沿 K 维一块块推进、累加。下面是规范化的教学骨架（真实的 <span class="mono">mmq.cuh</span> 在此之上还加了 4-bit 解包和大量模板，但骨架就是这个）：</p>
+<pre class="code"><span class="cm">// 教学版分块矩阵乘骨架 (真实的 ggml-cuda/mmq.cuh 在此之上加了 4-bit 解包和模板)</span>
+<span class="kw">__global__</span> void <span class="fn">matmul_tiled</span>(const float* A, const float* B, float* C, int N) {
+    <span class="kw">__shared__</span> float As[T][T];                 <span class="cm">// 片上共享: A 的一块</span>
+    <span class="kw">__shared__</span> float Bs[T][T];                 <span class="cm">// 片上共享: B 的一块</span>
+    int row = blockIdx.y*T + threadIdx.y;
+    int col = blockIdx.x*T + threadIdx.x;
+    float acc = 0.0f;                            <span class="cm">// 累加器在寄存器里(最快)</span>
+    <span class="kw">for</span> (int k0 = 0; k0 &lt; N; k0 += T) {         <span class="cm">// 沿 K 维一块块推进</span>
+        As[threadIdx.y][threadIdx.x] = A[row*N + (k0+threadIdx.x)]; <span class="cm">// 协作载入</span>
+        Bs[threadIdx.y][threadIdx.x] = B[(k0+threadIdx.y)*N + col];
+        <span class="fn">__syncthreads</span>();                       <span class="cm">// 等整块都载完再算</span>
+        <span class="kw">for</span> (int k = 0; k &lt; T; ++k)             <span class="cm">// 块内复用, 全在快内存里</span>
+            acc += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        <span class="fn">__syncthreads</span>();                       <span class="cm">// 等大家算完再覆盖下一块</span>
+    }
+    C[row*N + col] = acc;                        <span class="cm">// 一格只写回一次</span>
+}</pre>
+<p>关键就在那两个 <span class="mono">__syncthreads()</span>：第一个保证"整块都搬上工作台了"才开始算，第二个保证"大家都算完了"才去覆盖下一块——少了任何一个，就会有线程读到半截数据，结果全错。而一块 tile 一旦搬进 shared memory，就被 block 里所有线程<strong>反复复用</strong>很多次，把慢的 global 访问摊薄到极低。这正是把上一课"载入一次、复用多次"的 tiling 思想搬到了 GPU 的片上内存上：CPU 复用的是 cache，GPU 复用的是 shared memory，但省访存的算盘一模一样。粗算一下复用的威力：一块 T x T 的 tile 一旦载入 shared，块内线程会把它当行/列反复用上约 T 次——也就是每个从 global 搬来的数平均被复用约 T 倍；T 取 32，慢显存的访问量就直接降到约三十分之一。（代码里的 T 是 tile 的边长，常取 16 或 32；blockDim 也设成 T 行 T 列，正好一个线程管一格。）</p>
+<p>把这个过程定格成一张图最直观——一个 block 把 A 的行块、B 的列块载入 shared，块内每个线程负责输出 C 的一格：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次分块矩阵乘</b>：一个 thread block 把 A 的行块、B 的列块载入 shared memory，块内每个线程算 C 的一格（As 的一行与 Bs 的一列做点积），沿 K 维循环累加（示意）。</div>
+<svg viewBox="0 18 660 372" width="100%" role="img" aria-label="分块矩阵乘示例：一个 thread block 把 A 的行块、B 的列块载入共享内存，块内每个线程算输出 C 的一格">
+<g font-family="ui-monospace,monospace">
+<rect x="117" y="189" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="120" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="120" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="148" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="176" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="204" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="120" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="120" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="377" y="49" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="380" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="52" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="80" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="108" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="136" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="377" y="189" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="380" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="220" width="28" height="28" fill="#ece3fb" stroke="#7c3aed"/>
+<rect x="436" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<text x="176" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">As（共享内存）</text>
+<text x="436" y="40" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">Bs（共享内存）</text>
+<text x="436" y="324" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="12">C 输出块</text>
+<text x="110" y="238" text-anchor="end" fill="#c2630e" font-weight="700" font-size="11">行 i</text>
+<text x="432" y="182" fill="#2563eb" font-weight="700" font-size="11">列 j</text>
+<line x1="238" y1="234" x2="368" y2="234" stroke="#c2630e" stroke-width="1.6"/>
+<path d="M 376 234 L 368 230 L 368 238 z" fill="#c2630e"/>
+<line x1="422" y1="170" x2="422" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+<path d="M 422 188 L 418 180 L 426 180 z" fill="#2563eb"/>
+<text x="504" y="238" fill="#7c3aed" font-weight="700" font-size="11">C[i][j]</text>
+<line x1="500" y1="234" x2="438" y2="234" stroke="#7c3aed" stroke-width="1.2"/>
+<rect x="60" y="332" width="540" height="44" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<text x="330" y="350" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="12">thread(i,j): C[i][j] += As[i][k] * Bs[k][j]</text>
+<text x="330" y="368" text-anchor="middle" fill="#5b6470" font-size="11">循环 k0 = 0..K 步长 T：载入下一块 -> __syncthreads -> 累加 -> __syncthreads</text>
+</g></svg>
+</div>
+
+<h2>显存层级：为什么"搬数据"比"算"还贵</h2>
+<p>上面反复说"快内存""慢显存"，这里把它讲清楚。GPU 有三级内存，越往下越小、越快：<strong>global（显存 VRAM）</strong>有几 GB、所有线程都能访问，但延迟高、带宽常常就是整个内核的瓶颈；<strong>shared（片上共享内存）</strong>每个 block 只有几十 KB、只给 block 内线程共享，比 global 快一两个数量级；<strong>register（寄存器）</strong>每个线程私有、最快，分块矩阵乘里的累加器 <span class="mono">acc</span> 就住在这里。分块矩阵乘的全部意义，就是把数据尽量从 global 挪到 shared 和 register 上反复用。</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">大·慢</span><span class="name">global / 显存 VRAM</span></div><div class="ld">几 GB, 所有线程可见; 延迟高、带宽是瓶颈 (呼应 L30 的访存密集)</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">中·快</span><span class="name">shared / 片上</span></div><div class="ld">每个 block 几十 KB, block 内共享; 比 global 快一两个数量级</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">小·最快</span><span class="name">register / 寄存器</span></div><div class="ld">每个线程私有, 最快; 累加器 acc 就放这里</div></div>
+</div>
+<p>这又一次印证了 L30 的观察：很多内核是"访存密集"而非"算力密集"的——GPU 的算力多到常常用不完，真正卡住它的，是把数据从显存喂进来的那点带宽。所以 GPU 优化的大半功夫，都花在"减少 global 访问、增加 shared/register 复用"上。看懂这一条，你就明白了为什么同一块卡上，一个写得好的 kernel 能比朴素版快好几倍——要算的总量没变，省下的全是搬运。这也是为什么 batch（一次喂多条序列/多 token）几乎总能提高 GPU 利用率：数据搬进来一次，多算几遍，把那条带宽用得更值。再补一个 GPU 特有的讲究：访问 global 显存时，一个 warp 里 32 个线程最好去读<strong>连续相邻</strong>的地址，硬件能把它们合并成一次大的内存事务（coalesced，合并访问）；要是各读各的乱地址，就退化成几十次小事务，带宽利用率骤降。所以 GPU 内核不仅要"少读 global"，还要"读得整齐"——这也是为什么张量在显存里的摆放顺序（layout）对性能影响很大，很多内核会专门重排数据来迁就这条规则。</p>
+
+<h2>flash attention：把多个算子融合成一个 kernel</h2>
+<p>注意力（attention）要算 <span class="mono">softmax(Q @ K^T) @ V</span>。朴素做法会先把巨大的 N x N 注意力分数矩阵整个算出来、写回显存，再读回来做 softmax、再读回来乘 V——光是把这个 N x N 大矩阵在显存里写一遍、读三遍，就把带宽吃干了（还得额外占一大块显存）。<strong>flash attention</strong> 的思路是把这几步<strong>融合（fuse）</strong>成一个 kernel：分块地算，一边算一边用"在线 softmax"修正，<strong>永不把整个 N x N 分数矩阵物化到显存</strong>，只把最终输出 O 写出去。</p>
+<pre class="code"><span class="cm">// flash attention 思路 (概念伪代码, 真实实现见 ggml-cuda/fattn*.cu)</span>
+acc = 0;  run_max = -inf;  run_sum = 0;
+<span class="kw">for</span> each K/V tile:                  <span class="cm">// 分块, 永不物化整个 N x N 分数</span>
+    s   = Q @ K_tile^T               <span class="cm">// 只算当前块的注意力分数</span>
+    m   = max(run_max, rowmax(s))    <span class="cm">// 更新到目前为止的行最大值</span>
+    p   = exp(s - m)                 <span class="cm">// 在线 softmax: 边算边修正</span>
+    run_sum = run_sum * exp(run_max - m) + rowsum(p)
+    acc     = acc     * exp(run_max - m) + p @ V_tile
+    run_max = m
+O = acc / run_sum                    <span class="cm">// 最后归一; 只写出 O, 不写 N x N</span></pre>
+<p>诀窍在那个"在线 softmax"：softmax 本该先看到一整行才能定下分母，但 flash attention 用一个<strong>跑动的最大值和跑动的分母</strong>（<span class="mono">run_max</span> / <span class="mono">run_sum</span>），每来一个新块就把已累计的结果按新最大值重新缩放一下，于是不必等齐整行、也能分块往前算。代价是多了几次缩放运算，换来的是<strong>再也不用把那个 N x N 大矩阵搬进搬出显存</strong>——序列越长，省得越多。这就是"算子融合"的威力：把本该分几个 kernel、来回读写显存的活儿，并进一个 kernel 里一气呵成，省下的全是最贵的那部分——访存。这一点对长上下文尤其要命：序列长度翻倍，那个 N x N 矩阵的面积就翻四倍，朴素做法的显存和带宽开销爆炸式增长，而 flash attention 因为根本不物化它，开销只随序列长度线性上升——这正是如今动辄几万、几十万 token 的长上下文能跑起来的关键之一。</p>
+<div class="card detail">
+  <div class="tag">🔬 范围与源码</div>
+  这一节只讲 flash attention 的<strong>思路</strong>，不逐行抠真实 kernel。原因是 ggml 的 <span class="mono">fattn-*</span> 系列文件（<span class="mono">fattn-tile</span> / <span class="mono">fattn-mma-f16</span> / <span class="mono">fattn-vec</span> 等）为了在不同 GPU、不同精度、不同 head 维度上都跑到最快，写了一大堆模板特化，行数多、枝杈密。但万变不离其宗：它们做的都是上面这套"分块 + 在线 softmax + 不物化 N x N"。先把思路记牢，真要读源码时就不会迷路。
+</div>
+
+<h2>深入：warp 内求和与内核变体</h2>
+<p>最后两个折叠，补两个 GPU 内核里很常见、却容易看懵的细节：warp 怎么不靠 shared 就快速求和，以及为什么同一个算子会有那么多份 kernel。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> warp 内 32 个线程怎么不用 shared memory 就求和？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>很多内核（比如 softmax、norm、点积收尾）最后要把一组线程各自的部分和加成一个总和。如果走 shared memory，要写、要 <span class="mono">__syncthreads</span>、再读，比较费。而同一个 warp 里的 32 个线程本就步调一致，CUDA 提供了 <strong>warp shuffle</strong> 指令，让它们<strong>直接读彼此的寄存器</strong>，不碰任何内存。下面是 ggml 真实的 <span class="mono">warp_reduce_sum</span>（<span class="mono">ggml-cuda/common.cuh</span>）：</p>
+<pre class="code"><span class="cm">// warp 内 32 线程求和, 不用 shared memory (来自 ggml-cuda/common.cuh)</span>
+<span class="kw">__device__</span> float <span class="fn">warp_reduce_sum</span>(float x) {
+    <span class="kw">for</span> (int offset = 16; offset &gt; 0; offset &gt;&gt;= 1)   <span class="cm">// 16 -> 8 -> 4 -> 2 -> 1</span>
+        x += <span class="fn">__shfl_xor_sync</span>(0xffffffff, x, offset, 32); <span class="cm">// 直接读"距离 offset"的邻居</span>
+    <span class="kw">return</span> x;                                          <span class="cm">// 结束后每个线程都拿到总和</span>
+}</pre>
+    <p>这是一棵<strong>蝶式（butterfly）归约树</strong>：第一轮每个线程和"隔 16"的伙伴交换并相加，第二轮隔 8、再隔 4、2、1，五轮（log2 32）之后，每个线程手里都是全 32 个值的总和。<span class="mono">__shfl_xor_sync</span> 的第一个参数 <span class="mono">0xffffffff</span> 是参与线程的掩码（全 32 个都参与），它让一个线程直接拿到另一个线程寄存器里的 <span class="mono">x</span>，完全不经过 shared 或 global。这就是为什么 warp 级归约又快又省——它把"线程间通信"压到了寄存器层面。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 为什么同一个矩阵乘有那么多份 kernel？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>翻 <span class="mono">ggml-cuda/</span> 你会看到一个算子常有好几份实现：<span class="mono">mmq</span>（量化矩阵乘）、<span class="mono">mmvq</span>（矩阵 x 向量，解码单 token 时用），还有针对不同量化格式（Q4_0/Q4_K/...）、不同 GPU 计算能力（compute capability）的特化版。为什么不写一份通用的？因为 GPU 性能对这些条件<strong>极其敏感</strong>：解码时是"瘦高"的矩阵 x 向量、prefill 时是"胖"的矩阵 x 矩阵（呼应 L18/L30 的 pp vs tg），最优的分块大小、用不用 tensor core、寄存器怎么分配都不一样。与其用一份折中代码处处平庸，不如为每种重要情形挑一份最快的——这跟 L31 里 CPU 的 <span class="mono">arch/</span> 多架构分派是同一种工程取舍：<strong>用代码量换性能</strong>。运行时再根据张量形状、量化类型、GPU 型号，挑一条最合适的 kernel 走。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>CUDA 三层：<span class="mono">grid -&gt; block -&gt; thread</span>；每 32 线程一个 <strong>warp</strong> 步调一致；同一 block 内可用 <span class="mono">__shared__</span> + <span class="mono">__syncthreads</span>。</li>
+    <li>每个线程算自己那份：<span class="mono">tid = blockIdx.x*blockDim.x + threadIdx.x</span>，数据比线程多时用 <strong>grid-stride 循环</strong>。</li>
+    <li>分块矩阵乘是心脏：block 协作把 A/B 小块搬进 <span class="mono">__shared__</span>，<span class="mono">__syncthreads</span> 后反复复用、沿 K 累加；真实的 <span class="mono">mmq.cuh</span> 再加 4-bit 解包。</li>
+    <li>显存三级 <span class="mono">global / shared / register</span>（大慢 -&gt; 小快 -&gt; 最快）；瓶颈常是带宽，优化 = 减少 global 访问、增加 shared 复用（呼应 L30）。</li>
+    <li>flash attention：把 softmax + matmul 融合成一个 kernel，永不物化 N x N 分数，省显存与带宽；真实实现在 <span class="mono">fattn*.cu</span>。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  GPU 和 CPU 看似天差地别，内核思路却是<strong>同一个</strong>：同样的运算量，怎么铺开同时做、怎么让数据少跑路。CPU 把它推到几个核 × 8 路 SIMD；GPU 把它推到几千个线程 × 片上复用。所以你在 L31 学的那两问——"能不能一次多算几个？""数据是不是反复在远处取？"——到了 GPU 上原样还能用，只是答案换成了"几千个线程"和"shared memory"。看穿 <span class="mono">blockIdx</span>、<span class="mono">__shared__</span>、<span class="mono">__syncthreads</span> 这层语法，底下还是那个朴素的念头：让海量硬件都忙起来、别让它们饿着。这也是为什么"算子融合"（flash attention）和"分块复用"（tiling）会成为 GPU 优化的两大母题——它们都在和那条又慢又窄的显存带宽较劲。下一课我们退一步，看 ggml 怎么用一个统一的"后端"抽象，把 CPU、CUDA 以及更多后端管起来，并把一张计算图的算子分派到合适的硬件上。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Last lesson watched the CPU backend make matmul fast with SIMD + multithreading (L31). But what really makes large-model inference "fly" is usually the GPU - it wins not with a few strong cores but with <strong>thousands of threads computing at once</strong>. This lesson drops into ggml's CUDA backend (<span class="mono">ggml/src/ggml-cuda/</span>) to see how it organizes all those threads: how one matmul is split into block-and-thread cooperation, and how on-chip fast memory keeps them fed.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">A single GPU thread is feeble - lower clock than a CPU, computing one cell at a time. The GPU's strength is all in "numbers": thousands of threads at once give overwhelming throughput. So the whole craft of a GPU kernel comes down to two things: cut the work into thousands of independent little pieces (so every thread has something to do), and get the data close enough to the threads (so they do not starve waiting on VRAM). This lesson reads a real CUDA kernel skeleton, then this lesson's star - tiled matmul, then the memory hierarchy, and finally a conceptual look at flash attention.</p>
+<p style="color:var(--muted)">Roadmap: first the CUDA execution model (grid / block / thread / warp), then how tiled matmul reuses data through on-chip shared memory, then the three-level memory hierarchy and "moving data costs more than computing", and finally why flash attention fuses several ops into one kernel.</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  The GPU's performance secret is the same theme as the CPU (L31), just pushed to the extreme: <strong>massive parallelism</strong> (thousands of threads at once, not a few cores) + <strong>keeping them fed</strong> (reuse data in on-chip fast memory, do not let threads idle on VRAM). The CPU's "8-head arm" (SIMD) becomes, on the GPU, a whole stadium of thousands of hands; but the more hands, the greater the "supply" pressure - which is why the most critical code in a GPU kernel is often not "how to compute" but "how to move data into that small, fast shared memory so threads in a block reuse it over and over". Hold these two - spread the parallelism, bring the data close - and the screenful of <span class="mono">blockIdx</span>, <span class="mono">__shared__</span>, <span class="mono">__syncthreads</span> all gains a through-line.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Last lesson's CPU is like a few <strong>master craftsmen</strong>, each with an 8-head robotic arm - skilled work, few people; the GPU is like <strong>thousands of ordinary workers in a stadium</strong>. One worker is slow, but thousands at once give astonishing total throughput - provided you can split the job into thousands of little tasks that wait on no one, and can keep them supplied. Each crew (block) has a <strong>small, fast workbench</strong> (shared memory) in front of it, but the warehouse (global VRAM) is far away. The smart move: the crew first hauls a batch of material from the warehouse onto the bench together, then everyone draws from the bench repeatedly without disturbing each other, and hauls the next batch only when done. Almost all the craft of a GPU kernel is in "using that small bench well" - which is exactly what tiled matmul below is about.
+</div>
+
+<h2>The CUDA execution model: grid / block / thread</h2>
+<p>CUDA organizes thousands of threads into three levels: one kernel launch is a <strong>grid</strong>, the grid splits into many <strong>blocks</strong>, and each block holds tens to thousands of <strong>threads</strong>. One more unavoidable concept is the <strong>warp</strong>: every 32 threads form a group that executes the same instruction in perfect lockstep (this model is called SIMT, single instruction multiple threads). Threads in the same block can share a patch of on-chip <span class="mono">__shared__</span> memory and can wait for each other with <span class="mono">__syncthreads()</span>; different blocks are largely on their own, with no ordering guaranteed between them.</p>
+<p>First a simplest real kernel: multiply every element by a scale. It shows the most basic GPU idiom - <strong>work out "who am I" first, then compute only my share</strong>:</p>
+<pre class="code"><span class="cm">// real CUDA kernel: each thread computes one/few output elements (simplified from ggml-cuda/scale.cu)</span>
+<span class="kw">__global__</span> void <span class="fn">scale_f32</span>(const float* x, float* dst, float scale, int64_t n) {
+    int64_t tid    = blockIdx.x * blockDim.x + threadIdx.x;  <span class="cm">// globally unique thread id</span>
+    int64_t stride = blockDim.x * gridDim.x;                 <span class="cm">// total threads in one sweep</span>
+    <span class="kw">for</span> (int64_t i = tid; i &lt; n; i += stride)             <span class="cm">// grid-stride loop</span>
+        dst[i] = scale * x[i];                              <span class="cm">// each thread on its own, no deps</span>
+}
+<span class="cm">// launch: set grid and block size</span>
+<span class="fn">scale_f32</span>&lt;&lt;&lt;num_blocks, 256&gt;&gt;&gt;(x, dst, scale, n);   <span class="cm">// 256 = threads per block</span></pre>
+<p>Line by line: <span class="mono">blockIdx.x * blockDim.x + threadIdx.x</span> turns "which block, and which thread within it" into a globally unique thread id <span class="mono">tid</span> - this is the first line of almost every CUDA kernel. <span class="mono">stride</span> is how many elements all threads together cover in one sweep; when there is more data than threads, this <strong>grid-stride loop</strong> lets each thread hop by <span class="mono">stride</span> and handle a few more. The key point: all threads run the <strong>same code</strong>, landing on different data only through their different <span class="mono">tid</span> - that is SIMT. The <span class="mono">&lt;&lt;&lt;num_blocks, 256&gt;&gt;&gt;</span> triple-angle-bracket syntax at launch sets how many blocks to start and how many threads per block. One easily-missed but crucial point: a GPU launches far <strong>more</strong> threads than it has physical cores (tens of thousands routinely) - not waste, but the GPU's signature trick for hiding latency. When one batch of threads stalls waiting on VRAM, the hardware instantly switches to another ready batch, keeping the compute units never idle. So "more threads than you can use" is exactly the point: it fills the memory-wait time with other threads' computation - which is why a GPU favors "small tasks, massive parallelism" rather than the CPU's few strong cores.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">grid</span><span class="name">grid</span></div><div class="ld">one kernel launch = one grid, holding hundreds-thousands of blocks</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">block</span><span class="name">thread block</span></div><div class="ld">tens-thousands of threads, sharing one patch of on-chip shared memory, syncable with __syncthreads</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">thread</span><span class="name">thread</span></div><div class="ld">smallest execution unit, computes its own cell; every 32 threads form a warp, in lockstep</div></div>
+</div>
+
+<h2>Tiled matmul: the heart of the GPU kernel</h2>
+<p>Matmul is the heaviest op in a large model, and the key to writing it fast on a GPU is again tiling - the same idea as the CPU tiling in L31, but here we tile into <strong>shared memory</strong>. First, the flaw in the naive way: let each thread independently compute one cell of C, and it must read a whole row of A and a whole column of B from global VRAM (slow). Neighboring threads read heavily overlapping data, yet each reads its own, wasting the already-scarce VRAM bandwidth - the bottleneck is again "waiting for data", not "computing". A concrete sense: the naive version computing an N x N output reads on the order of N-cubed values from slow VRAM (every cell rescans a whole row of A and a whole column of B, with heavy duplicate reads between neighboring threads); the multiply-adds the machine is actually good at are fast, so most of the time goes to "waiting for data". That is exactly the core tension tiling resolves.</p>
+<p>The tiled fix has a block's threads <strong>cooperate</strong>: together they first haul a small tile of A and a small tile of B from global into the block's shared <span class="mono">__shared__</span> memory (on-chip, one-to-two orders of magnitude faster), wait with <span class="mono">__syncthreads()</span> until everyone has loaded, then every thread in the block draws from that fast memory repeatedly to compute its own cell, advancing tile by tile along K and accumulating. Below is a normalized teaching skeleton (the real <span class="mono">mmq.cuh</span> adds 4-bit unpacking and heavy templating on top, but the skeleton is exactly this):</p>
+<pre class="code"><span class="cm">// teaching tiled-matmul skeleton (real ggml-cuda/mmq.cuh adds 4-bit unpack + templates)</span>
+<span class="kw">__global__</span> void <span class="fn">matmul_tiled</span>(const float* A, const float* B, float* C, int N) {
+    <span class="kw">__shared__</span> float As[T][T];                 <span class="cm">// on-chip shared: a tile of A</span>
+    <span class="kw">__shared__</span> float Bs[T][T];                 <span class="cm">// on-chip shared: a tile of B</span>
+    int row = blockIdx.y*T + threadIdx.y;
+    int col = blockIdx.x*T + threadIdx.x;
+    float acc = 0.0f;                            <span class="cm">// accumulator in a register (fastest)</span>
+    <span class="kw">for</span> (int k0 = 0; k0 &lt; N; k0 += T) {         <span class="cm">// advance along K, tile by tile</span>
+        As[threadIdx.y][threadIdx.x] = A[row*N + (k0+threadIdx.x)]; <span class="cm">// cooperative load</span>
+        Bs[threadIdx.y][threadIdx.x] = B[(k0+threadIdx.y)*N + col];
+        <span class="fn">__syncthreads</span>();                       <span class="cm">// wait until the whole tile is loaded</span>
+        <span class="kw">for</span> (int k = 0; k &lt; T; ++k)             <span class="cm">// reuse the tile, all in fast memory</span>
+            acc += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        <span class="fn">__syncthreads</span>();                       <span class="cm">// wait before overwriting next tile</span>
+    }
+    C[row*N + col] = acc;                        <span class="cm">// write each cell back just once</span>
+}</pre>
+<p>The crux is those two <span class="mono">__syncthreads()</span>: the first guarantees "the whole tile is on the bench" before any compute starts, the second guarantees "everyone is done" before overwriting the next tile - drop either and some thread reads half-loaded data and the result is all wrong. Once a tile is in shared memory it is <strong>reused</strong> many times by all threads in the block, amortizing the slow global accesses down to almost nothing. This carries last lesson's "load once, reuse many" tiling onto the GPU's on-chip memory: the CPU reuses cache, the GPU reuses shared memory, but the memory-saving arithmetic is identical. A rough sense of the payoff: once a T x T tile is in shared, the block's threads reuse it as rows/columns about T times - so each value hauled from global is reused roughly T-fold; with T = 32, slow VRAM traffic drops to about one thirtieth. (T is the tile width, often 16 or 32; blockDim is set to T x T so one thread owns exactly one cell.)</p>
+<p>Freezing the process into one picture is clearest - a block loads A's row-tile and B's col-tile into shared, and each thread in the block owns one cell of the output C:</p>
+<div class="trace">
+  <div class="tcap"><b>Trace one tiled matmul</b>: one thread block loads A's row-tile and B's col-tile into shared memory; each thread in the block computes one C cell (dot of an As row and a Bs col), looping and accumulating along K.</div>
+<svg viewBox="0 18 660 372" width="100%" role="img" aria-label="Tiled matrix multiply example: one thread block loads A's row-tile and B's col-tile into shared memory, and each thread in the block computes one cell of C">
+<g font-family="ui-monospace,monospace">
+<rect x="117" y="189" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="120" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="120" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="148" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="176" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="204" y="220" width="28" height="28" fill="#fbe7d2" stroke="#c2630e"/>
+<rect x="120" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="120" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="148" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="176" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="204" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="377" y="49" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="380" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="52" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="52" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="80" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="80" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="108" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="108" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="136" width="28" height="28" fill="#dbe7fc" stroke="#2563eb"/>
+<rect x="436" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="136" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="377" y="189" width="118" height="118" rx="6" fill="none" stroke="#cdd5df"/>
+<rect x="380" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="192" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="220" width="28" height="28" fill="#ece3fb" stroke="#7c3aed"/>
+<rect x="436" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="220" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="248" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="380" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="408" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="436" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<rect x="464" y="276" width="28" height="28" fill="#ffffff" stroke="#cdd5df"/>
+<text x="176" y="180" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">As (shared)</text>
+<text x="436" y="40" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">Bs (shared)</text>
+<text x="436" y="324" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="12">C output tile</text>
+<text x="110" y="238" text-anchor="end" fill="#c2630e" font-weight="700" font-size="11">row i</text>
+<text x="432" y="182" fill="#2563eb" font-weight="700" font-size="11">col j</text>
+<line x1="238" y1="234" x2="368" y2="234" stroke="#c2630e" stroke-width="1.6"/>
+<path d="M 376 234 L 368 230 L 368 238 z" fill="#c2630e"/>
+<line x1="422" y1="170" x2="422" y2="180" stroke="#2563eb" stroke-width="1.6"/>
+<path d="M 422 188 L 418 180 L 426 180 z" fill="#2563eb"/>
+<text x="504" y="238" fill="#7c3aed" font-weight="700" font-size="11">C[i][j]</text>
+<line x1="500" y1="234" x2="438" y2="234" stroke="#7c3aed" stroke-width="1.2"/>
+<rect x="60" y="332" width="540" height="44" rx="6" fill="#ffffff" stroke="#cdd5df"/>
+<text x="330" y="350" text-anchor="middle" fill="#1d2129" font-weight="700" font-size="12">thread(i,j): C[i][j] += As[i][k] * Bs[k][j]</text>
+<text x="330" y="368" text-anchor="middle" fill="#5b6470" font-size="11">loop k0 = 0..K step T: load tile -> __syncthreads -> accumulate -> __syncthreads</text>
+</g></svg>
+</div>
+
+<h2>The memory hierarchy: why "moving data" costs more than "computing"</h2>
+<p>We kept saying "fast memory" and "slow VRAM" above; here is the clear version. A GPU has three levels of memory, each smaller and faster as you go down: <strong>global (VRAM)</strong> is several GB, visible to all threads, but high-latency, and its bandwidth is often the whole kernel's bottleneck; <strong>shared (on-chip)</strong> is only tens of KB per block, shared just among that block's threads, one-to-two orders of magnitude faster than global; <strong>register</strong> is private to each thread and fastest - the accumulator <span class="mono">acc</span> in tiled matmul lives here. The entire point of tiled matmul is to move data from global up into shared and registers and reuse it.</p>
+<div class="layers">
+  <div class="layer l-app"><div class="lh"><span class="badge">big-slow</span><span class="name">global / VRAM</span></div><div class="ld">several GB, all threads see it; high latency, bandwidth is the bottleneck (echoes L30's memory-bound)</div></div>
+  <div class="layer l-part"><div class="lh"><span class="badge">mid-fast</span><span class="name">shared / on-chip</span></div><div class="ld">tens of KB per block, shared within a block; one-to-two orders faster than global</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">small-fastest</span><span class="name">register</span></div><div class="ld">private to each thread, fastest; the accumulator acc lives here</div></div>
+</div>
+<p>This confirms L30's observation once more: many kernels are "memory-bound", not "compute-bound" - a GPU has so much compute it often goes unused, and what actually stalls it is the bandwidth feeding data in from VRAM. So most of GPU optimization goes into "fewer global accesses, more shared/register reuse". Grasp this and you see why, on the same card, a well-written kernel can be several times faster than a naive one - the total work is unchanged; all the savings are in movement. It is also why batching (feeding many sequences/tokens at once) almost always raises GPU utilization: bring data in once, compute on it several times, and get more value out of that one bandwidth. One more GPU-specific subtlety: when accessing global VRAM, the 32 threads of a warp should ideally read <strong>contiguous neighboring</strong> addresses, so the hardware can merge them into one large memory transaction (coalesced access); if each reads a scattered address, it degrades into dozens of tiny transactions and bandwidth utilization collapses. So a GPU kernel must not only "read global less" but also "read it tidily" - which is why a tensor's layout in VRAM matters so much for performance, and why many kernels rearrange data specifically to satisfy this rule.</p>
+
+<h2>Flash attention: fusing several ops into one kernel</h2>
+<p>Attention computes <span class="mono">softmax(Q @ K^T) @ V</span>. The naive way first computes the whole huge N x N score matrix and writes it to VRAM, reads it back for softmax, reads it back again to multiply V - just writing that N x N matrix once and reading it three times drains the bandwidth (and costs a big slab of VRAM besides). <strong>Flash attention</strong> <strong>fuses</strong> these steps into one kernel: compute in tiles, correcting with an "online softmax" as you go, <strong>never materializing the whole N x N score matrix to VRAM</strong>, writing out only the final output O.</p>
+<pre class="code"><span class="cm">// flash attention idea (concept pseudocode; real impl in ggml-cuda/fattn*.cu)</span>
+acc = 0;  run_max = -inf;  run_sum = 0;
+<span class="kw">for</span> each K/V tile:                  <span class="cm">// tiled; never materialize the full N x N scores</span>
+    s   = Q @ K_tile^T               <span class="cm">// scores for this tile only</span>
+    m   = max(run_max, rowmax(s))    <span class="cm">// update the running row max</span>
+    p   = exp(s - m)                 <span class="cm">// online softmax: correct as you go</span>
+    run_sum = run_sum * exp(run_max - m) + rowsum(p)
+    acc     = acc     * exp(run_max - m) + p @ V_tile
+    run_max = m
+O = acc / run_sum                    <span class="cm">// normalize once; write only O, not the N x N</span></pre>
+<p>The trick is that "online softmax": softmax normally needs a whole row before it can fix the denominator, but flash attention keeps a <strong>running max and a running denominator</strong> (<span class="mono">run_max</span> / <span class="mono">run_sum</span>), and on each new tile rescales the accumulated result to the new max - so it can march forward tile by tile without waiting for the full row. The cost is a few extra rescale operations; the reward is <strong>never shuttling that N x N matrix in and out of VRAM</strong> - the longer the sequence, the more you save. That is the power of "op fusion": work that would otherwise take several kernels reading and writing VRAM is merged into one kernel done in a single pass, and all the savings are in the most expensive part - memory traffic. This matters most for long context: double the sequence length and that N x N matrix quadruples in area, so the naive approach's VRAM and bandwidth costs explode, whereas flash attention, never materializing it, grows only linearly with the sequence - one of the key reasons today's tens-of-thousands to hundreds-of-thousands token contexts are feasible at all.</p>
+<div class="card detail">
+  <div class="tag">🔬 Scope &amp; source</div>
+  This section conveys only the <strong>idea</strong> of flash attention, not a line-by-line real kernel. The reason is that ggml's <span class="mono">fattn-*</span> files (<span class="mono">fattn-tile</span> / <span class="mono">fattn-mma-f16</span> / <span class="mono">fattn-vec</span> and more) carry a pile of template specializations to run fastest across different GPUs, precisions, and head dimensions - many lines, dense branches. But it all comes back to the same thing: the "tile + online softmax + do not materialize N x N" above. Fix the idea first and you will not get lost when you do read the source.
+</div>
+
+<h2>Deeper: warp-level sum and kernel variants</h2>
+<p>Two last folds for two GPU-kernel details that are common yet easy to find baffling: how a warp sums quickly without shared memory, and why one op has so many kernels.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> How do 32 threads in a warp sum without shared memory? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Many kernels (softmax, norm, the tail of a dot product) finally need to add up each thread's partial sum into one total. Going through shared memory means write, <span class="mono">__syncthreads</span>, then read - fairly costly. But the 32 threads in one warp are already in lockstep, and CUDA offers <strong>warp shuffle</strong> instructions that let them <strong>read each other's registers directly</strong>, touching no memory. Here is ggml's real <span class="mono">warp_reduce_sum</span> (<span class="mono">ggml-cuda/common.cuh</span>):</p>
+<pre class="code"><span class="cm">// sum 32 threads within a warp, no shared memory (from ggml-cuda/common.cuh)</span>
+<span class="kw">__device__</span> float <span class="fn">warp_reduce_sum</span>(float x) {
+    <span class="kw">for</span> (int offset = 16; offset &gt; 0; offset &gt;&gt;= 1)   <span class="cm">// 16 -> 8 -> 4 -> 2 -> 1</span>
+        x += <span class="fn">__shfl_xor_sync</span>(0xffffffff, x, offset, 32); <span class="cm">// read the neighbor "offset away"</span>
+    <span class="kw">return</span> x;                                          <span class="cm">// afterwards every thread holds the total</span>
+}</pre>
+    <p>This is a <strong>butterfly reduction tree</strong>: round one, each thread swaps with and adds its partner "16 away", round two "8 away", then 4, 2, 1 - after five rounds (log2 of 32) every thread holds the sum of all 32 values. The first argument <span class="mono">0xffffffff</span> of <span class="mono">__shfl_xor_sync</span> is the mask of participating threads (all 32), and it lets a thread grab another thread's register <span class="mono">x</span> directly, never via shared or global. That is why warp-level reduction is fast and cheap - it pushes "inter-thread communication" down to the register level.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Why are there so many kernels for one matmul? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>Browse <span class="mono">ggml-cuda/</span> and you will find one op often has several implementations: <span class="mono">mmq</span> (quantized matmul), <span class="mono">mmvq</span> (matrix x vector, used when decoding a single token), plus specializations for different quant formats (Q4_0/Q4_K/...) and different GPU compute capabilities. Why not one generic version? Because GPU performance is <strong>extremely sensitive</strong> to these conditions: decoding is a "tall thin" matrix x vector, prefill is a "fat" matrix x matrix (echoing pp vs tg in L18/L30), and the best tile size, whether to use tensor cores, and how registers are allocated all differ. Rather than one compromise that is mediocre everywhere, pick the fastest for each important case - the same engineering trade-off as the CPU's multi-arch dispatch in <span class="mono">arch/</span> from L31: <strong>spend code to buy performance</strong>. At runtime it then picks the most suitable kernel by tensor shape, quant type, and GPU model.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>CUDA's three levels: <span class="mono">grid -&gt; block -&gt; thread</span>; every 32 threads a <strong>warp</strong> in lockstep; within a block, <span class="mono">__shared__</span> + <span class="mono">__syncthreads</span>.</li>
+    <li>Each thread computes its share: <span class="mono">tid = blockIdx.x*blockDim.x + threadIdx.x</span>; with more data than threads, use a <strong>grid-stride loop</strong>.</li>
+    <li>Tiled matmul is the heart: a block cooperatively loads A/B tiles into <span class="mono">__shared__</span>, then after <span class="mono">__syncthreads</span> reuses them, accumulating along K; the real <span class="mono">mmq.cuh</span> adds 4-bit unpack.</li>
+    <li>Three memory levels <span class="mono">global / shared / register</span> (big-slow -&gt; small-fast -&gt; fastest); the bottleneck is usually bandwidth, so optimize = fewer global accesses, more shared reuse (echoes L30).</li>
+    <li>Flash attention: fuse softmax + matmul into one kernel, never materializing the N x N scores, saving VRAM and bandwidth; real impl in <span class="mono">fattn*.cu</span>.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  GPU and CPU look worlds apart, yet the kernel mindset is <strong>the same</strong>: given the same amount of computation, how do you spread it out to run at once, and how do you make data travel less. The CPU pushes it to a few cores x 8-lane SIMD; the GPU pushes it to thousands of threads x on-chip reuse. So the two questions you learned in L31 - "can it compute several at once?" and "is data fetched from afar over and over?" - carry over verbatim to the GPU, only the answers become "thousands of threads" and "shared memory". See through the <span class="mono">blockIdx</span>, <span class="mono">__shared__</span>, <span class="mono">__syncthreads</span> syntax and underneath is still that plain idea: keep the massive hardware busy and do not let it starve. It is also why "op fusion" (flash attention) and "tiled reuse" (tiling) became the two great themes of GPU optimization - both are fighting that slow, narrow VRAM bandwidth. Next lesson we step back to see how ggml uses one unified "backend" abstraction to manage CPU, CUDA, and more, dispatching a compute graph's ops to the right hardware.
+</div>
+""",
+}

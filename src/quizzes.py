@@ -2053,6 +2053,67 @@ QUIZZES = {
             },
         ],
     },
+    "32-cuda-backend.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "CUDA kernel 里 blockIdx.x * blockDim.x + threadIdx.x 算的是什么？",
+                    "en": "In a CUDA kernel, what does blockIdx.x * blockDim.x + threadIdx.x compute?",
+                },
+                "opts": [
+                    {"zh": "当前线程在所有线程里的全局唯一编号（用它落到自己负责的数据上）", "en": "the current thread's globally unique index across all threads (used to land on its own data)"},
+                    {"zh": "这次 kernel 一共启动了多少个线程", "en": "how many threads this kernel launched in total"},
+                    {"zh": "shared memory 的大小（字节）", "en": "the size of shared memory in bytes"},
+                    {"zh": "当前 GPU 的计算能力（compute capability）", "en": "the current GPU's compute capability"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "blockIdx.x 是“第几个 block”、blockDim.x 是“每个 block 多少线程”、threadIdx.x 是“block 内第几个线程”，三者组合成一个全局唯一的线程号 tid。这几乎是每个 CUDA kernel 的第一行——所有线程跑同一份代码，只靠各自不同的 tid 落到不同数据上（SIMT）。数据比线程多时，再配 grid-stride 循环让每个线程隔 stride 多算几个。",
+                    "en": "blockIdx.x is 'which block', blockDim.x is 'threads per block', threadIdx.x is 'which thread within the block'; together they form a globally unique thread id tid. This is the first line of almost every CUDA kernel - all threads run the same code, landing on different data only through their different tid (SIMT). When data exceeds threads, a grid-stride loop lets each thread handle a few more, hopping by stride.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "分块矩阵乘把 A、B 的小块先搬进 __shared__，主要是为了什么？",
+                    "en": "In tiled matmul, why first load small tiles of A and B into __shared__?",
+                },
+                "opts": [
+                    {"zh": "让一个 block 的线程在快内存上反复复用这块数据，少碰慢的 global 显存", "en": "so a block's threads reuse that data in fast memory, touching slow global VRAM less"},
+                    {"zh": "因为 global 显存装不下整个矩阵", "en": "because global VRAM cannot hold the whole matrix"},
+                    {"zh": "因为 __shared__ 是唯一能做乘法的内存", "en": "because __shared__ is the only memory that can do multiplication"},
+                    {"zh": "为了把结果永久保存下来", "en": "to store the result permanently"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素写法里每个线程各自去 global 读一整行/一整列，相邻线程大量重复读、把带宽浪费光，瓶颈是“等数据”。分块让 block 内线程合作把一小块搬进片上的 shared memory（快一两个数量级），然后大家在这块快内存上反复取数；一块 T×T 的 tile 平均被复用约 T 倍，慢显存访问量大幅下降。这正是 L31 的“载入一次、复用多次”搬到了 GPU——CPU 复用 cache，GPU 复用 shared memory。",
+                    "en": "In the naive version each thread reads a whole row/column from global, neighboring threads duplicating reads and wasting bandwidth, so the bottleneck is 'waiting for data'. Tiling has the block's threads cooperatively load a small tile into on-chip shared memory (one-to-two orders faster), then reuse it repeatedly; a T x T tile is reused about T-fold, slashing slow global traffic. This is L31's 'load once, reuse many' moved to the GPU - the CPU reuses cache, the GPU reuses shared memory.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "flash attention 把 softmax 和矩阵乘融合成一个 kernel，主要省下了什么？",
+                    "en": "Flash attention fuses softmax and matmul into one kernel - what does it mainly save?",
+                },
+                "opts": [
+                    {"zh": "不必把巨大的 N×N 注意力分数矩阵写回显存再读回来，省显存与带宽", "en": "not writing the huge N x N attention-score matrix back to VRAM and reading it again - saving VRAM and bandwidth"},
+                    {"zh": "省掉了 softmax 里的指数运算", "en": "eliminating the exponential in softmax"},
+                    {"zh": "把注意力的计算量从 N×N 降到 N", "en": "reducing attention's compute from N x N down to N"},
+                    {"zh": "不再需要 Q、K、V 三个矩阵", "en": "no longer needing the Q, K, V matrices"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "朴素注意力会先把 N×N 的分数矩阵整个算出来、写回显存，再读回做 softmax、再读回乘 V——把 N×N 在显存里写一遍读三遍，带宽全耗在这。flash attention 用“在线 softmax”分块地边算边修正，永不物化整个 N×N，只写出最终输出 O。注意：计算量并没变少（仍要算那些分数），省的是最贵的访存；序列越长省得越多，所以它对长上下文尤其关键。",
+                    "en": "Naive attention computes the whole N x N score matrix, writes it to VRAM, reads it back for softmax, reads it again to multiply V - writing N x N once and reading it three times burns the bandwidth. Flash attention uses an 'online softmax' to compute and correct tile by tile, never materializing the full N x N, writing out only the final O. Note: the compute is not reduced (those scores are still computed); what is saved is the costliest memory traffic, and the longer the sequence the more it saves - so it is especially key for long context.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课反复出现一个判断：很多内核是“访存密集”而非“算力密集”，瓶颈在带宽而非算力。请用这一课的三件事——分块矩阵乘（tiling 进 shared）、显存三级层级、flash attention（算子融合）——各说明一次它们是怎么和“带宽瓶颈”较劲的；再回想 L31 的 CPU tiling，说说 GPU 和 CPU 在“省访存”这件事上到底是不是同一个思路。",
+                "en": "One judgment recurs in this lesson: many kernels are 'memory-bound', not 'compute-bound' - the bottleneck is bandwidth, not compute. Using this lesson's three things - tiled matmul (tiling into shared), the three-level memory hierarchy, and flash attention (op fusion) - explain once each how they fight the 'bandwidth bottleneck'; then recall L31's CPU tiling and say whether the GPU and CPU are really following the same idea when it comes to 'saving memory traffic'.",
+            },
+        ],
+    },
 }
 
 

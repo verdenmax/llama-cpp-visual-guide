@@ -108,6 +108,8 @@ PAGES = [
      "第五部分 · 公共 API 与工具", "Part 5 · Public API & tools"),
     ("31-cpu-backend.html", "CPU 后端", "The CPU backend",
      "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
+    ("32-cuda-backend.html", "CUDA 后端", "The CUDA backend",
+     "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
 ]
 
 
@@ -604,6 +606,8 @@ SUBTITLES = {
                            "perplexity for quality, llama-bench for speed: the two rulers for choosing models/quants"),
     "31-cpu-backend.html": ("ggml-cpu：从标量到 SIMD、量化点积、多线程",
                             "ggml-cpu: scalar to SIMD, quantized dot product, multithreading"),
+    "32-cuda-backend.html": ("ggml-cuda：线程网格、分块矩阵乘、显存层级",
+                             "ggml-cuda: thread grid, tiled matmul, the memory hierarchy"),
 }
 
 

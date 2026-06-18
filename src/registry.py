@@ -44,4 +44,5 @@ CONTENT = {
     "29-quantize-tool.html": part5.LESSON_29,
     "30-eval-bench.html": part5.LESSON_30,
     "31-cpu-backend.html": part6.LESSON_31,
+    "32-cuda-backend.html": part6.LESSON_32,
 }
