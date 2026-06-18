@@ -1,240 +1,334 @@
-"""Content for Part 7 (advanced topics)."""
-
-LESSON_34 = {
-    "zh": r"""
-<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-推理时模型一次只吐一个 token：把整个序列前向一遍、采样出下一个、再接上去前向一遍……一步接一步，纯串行。而上一部分刚说过（L30/L32），decode 阶段是<strong>访存密集</strong>的——大部分时间花在把几个 GB 的权重从显存搬进来，真正的乘加反而没占满算力。投机解码（speculative decoding）就是钻这个空子：让一个<strong>小模型先猜一串</strong>，大模型<strong>一次性批改</strong>，把"猜对的部分"白赚下来。
-</p>
-<p style="color:var(--muted);margin-top:.4rem">关键洞察只有一句：既然 decode 慢在带宽、算力有富余，那"验证 K 个 token"和"生成 1 个 token"几乎一样快——多验证的那几个 token 几乎是免费的。投机解码把这点免费算力，换成了实打实的加速：典型能快 2-3 倍，而且<strong>输出和直接采样完全等价</strong>，不掉一点质量。这听起来几乎像免费的午餐，而它确实接近免费——代价只是要额外备一个小草稿模型（或者连小模型都不用，走 n-gram）。这一课就把这件"又快又不掉质量"的事，从直觉一路讲到它为什么严格成立。</p>
-<p style="color:var(--muted)">路线图：先讲清"为什么验证 K 个 ~= 生成 1 个"这点免费午餐，配一张追踪图看一轮投机怎么跑；再看草稿从哪来（小 draft model / n-gram）；最后看接受/拒绝怎么定、接受率怎么决定加速比，以及为什么它不改变输出质量。</p>
-
-<div class="card macro">
-  <div class="tag">🌍 宏观理解</div>
-  投机解码的全部精髓，就一句话：<strong>用富余的算力换串行的时间</strong>。自回归解码是 N 步串行，每步都被显存带宽卡着、算力闲着；投机解码让小模型一口气猜 K 个，大模型一次前向把这 K 个<strong>并行</strong>验证掉——猜对几个就等于一步顶几步。它不改模型、不改输出分布，纯粹是把"反正要把权重搬一遍，顺手多算几个 token"这点免费空间用起来。理解它，你就懂了为什么同样的模型、同样的显卡，挂一个小草稿模型就能快好几倍——快的不是"算得多"，而是"等得少"。顺带说，第七部分这几课的主题都是这种"换个角度重新看瓶颈"：投机解码省的是串行时间；下一课 MoE 省的是每个 token 的计算量；再后面的多模态在扩展"输入能是什么"，状态空间模型在重定义"历史怎么记"。四课各打一个新角度，但都还站在你前六部分搭好的地基上。
-</div>
-
-<div class="card analogy">
-  <div class="tag">🔌 生活类比</div>
-  想象你在<strong>批改听写</strong>：普通做法是你念一个词、学生写一个、你再念下一个，一来一回特别慢。投机解码像是请了个<strong>实习生先把整句都猜着写下来</strong>，然后你<strong>一眼扫过去</strong>，对的部分直接打勾、错的地方从那里改起。实习生（小模型）猜得快但不一定准；你（大模型）一次扫一整句、又快又权威。只要实习生猜对的比例够高，整体就比"一个一个念"快得多——而最终对错完全由你说了算，实习生再怎么瞎猜，也不会让最终答案出错。这个类比还能解释一个细节：实习生写得越像你的笔迹（draft 越接近 target），你打勾打得越顺、改得越少——这就是"接受率"在生活里的样子。
-</div>
-
-<h2>为什么能加速：免费的并行空间</h2>
-<p>先把"免费午餐"算清楚。一次 <span class="mono">llama_decode</span> 的开销，绝大部分是把模型那几个 GB 的权重从显存流过一遍（L30/L32 说的访存密集）；至于这一遍里顺便算 1 个 token 还是 10 个 token 的乘加，差别小到可以忽略。换句话说：<strong>前向一次的成本几乎是固定的，和这次算几个位置无关</strong>。这就留出了一个空子——如果能一次性把好几个候选 token 都喂进去并行验证，那它们摊到的"额外成本"趋近于零。举个量级感受：一次前向的开销，几乎全压在"把几个 GB 的权重在显存里流一遍"上（动辄几十毫秒）；而这一遍里多验几个 token 位置，只是多做一点点乘加，相比那笔固定的搬运开销只是个零头。所以"顺手多验几个 token"的边际成本，低到几乎白送。这也是为什么投机解码只在 decode（memory-bound）上有效、在 prefill（compute-bound）上意义不大：prefill 本来就在并行算一大批 token，没有"闲着的算力"可榨。</p>
-<p>自回归解码偏偏不给这个机会：它一步只产 1 个 token，下一个 token 依赖上一个，逼着你串行地把那几个 GB 反复搬 N 遍。投机解码的破法，就是<strong>先用别的办法弄出一串候选</strong>（猜的），再用大模型一次前向<strong>并行验证</strong>这一串——把"串行 N 步"压缩成"猜 1 次 + 验 1 次"。这里有个容易混淆的点：投机解码并没有"少算"——大模型该过的前向一次都没省，被拒的草稿 token 也实打实算了一遍。它省的纯粹是"串行的轮次"：把原本要排队等 N 次的前向，合并成了少数几次。所以它换来的是延迟（latency）下降，而不是总算力下降；在算力本就吃紧（大 batch、多并发）的服务器上，投机的收益反而会被压缩——这又一次呼应了 L30 的 pp/tg、L28 的连续批处理。</p>
-<div class="cols">
-  <div class="col"><h4>朴素 decode</h4><p>N 个 token = N 次前向，每次搬一遍几 GB 权重，纯串行。慢在"等数据"，不在"算"。</p></div>
-  <div class="col"><h4>投机 decode</h4><p>小模型猜 K 个 -&gt; 大模型 1 次前向并行验 K 个 -&gt; 接受 m 个。猜得准时，1 次前向顶 m 步。</p></div>
-</div>
-<p>把一轮投机定格成一条流水看最清楚：</p>
-<div class="trace">
-  <div class="tcap"><b>追踪一轮投机解码</b>：草稿模型提 K 个候选，target 一次并行验证，从头接受匹配前缀、并在第一个不匹配处白送 1 个，下一轮从接受点续（示意）。</div>
-  <div class="stations">
-    <div class="stn"><h5>① 草稿</h5>
-      <div class="cellrow"><span class="vc">t1 t2 t3 t4 t5</span></div>
-      <div class="tlab">小模型猜 K=5 个</div></div>
-    <div class="op">target<br>1 次前向</div>
-    <div class="stn"><h5>② 并行验证</h5>
-      <div class="cellrow"><span class="vc blue">5 个位置的预测</span></div>
-      <div class="tlab">一次 llama_decode</div></div>
-    <div class="op">逐位<br>比对</div>
-    <div class="stn"><h5>③ 比对</h5>
-      <div class="cellrow"><span class="vc">t1 t2 t3 对 | t4 错</span></div>
-      <div class="tlab">第 4 个起不匹配</div></div>
-    <div class="op">接受<br>前缀</div>
-    <div class="stn"><h5>④ 接受 + bonus</h5>
-      <div class="cellrow"><span class="vc hot">t1 t2 t3 + 1 个</span></div>
-      <div class="tlab">3 个 + 白送 1 个</div></div>
-    <div class="op">续下<br>一轮</div>
-    <div class="stn"><h5>⑤ 下一轮</h5>
-      <div class="cellrow"><span class="vc">从接受点再猜</span></div>
-      <div class="tlab">丢弃 t4 t5 之后</div></div>
-  </div>
-</div>
-<p>这一轮里，大模型只做了<strong>一次</strong>前向，却一口气敲定了 4 个 token（3 个接受 + 1 个 bonus）。要是草稿全中，5 个候选就能换来 6 个 token / 一次前向；要是第一个就错，那就退化成普通 decode（白跑一次草稿）。换个角度看整段生成：原本要 N 次串行前向才能出 N 个 token，现在每次前向平均落定 m+1 个，前向次数就降到约 N/(m+1)——省下的全是那些"排队等显存"的时间。所以投机解码的加速比，全看<strong>接受率</strong>——草稿猜得越准，省得越多。</p>
-
-<h2>草稿从哪来：小模型与 n-gram</h2>
-<p>候选不能瞎猜——猜得越接近大模型的真实输出，接受率越高、越省。ggml 的 <span class="mono">common/speculative</span> 给了两条主要路子：</p>
-<p><strong>(1) draft model（草稿模型）</strong>：一个和 target <strong>同词表</strong>的小模型（比如 target 是 70B、draft 用同系列的 1B）。它就是个迷你版的自回归解码——贪心地一个个续写，直到够 K 个、或者自己都没把握了：</p>
-<pre class="code"><span class="cm">// 草稿模型贪心续写 K 个 (简化自 common/speculative.cpp)</span>
-<span class="kw">while</span> (n_drafting &lt; n_max) {
-    <span class="fn">llama_decode</span>(ctx_dft, batch);              <span class="cm">// 小模型前向一步</span>
-    auto * cur_p = <span class="fn">get_probs</span>(ctx_dft);          <span class="cm">// 取这一步的概率分布</span>
-    <span class="kw">if</span> (cur_p-&gt;data[0].p &lt; params.p_min)        <span class="cm">// 最可能的 token 都没把握?</span>
-        <span class="kw">break</span>;                                  <span class="cm">// 收手, 不硬猜</span>
-    draft.push_back(cur_p-&gt;data[0].id);          <span class="cm">// 把它当下一个候选</span>
-    <span class="cm">// ... 把这个 token 接上, 继续猜下一个 ...</span>
-}</pre>
-<p>注意那个 <span class="mono">p_min</span> 阈值：草稿模型一旦"自己都没把握"（最可能 token 的概率都低于阈值），就<strong>提前收手</strong>——与其硬猜一个大概率被拒的 token、白占一个验证位，不如少猜几个。这正是接受率和草稿长度之间的权衡：猜太短省不到，猜太长又容易在后段翻车。（这说的是草稿的"长度" K；另一个旋钮是草稿模型的"大小"——越小越快但越不准，得和接受率一起权衡，两个旋钮一起决定那个甜区落在哪。）</p>
-<p><strong>(2) n-gram</strong>：连小模型都不要，直接从<strong>已经生成的文本里查</strong>。原理很朴素：自然语言里很多片段会重复（人名、固定搭配、代码里的变量名），如果当前这几个 token 在前文出现过，那它后面跟过的那几个 token，很可能就是这次要续的。<span class="mono">common/speculative</span> 里有好几种 n-gram 变体（<span class="mono">ngram-simple</span> / <span class="mono">ngram-cache</span> 等），共同点是<strong>零额外模型、近乎零成本</strong>地凑出候选——特别适合"输出里有大量重复"的场景（改写、续写、结构化输出）。n-gram 这条路尤其适合 agent / 工具调用 / 长文档改写这类"输入和输出大量重叠"的活儿：要续的内容很多就照抄前文，命中率高得惊人，几乎白嫖一截速度，还省掉了加载和运行草稿模型的那份显存与算力。代价是 n-gram 只会照搬前文出现过的片段，遇到全新内容就没辙——所以实现里常把它和草稿模型<strong>串成一条链</strong>：先用近乎零成本的 n-gram 试一把，命中就直接用，没命中再退回让小草稿模型猜。前面源码事实里说的"多实现可链式"，就是这个意思。</p>
-<table class="t">
-  <tr><th>草稿来源</th><th>额外成本</th><th>准确度（接受率）</th><th>最适合</th></tr>
-  <tr><td><span class="mono">draft model</span></td><td>要加载并运行一个小模型</td><td>高（draft 与 target 同系列时）</td><td>通用场景，draft 与 target 同源</td></tr>
-  <tr><td><span class="mono">n-gram</span></td><td>近乎零（只查前文）</td><td>看输出的重复度</td><td>输入输出大量重叠：改写 / agent / 代码续写</td></tr>
-</table>
-
-<h2>接受、拒绝与接受率</h2>
-<p>草稿有了，轮到大模型当裁判。调用方把草稿的 K 个 token 一次性追加进 target 的 batch，<span class="mono">llama_decode</span> 一次算出 target 在这 K 个位置各自的预测，然后<strong>从头逐位比对</strong>：target 在第 i 位的预测和草稿的第 i 个一致就接受，碰到第一个不一致就停，接受前面那段前缀，并把 target 自己在该位置的预测白送进来（见下一节）。这里有个关键的并行点：这 K 个位置的验证是在<strong>一次</strong> <span class="mono">llama_decode</span> 里同时算出来的——靠的是把草稿的 K 个 token 当作"已知输入"一起喂进去，让 target 在一趟前向里给出每个位置的预测。这正是前面那句"验证 K 个 ~= 生成 1 个"在代码层面的落地。最后告诉投机上下文这次接受了几个：</p>
-<pre class="code"><span class="cm">// 调用方的验证循环 (示意; 接受语义见 common/speculative.h)</span>
-<span class="kw">int</span> n_accepted = 0;
-<span class="kw">for</span> (int i = 0; i &lt; n_draft; i++) {
-    <span class="kw">if</span> (target_pred[i] != draft[i])             <span class="cm">// 第一个不匹配?</span>
-        <span class="kw">break</span>;                                  <span class="cm">// 接受到此为止</span>
-    n_accepted++;                               <span class="cm">// 这一位匹配, 接受</span>
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var l=localStorage.getItem('lcvg-lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<title>35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程</title>
+<meta name="description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="theme-color" content="#c2630e">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nI2MyNjMwZScvPjx0ZXh0IHg9JzE2JyB5PScyMicgZm9udC1mYW1pbHk9J3N5c3RlbS11aSxzYW5zLXNlcmlmJyBmb250LXNpemU9JzE1JyBmb250LXdlaWdodD0nODAwJyBmaWxsPScjZmZmJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5sbDwvdGV4dD48L3N2Zz4=">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="llama.cpp 图解教程">
+<meta property="og:title" content="35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程">
+<meta property="og:description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="35 · MoE 专家混合 / Mixture of experts - llama.cpp 图解教程">
+<meta name="twitter:description" content="第七部分 · 进阶专题｜MoE 专家混合 - llama.cpp 图解教程（中英双语，配真实源码对应、折叠深挖与设计亮点）">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --ink: #1d2129;
+  --muted: #5b6470; --faint: #8a939f; --line: #e1e5ea;
+  --accent: #c2630e; --accent-soft: #fbeede; --accent-ink: #8a4708;
+  --blue: #2563eb; --blue-soft: #e7efff; --amber: #b4690e; --amber-soft: #fdf1dd;
+  --purple: #7c3aed; --purple-soft: #f0e9ff; --red: #d23f3f; --red-soft: #fbe6e6;
+  --code-bg: #0f172a; --code-ink: #e2e8f0; --code-line: #1e293b;
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  --radius: 14px;
 }
-<span class="fn">common_speculative_accept</span>(spec, seq_id, n_accepted); <span class="cm">// 告知接受了几个</span></pre>
-<p>"接受率"就是<strong>平均每轮草稿被接受的比例</strong>。它直接决定加速比：设草稿长度 K、平均接受 m 个，那么大模型每做 1 次前向就推进了 m+1 个 token（含 bonus），理想加速约 m+1 倍——当然要减去跑草稿的开销。所以投机解码有个<strong>甜区</strong>：草稿模型既要够小（跑得快）、又要够准（接受率高），两者得平衡。draft 和 target 越像（同系列、同数据训练），接受率越高。实战里这对应 llama.cpp 的 <span class="mono">--model-draft</span> / <span class="mono">-md</span>（指定草稿模型）和 <span class="mono">--spec-draft-n-max</span> / <span class="mono">--spec-draft-n-min</span>（草稿长度上下限）等参数；草稿长度 K 也不是越大越好——K 越大，后段越容易翻车（一旦中途某个被拒，它后面猜的就全废了），所以通常取 4 到 8 这个量级最划算。总之，投机解码不是"开了就快"的开关，而是"配好草稿来源和长度才快"的调参题——配得好，免费的加速就到手了。</p>
-<p>反过来，接受率低时投机解码会<strong>变慢</strong>：草稿老被拒，等于每轮都白跑一遍小模型、还多搬了一次草稿那几个 token 的 KV。所以它不是无脑开就赚——任务越"可预测"（代码、翻译、改写），越划算；越"发散"（创意写作、高温采样下的多样输出），越容易亏。一个实用的判断：如果你的场景里草稿接受率长期低于某条线（经验上大概 0.3 左右），那投机大概率在帮倒忙，不如关掉。好在 llama.cpp 跑投机时会打印接受率统计，看一眼就知道这笔买卖划不划算——这也呼应 L30 的态度：别猜，去量。</p>
-
-<h2>深入：bonus token 与"不改变输出"</h2>
-<p>两个折叠，回答投机解码最容易让人犯嘀咕的两个问题。</p>
-<details class="accordion">
-  <summary><span class="badge-num">1</span> 为什么第一个不匹配处能白送 1 个 token？ <span class="hint">点击展开</span></summary>
-  <div class="acc-body">
-    <p>因为 target 那一次前向，本来就把"每个位置的下一个 token 预测"都算出来了。验证草稿的第 i 个，用的就是 target 在第 i-1 位的预测；当草稿第 i 个被拒，意味着 target 在第 i-1 位给出的预测和草稿不同——而 <strong>target 这个预测，正是这一步本来就要采的那个 token</strong>。所以它不是"额外算的"，是"顺手已经算好的"，直接拿来用就行。于是每轮哪怕草稿一个都没中，至少也能靠这个 bonus 推进 1 个 token——保证投机解码<strong>最坏也不比普通 decode 少出 token</strong>（只是多花了草稿的开销）。顺带说，正因为有这个"保底 1 个"，投机解码的最坏情况是确定的：接受率为 0 时，它退化成"普通 decode + 每轮一次白跑的草稿"，慢一点但绝不会卡死或出错。这种"上不封顶、下有保底"的性质，正是它能放心默认开启的底气。</p>
-  </div>
-</details>
-<details class="accordion">
-  <summary><span class="badge-num">2</span> 投机解码会不会让输出变差？ <span class="hint">点击展开</span></summary>
-  <div class="acc-body">
-    <p>不会——这是投机解码最漂亮的地方：它<strong>在数学上等价于直接从 target 采样</strong>，输出分布一模一样。直觉是这样：被接受的 token，都是 target 自己也会给出的（验证通过）；被拒的位置，用的是 target 自己的预测（bonus）。草稿模型只在"提议"环节出现，它提议得好不好只影响<strong>速度</strong>（接受率），完全不参与"最终选哪个 token"的决定。换句话说，草稿是"加速器"不是"决策者"。<strong>贪心解码下</strong>这点最直观（逐位必须精确匹配）；<strong>带温度的随机采样</strong>下也一样：llama.cpp 在每个位置照常从 target 采一个 token，只有当草稿这一位和采到的<strong>完全相同</strong>才接受——发出去的永远是 target 自己采的那个，所以"开不开投机、采样分布完全一致"是天然成立的。（理论上还有一种更宽松的"修正拒绝采样"，能在保持分布不变的前提下提高接受率，但 llama.cpp 走的是更简单的"精确匹配才接受"这一路。）所以你可以放心：投机解码只换速度，不换质量。这一点之所以重要，是因为它把"要不要开投机"从一个质量问题降级成了纯粹的速度问题：你永远不必担心"开了投机会不会让模型变笨"，只需要关心"这个场景下它划不划算"——而后者，量一下接受率就有答案。</p>
-  </div>
-</details>
-
-<div class="card key">
-  <div class="tag">✅ 关键要点</div>
-  <ul>
-    <li>原理：decode 是访存密集（L30/L32），一次前向验证 K 个 token ~= 生成 1 个；用富余算力换串行时间。</li>
-    <li>一轮：草稿提 K 个 -&gt; target 一次前向并行验证 -&gt; 接受匹配前缀 + 1 个 bonus -&gt; 下一轮从接受点续。</li>
-    <li>草稿来源：(1) 小 draft model（同词表，贪心续写、<span class="mono">p_min</span> 门控）；(2) n-gram（查前文重复，零额外模型）。</li>
-    <li>加速比 = 接受率：平均接受 m 个则约 m+1 倍；draft 越像 target 越快；接受率太低反而变慢。</li>
-    <li>不改变质量：数学上等价于直接从 target 采样；草稿只影响速度、不参与最终决策。</li>
-  </ul>
-</div>
-
-<div class="card spark">
-  <div class="tag">💡 设计洞察</div>
-  投机解码是一个特别值得回味的"系统级"优化：它没改一行模型、没动一个权重，纯粹是<strong>看穿了瓶颈的性质</strong>（decode 慢在带宽、算力闲着），再用一个"提议-验证"的结构把闲置算力榨出来。这种"先猜后验、猜错不亏"的套路，在计算机系统里到处都是——CPU 的分支预测（猜下一条指令、猜错就回滚）、数据库的乐观锁、网络的预取，骨子里都是同一招：<strong>在有富余资源、且验证比生成便宜的地方，大胆地投机</strong>。把这个视角装进脑子，你会在很多看似无关的系统里认出它。其实大模型推理本身也越来越像一个"投机 + 验证"的系统：从这一课的 token 级投机，到把草稿缓存复用，再到各种"先用便宜的近似、再用昂贵的精确兜底"的设计——一旦认出这个模式，很多看似花哨的加速技巧，本质都是同一个朴素的赌注。下一课我们看另一种"用结构换效率"的思路：MoE 把一个大 FFN 拆成很多专家，每个 token 只走几个——用激活稀疏换参数容量。
-</div>
-""",
-    "en": r"""
-<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
-In inference the model emits one token at a time: run the whole sequence forward, sample the next token, append it, run forward again... step after step, purely serial. Yet as the last part showed (L30/L32), the decode phase is <strong>memory-bound</strong> - most of the time goes to hauling several GB of weights in from VRAM, while the actual multiply-adds leave compute underused. Speculative decoding exploits exactly this gap: let a <strong>small model guess a run of tokens first</strong>, have the big model <strong>grade them in one shot</strong>, and pocket the part it guessed right for free.
-</p>
-<p style="color:var(--muted);margin-top:.4rem">The key insight is one sentence: since decode is slow on bandwidth with compute to spare, "verifying K tokens" is about as fast as "generating 1 token" - those extra verified tokens are almost free. Speculative decoding turns that free compute into real speedup: typically 2-3x faster, and <strong>exactly equivalent to direct sampling</strong>, with no quality loss at all. It almost sounds like a free lunch, and it nearly is - the only cost is keeping a small draft model around (or no small model at all, going the n-gram route). This lesson takes this "faster with no quality loss" claim from intuition all the way to why it strictly holds.</p>
-<p style="color:var(--muted)">Roadmap: first make clear why "verify K ~= generate 1" is a free lunch, with a trace of one speculative round; then where the draft comes from (a small draft model / n-gram); and finally how accept/reject is decided, how the acceptance rate sets the speedup, and why it does not change output quality.</p>
-
-<div class="card macro">
-  <div class="tag">🌍 Big picture</div>
-  The whole essence of speculative decoding is one sentence: <strong>trade spare compute for serial time</strong>. Autoregressive decoding is N serial steps, each stalled on VRAM bandwidth with compute sitting idle; speculative decoding lets a small model guess K tokens in one go, and the big model verifies all K in <strong>one parallel</strong> forward pass - guess a few right and one step does the work of several. It changes no model and no output distribution; it purely uses the free room of "since the weights get hauled in anyway, compute a few extra tokens while at it". Grasp it and you see why the same model on the same GPU runs several times faster once you attach a small draft model - the speedup is not "computing more" but "waiting less". By the way, this whole Part 7 shares that theme of "re-seeing the bottleneck from a new angle": speculative decoding saves serial time; next lesson's MoE saves per-token compute; later, multimodal extends "what the input can be" and state-space models redefine "how history is kept". Four lessons, four new angles - all still standing on the foundation the first six parts built.
-</div>
-
-<div class="card analogy">
-  <div class="tag">🔌 Analogy</div>
-  Picture <strong>grading a dictation</strong>: the plain way is you read one word, the student writes one, you read the next - a slow back-and-forth. Speculative decoding is like hiring an <strong>intern to guess the whole sentence ahead</strong>, then you <strong>scan it at a glance</strong>, tick the right part and fix from where it went wrong. The intern (small model) guesses fast but not always right; you (big model) scan a whole sentence at once, fast and authoritative. As long as the intern's hit rate is high enough, the whole thing beats "one word at a time" - and the final right-or-wrong is entirely your call, so however wildly the intern guesses, the final answer is never wrong. The analogy also explains a detail: the more the intern's handwriting matches yours (the closer the draft is to the target), the smoother you tick and the less you fix - that is what "acceptance rate" looks like in everyday terms.
-</div>
-
-<h2>Why it speeds up: the free parallel room</h2>
-<p>First, do the "free lunch" math. The cost of one <span class="mono">llama_decode</span> is mostly streaming the model's several GB of weights through from VRAM (the memory-bound point of L30/L32); whether you also compute the multiply-adds for 1 token or 10 in that pass is a negligible difference. In other words: <strong>one forward pass costs almost a fixed amount, regardless of how many positions it computes</strong>. That leaves a gap - if you can feed several candidate tokens in at once and verify them in parallel, their "extra cost" approaches zero. A sense of scale: the cost of one forward pass sits almost entirely on "streaming the several GB of weights through VRAM" (often tens of milliseconds); verifying a few more token positions in that same pass only adds a bit more multiply-add, a mere fraction of that fixed hauling cost. So the marginal cost of "verifying a few more tokens in passing" is low enough to be nearly free. This is also why speculative decoding helps only in decode (memory-bound) and means little in prefill (compute-bound): prefill is already computing a big batch of tokens in parallel, with no "idle compute" to wring out.</p>
-<p>Autoregressive decoding refuses this chance: it produces just 1 token per step, and the next token depends on the last, forcing you to serially haul those GB N times over. Speculative decoding's trick is to <strong>produce a run of candidates by some other means</strong> (a guess), then use the big model's one forward pass to <strong>verify the run in parallel</strong> - compressing "N serial steps" into "1 guess + 1 verify". A common confusion here: speculative decoding does not "compute less" - the big model's forward passes are not saved, and rejected draft tokens really were computed. What it saves is purely "serial rounds": forward passes that used to queue up N times are merged into a few. So what it buys is lower latency, not lower total compute; on a server where compute is already tight (large batch, high concurrency), speculation's gains shrink instead - echoing once more L30's pp/tg and L28's continuous batching.</p>
-<div class="cols">
-  <div class="col"><h4>naive decode</h4><p>N tokens = N forward passes, each hauling several GB of weights, purely serial. Slow on "waiting for data", not "computing".</p></div>
-  <div class="col"><h4>speculative decode</h4><p>small model guesses K -&gt; big model verifies K in 1 pass -&gt; accept m. When guesses are good, one pass does m steps' work.</p></div>
-</div>
-<p>Freezing one speculative round into a flow is clearest:</p>
-<div class="trace">
-  <div class="tcap"><b>Trace one speculative round</b>: the draft model proposes K candidates, the target verifies them in one parallel pass, accepts the matching prefix and adds 1 free bonus at the first mismatch, and the next round resumes from the accept point (illustrative).</div>
-  <div class="stations">
-    <div class="stn"><h5>1 draft</h5>
-      <div class="cellrow"><span class="vc">t1 t2 t3 t4 t5</span></div>
-      <div class="tlab">small model guesses K=5</div></div>
-    <div class="op">target<br>1 pass</div>
-    <div class="stn"><h5>2 verify</h5>
-      <div class="cellrow"><span class="vc blue">predictions at 5 positions</span></div>
-      <div class="tlab">one llama_decode</div></div>
-    <div class="op">compare<br>position-wise</div>
-    <div class="stn"><h5>3 compare</h5>
-      <div class="cellrow"><span class="vc">t1 t2 t3 ok | t4 no</span></div>
-      <div class="tlab">mismatch from #4</div></div>
-    <div class="op">accept<br>prefix</div>
-    <div class="stn"><h5>4 accept + bonus</h5>
-      <div class="cellrow"><span class="vc hot">t1 t2 t3 + 1</span></div>
-      <div class="tlab">3 + 1 free bonus</div></div>
-    <div class="op">next<br>round</div>
-    <div class="stn"><h5>5 next round</h5>
-      <div class="cellrow"><span class="vc">guess again from accept</span></div>
-      <div class="tlab">discard after t4 t5</div></div>
-  </div>
-</div>
-<p>In this round the big model did <strong>one</strong> forward pass yet nailed down 4 tokens at once (3 accepted + 1 bonus). If the draft were all correct, 5 candidates would buy 6 tokens per forward pass; if the very first is wrong, it degrades to plain decode (a wasted draft run). Seen across a whole generation: where you used to need N serial forward passes for N tokens, each pass now lands m+1 on average, so the pass count drops to about N/(m+1) - and all the savings are that "queuing for VRAM" time. So speculative decoding's speedup hinges entirely on the <strong>acceptance rate</strong> - the better the draft guesses, the more you save.</p>
-
-<h2>Where the draft comes from: a small model and n-gram</h2>
-<p>The candidates cannot be wild guesses - the closer they are to the big model's real output, the higher the acceptance rate and the more you save. ggml's <span class="mono">common/speculative</span> offers two main routes:</p>
-<p><strong>(1) A draft model</strong>: a small model sharing the target's <strong>vocabulary</strong> (say target 70B, draft a 1B from the same family). It is just a mini autoregressive decode - greedily extending one token at a time until it has K, or until it is unsure:</p>
-<pre class="code"><span class="cm">// draft model greedily extends K tokens (simplified from common/speculative.cpp)</span>
-<span class="kw">while</span> (n_drafting &lt; n_max) {
-    <span class="fn">llama_decode</span>(ctx_dft, batch);              <span class="cm">// small model, one forward step</span>
-    auto * cur_p = <span class="fn">get_probs</span>(ctx_dft);          <span class="cm">// the step's probability distribution</span>
-    <span class="kw">if</span> (cur_p-&gt;data[0].p &lt; params.p_min)        <span class="cm">// not even confident in the top token?</span>
-        <span class="kw">break</span>;                                  <span class="cm">// stop, do not force a guess</span>
-    draft.push_back(cur_p-&gt;data[0].id);          <span class="cm">// take it as the next candidate</span>
-    <span class="cm">// ... append this token, keep guessing the next ...</span>
-}</pre>
-<p>Note that <span class="mono">p_min</span> threshold: once the draft model is "unsure even of itself" (the top token's probability falls below the threshold), it <strong>stops early</strong> - rather than force a token likely to be rejected and waste a verify slot, it guesses fewer. This is exactly the trade-off between acceptance rate and draft length: too short saves little, too long tends to derail in the later positions. (That is the draft's "length" K; the other knob is the draft model's "size" - smaller is faster but less accurate, to be weighed against the acceptance rate, and the two knobs together decide where the sweet spot falls.)</p>
-<p><strong>(2) n-gram</strong>: no small model at all - look it up directly <strong>in the already-generated text</strong>. The idea is plain: natural language repeats a lot (names, fixed phrases, variable names in code), so if the current few tokens appeared earlier, the tokens that followed them then are likely what comes next now. <span class="mono">common/speculative</span> has several n-gram variants (<span class="mono">ngram-simple</span> / <span class="mono">ngram-cache</span>, etc.); what they share is producing candidates at <strong>zero extra model and near-zero cost</strong> - great for outputs with heavy repetition (rewriting, continuation, structured output). The n-gram route especially suits agent / tool-calling / long-document-rewriting work where input and output overlap heavily: much of what comes next is copied from earlier text, the hit rate is astonishingly high, you grab a chunk of free speed, and you save the VRAM and compute of loading and running a draft model too. The cost is that n-gram only copies fragments that appeared earlier and is helpless against genuinely new content - so implementations often <strong>chain</strong> it with a draft model: try the near-zero-cost n-gram first, use it on a hit, and fall back to the small draft model's guess on a miss. The "multiple implementations can chain" from the source facts above means exactly this.</p>
-<table class="t">
-  <tr><th>Draft source</th><th>Extra cost</th><th>Accuracy (acceptance)</th><th>Best for</th></tr>
-  <tr><td><span class="mono">draft model</span></td><td>load and run a small model</td><td>high (when draft and target share a family)</td><td>general use, draft and target same origin</td></tr>
-  <tr><td><span class="mono">n-gram</span></td><td>near zero (just look up earlier text)</td><td>depends on output repetition</td><td>heavy input/output overlap: rewriting / agent / code continuation</td></tr>
-</table>
-
-<h2>Accept, reject, and the acceptance rate</h2>
-<p>With a draft in hand, the big model becomes the judge. The caller appends the draft's K tokens into the target's batch at once, <span class="mono">llama_decode</span> computes the target's prediction at each of those K positions in one pass, then compares <strong>position by position from the start</strong>: if the target's prediction at position i matches the draft's i-th token, accept it; at the first mismatch, stop, accept the prefix so far, and add the target's own prediction at that position for free (see next section). A key parallelism point here: these K positions are all verified in <strong>one</strong> <span class="mono">llama_decode</span> - by feeding the draft's K tokens in as "known inputs" so the target gives a prediction at every position in a single forward pass. This is exactly the code-level realization of "verify K ~= generate 1" from earlier. Finally tell the speculative context how many were accepted:</p>
-<pre class="code"><span class="cm">// the caller's verify loop (illustrative; accept semantics in common/speculative.h)</span>
-<span class="kw">int</span> n_accepted = 0;
-<span class="kw">for</span> (int i = 0; i &lt; n_draft; i++) {
-    <span class="kw">if</span> (target_pred[i] != draft[i])             <span class="cm">// first mismatch?</span>
-        <span class="kw">break</span>;                                  <span class="cm">// accept up to here</span>
-    n_accepted++;                               <span class="cm">// this position matches, accept</span>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232c; --ink: #e6edf3;
+    --muted: #9aa6b2; --faint: #6e7a86; --line: #2a323c;
+    --accent: #e8923f; --accent-soft: #3a2410; --accent-ink: #f3b673;
+    --blue: #6ea8fe; --blue-soft: #16243f; --amber: #e0a44a; --amber-soft: #33270f;
+    --purple: #b794f6; --purple-soft: #271a40; --red: #f08080; --red-soft: #3a1a1a;
+    --code-bg: #0a0f1a; --code-ink: #d8e2f0; --code-line: #14202f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
 }
-<span class="fn">common_speculative_accept</span>(spec, seq_id, n_accepted); <span class="cm">// inform how many accepted</span></pre>
-<p>The "acceptance rate" is the <strong>average fraction of the draft accepted per round</strong>. It directly sets the speedup: with draft length K and m accepted on average, each big-model forward pass advances m+1 tokens (including the bonus), an ideal speedup around m+1x - minus the cost of running the draft, of course. So speculative decoding has a <strong>sweet spot</strong>: the draft model must be small enough (fast) yet accurate enough (high acceptance), and the two must balance. The more alike draft and target are (same family, same training data), the higher the acceptance. In practice this maps to llama.cpp's <span class="mono">--model-draft</span> / <span class="mono">-md</span> (pick the draft model) and <span class="mono">--spec-draft-n-max</span> / <span class="mono">--spec-draft-n-min</span> (draft-length bounds); and draft length K is not better when bigger - the larger K is, the more the later positions tend to derail (once one mid-draft token is rejected, everything it guessed after is wasted), so 4 to 8 is usually the sweet range. In short, speculative decoding is not a "turn it on and it's fast" switch but a "fast once you tune the draft source and length" knob-turning exercise - tune it well and the free speedup is yours.</p>
-<p>Conversely, when the acceptance rate is low, speculative decoding gets <strong>slower</strong>: the draft keeps getting rejected, so every round wastes a small-model run and the extra KV for those draft tokens. It is not a free win you flip on blindly - the more "predictable" the task (code, translation, rewriting), the more it pays; the more "divergent" (creative writing, diverse output under high-temperature sampling), the easier it loses. A practical test: if your scenario's draft acceptance rate stays below some line (around 0.3 by rule of thumb), speculation is probably doing more harm than good and is better turned off. Helpfully, llama.cpp prints acceptance-rate stats when speculating, so one glance tells you whether the trade pays - echoing L30's stance: do not guess, measure.</p>
-
-<h2>Deeper: the bonus token and "no change to output"</h2>
-<p>Two folds answering the two things about speculative decoding that most make people uneasy.</p>
-<details class="accordion">
-  <summary><span class="badge-num">1</span> Why can the first mismatch hand you 1 free token? <span class="hint">click to expand</span></summary>
-  <div class="acc-body">
-    <p>Because that one target forward pass already computed "the next-token prediction at every position". Verifying the draft's i-th token uses the target's prediction at position i-1; when the draft's i-th is rejected, it means the target's prediction at position i-1 differs from the draft - and <strong>that target prediction is exactly the token this step was going to sample anyway</strong>. So it is not "extra computed" but "already computed in passing", free to take. Thus even if a round's draft is all wrong, the bonus still advances 1 token - guaranteeing speculative decoding <strong>never emits fewer tokens than plain decode in the worst case</strong> (it only spent the draft's cost). Worth adding: because of this "at least 1" floor, speculative decoding's worst case is well-defined - at acceptance rate 0 it degrades to "plain decode plus one wasted draft run per round", a bit slower but never stalling or erroring. This "no ceiling above, a floor below" property is exactly what makes it safe to leave on by default.</p>
-  </div>
-</details>
-<details class="accordion">
-  <summary><span class="badge-num">2</span> Does speculative decoding make the output worse? <span class="hint">click to expand</span></summary>
-  <div class="acc-body">
-    <p>No - this is the prettiest part: it is <strong>mathematically equivalent to sampling directly from the target</strong>, the output distribution is identical. The intuition: accepted tokens are ones the target itself would give (they passed verification); rejected positions use the target's own prediction (the bonus). The draft model appears only in "proposing", and how well it proposes affects only <strong>speed</strong> (acceptance rate), never the decision of "which token is final". In other words, the draft is an accelerator, not a decision-maker. <strong>Under greedy decoding</strong> this is most obvious (each position must match exactly); <strong>under temperature sampling</strong> it is the same: llama.cpp samples a token from the target at each position as usual, and accepts the draft only when it <strong>exactly equals</strong> the sampled token - what is emitted is always the target's own sample, so "the sampling distribution is identical whether speculation is on or off" holds by construction. (There is also a looser "modified rejection sampling" in theory that raises the acceptance rate while preserving the distribution, but llama.cpp takes the simpler "accept only on exact match" route.) So rest assured: speculative decoding trades only speed, not quality. This matters because it downgrades "should I enable speculation" from a quality question to a pure speed question: you never have to worry "will turning on speculation make the model dumber", only "is it worth it in this scenario" - and the latter is answered by measuring the acceptance rate.</p>
-  </div>
-</details>
-
-<div class="card key">
-  <div class="tag">✅ Key points</div>
-  <ul>
-    <li>Principle: decode is memory-bound (L30/L32), so one forward pass verifying K tokens ~= generating 1; trade spare compute for serial time.</li>
-    <li>One round: draft proposes K -&gt; target verifies all K in one pass -&gt; accept the matching prefix + 1 bonus -&gt; next round resumes from the accept point.</li>
-    <li>Draft sources: (1) a small draft model (same vocab, greedy extend, <span class="mono">p_min</span> gating); (2) n-gram (look up repeats in earlier text, no extra model).</li>
-    <li>Speedup = acceptance rate: m accepted on average gives about m+1x; the more draft resembles target, the faster; too low an acceptance is slower instead.</li>
-    <li>No quality change: mathematically equivalent to sampling from the target; the draft affects only speed, not the final decision.</li>
-  </ul>
-</div>
-
-<div class="card spark">
-  <div class="tag">💡 Design insight</div>
-  Speculative decoding is a "systems-level" optimization worth savoring: it changed not one line of the model and not one weight, purely <strong>seeing through the nature of the bottleneck</strong> (decode is slow on bandwidth with compute idle), then using a "propose-verify" structure to wring out that idle compute. This "guess first, verify after, lose nothing if wrong" pattern is everywhere in computer systems - a CPU's branch prediction (guess the next instruction, roll back if wrong), a database's optimistic locking, network prefetch - all the same move at heart: <strong>where there are spare resources and verifying is cheaper than generating, speculate boldly</strong>. Plant this view and you will recognize it in many seemingly unrelated systems. In fact large-model inference itself increasingly looks like a "speculate + verify" system: from this lesson's token-level speculation, to reusing cached drafts, to all sorts of "use a cheap approximation first, fall back to the expensive exact one" designs - once you recognize the pattern, many flashy-looking speedup tricks are at heart the same plain bet. Next lesson, another "structure for efficiency" idea: MoE splits one big FFN into many experts, each token taking only a few - trading activation sparsity for parameter capacity.
-</div>
-""",
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
 }
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace; overflow-wrap: break-word; }
 
-LESSON_35 = {
-    "zh": r"""
+/* ---- top progress bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 50; background: var(--panel);
+  border-bottom: 1px solid var(--line); backdrop-filter: blur(8px);
+}
+.topbar-inner {
+  max-width: 960px; margin: 0 auto; padding: .7rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.topbar .home { font-size: .82rem; color: var(--muted); font-weight: 600; display:flex; gap:.5rem; align-items:center; }
+.topbar .home b { color: var(--accent); }
+.topbar .pill { font-size: .72rem; color: var(--muted); background: var(--panel-2);
+  padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.progress { height: 3px; background: var(--panel-2); }
+.progress > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--blue)); }
+
+.wrap { max-width: 820px; margin: 0 auto; padding: 2.4rem 1.25rem 5rem; }
+
+/* ---- hero ---- */
+.hero { margin-bottom: 2rem; }
+.hero .part { font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); font-weight: 700; margin-bottom: .55rem; }
+.hero h1 { font-size: 2.05rem; line-height: 1.2; letter-spacing: -.01em; font-weight: 750; }
+.hero .lead { margin-top: .9rem; font-size: 1.06rem; color: var(--muted); }
+
+h2 { font-size: 1.32rem; margin: 2.4rem 0 .9rem; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: .55rem; }
+h2::before { content: ""; width: 4px; height: 1.05em; background: var(--accent); border-radius: 3px; display: inline-block; }
+h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem; }
+p { margin: .7rem 0; }
+ul, ol { margin: .6rem 0 .6rem 1.3rem; }
+li { margin: .3rem 0; }
+strong { color: var(--ink); font-weight: 680; }
+.inline { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: .08em .4em; font-size: .9em; color: var(--accent-ink); }
+
+/* ---- callout cards ---- */
+.card { border-radius: var(--radius); padding: 1.05rem 1.2rem; margin: 1.2rem 0;
+  border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.card .tag { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .5rem; }
+.card.macro { border-left: 4px solid var(--blue); }
+.card.macro .tag { color: var(--blue); }
+.card.detail { border-left: 4px solid var(--purple); }
+.card.detail .tag { color: var(--purple); }
+.card.analogy { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+.card.analogy .tag { color: var(--amber); }
+.card.key { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.card.key .tag { color: var(--accent-ink); }
+.card.warn { border-left: 4px solid var(--red); background: var(--red-soft); }
+.card.warn .tag { color: var(--red); }
+.card.spark { border-left: 4px solid #e0a000;
+  background: linear-gradient(100deg, rgba(224,160,0,.12), transparent 70%); }
+.card.spark .tag { color: #c98a00; }
+@media (prefers-color-scheme: dark) { .card.spark .tag { color: #f0c050; } }
+
+/* ---- code file callout ---- */
+.codefile { margin: 1.2rem 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  box-shadow: var(--shadow); }
+.codefile .cf-head { display: flex; align-items: center; gap: .55rem; padding: .5rem .85rem;
+  background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: .8rem; }
+.codefile .cf-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink:0; }
+.codefile .cf-head .path { font-family: ui-monospace, monospace; color: var(--ink); font-weight: 600; }
+.codefile .cf-head .ln { margin-left: auto; color: var(--faint); font-size: .72rem; }
+.codefile pre { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem;
+  overflow-x: auto; font-size: .82rem; line-height: 1.6; }
+.codefile pre .cm { color: #7d8aa3; }
+.codefile pre .kw { color: #c792ea; }
+.codefile pre .fn { color: #82aaff; }
+.codefile pre .st { color: #c3e88d; }
+.codefile pre .nb { color: #f78c6c; }
+
+pre.code { background: var(--code-bg); color: var(--code-ink); padding: .9rem 1rem; border-radius: 12px;
+  overflow-x: auto; font-size: .83rem; line-height: 1.6; margin: 1.1rem 0; box-shadow: var(--shadow); }
+pre.code .cm { color: #7d8aa3; } pre.code .kw { color: #c792ea; }
+pre.code .fn { color: #82aaff; } pre.code .st { color: #c3e88d; } pre.code .nb { color: #f78c6c; }
+
+/* ---- collapsible accordion (details/summary) ---- */
+.accordion { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  margin: .7rem 0; box-shadow: var(--shadow); overflow: hidden; }
+.accordion > summary { cursor: pointer; padding: .85rem 1.1rem; font-weight: 650; font-size: .96rem;
+  list-style: none; display: flex; align-items: center; gap: .6rem; user-select: none; }
+.accordion > summary::-webkit-details-marker { display: none; }
+.accordion > summary::after { content: "▶"; font-size: .68rem; color: var(--accent);
+  margin-left: auto; transition: transform .15s ease; }
+.accordion[open] > summary::after { transform: rotate(90deg); }
+.accordion > summary:hover { background: var(--panel-2); }
+.accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.accordion .badge-num { background: var(--accent-soft); color: var(--accent-ink);
+  width: 1.6rem; height: 1.6rem; border-radius: 7px; display: inline-flex; align-items: center;
+  justify-content: center; font-size: .82rem; font-weight: 700; flex-shrink: 0; }
+.accordion .hint { font-size: .72rem; color: var(--faint); font-weight: 400; }
+.acc-body { padding: .9rem 1.1rem 1.1rem; }
+.acc-intro { color: var(--muted); font-size: .9rem; margin: .2rem 0 .4rem; }
+.qa { margin: 1rem 0; }
+.qa:first-child { margin-top: .3rem; }
+.qa .q { font-weight: 680; font-size: .9rem; display: flex; gap: .45rem; align-items: center; margin-bottom: .3rem; }
+.qa .a { color: var(--muted); font-size: .9rem; }
+.qa .a strong { color: var(--ink); }
+.qa pre.code { margin: .5rem 0 0; font-size: .78rem; }
+
+/* ---- flow diagram ---- */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 1.3rem 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.2rem 1rem; box-shadow: var(--shadow); }
+.flow .node { flex: 1 1 0; min-width: 110px; text-align: center; padding: .7rem .5rem;
+  border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+.flow .node .nt { font-weight: 700; font-size: .92rem; }
+.flow .node .nd { font-size: .76rem; color: var(--muted); margin-top: .2rem; }
+.flow .node.hl { background: var(--accent-soft); border-color: var(--accent); }
+.flow .arrow { align-self: center; color: var(--faint); font-size: 1.3rem; padding: 0 .35rem; }
+
+/* vertical flow */
+.vflow { margin: 1.3rem 0; }
+.vflow .step { display: flex; gap: .9rem; position: relative; padding-bottom: 1.1rem; }
+.vflow .step:not(:last-child)::before { content:""; position:absolute; left: 15px; top: 34px; bottom: -2px;
+  width: 2px; background: var(--line); }
+.vflow .num { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; z-index:1; }
+.vflow .sc h4 { margin: .25rem 0 .2rem; font-size: 1rem; }
+.vflow .sc p { margin: .15rem 0; font-size: .92rem; color: var(--muted); }
+.vflow .sc .mono { font-size: .8rem; color: var(--accent-ink); }
+
+/* layered architecture */
+.layers { margin: 1.3rem 0; display: flex; flex-direction: column; gap: .55rem; }
+.layer { border-radius: 12px; padding: .85rem 1.1rem; border: 1px solid var(--line); background: var(--panel);
+  box-shadow: var(--shadow); }
+.layer .lh { display: flex; align-items: center; gap: .6rem; }
+.layer .lh .badge { font-size: .7rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; }
+.layer .lh .name { font-weight: 700; font-family: ui-monospace, monospace; }
+.layer .ld { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+.layer.l-core { border-left: 4px solid var(--accent); } .layer.l-core .badge { background: var(--accent-soft); color: var(--accent-ink); }
+.layer.l-main { border-left: 4px solid var(--blue); } .layer.l-main .badge { background: var(--blue-soft); color: var(--blue); }
+.layer.l-part { border-left: 4px solid var(--purple); } .layer.l-part .badge { background: var(--purple-soft); color: var(--purple); }
+.layer.l-app { border-left: 4px solid var(--amber); } .layer.l-app .badge { background: var(--amber-soft); color: var(--amber); }
+
+/* two-column compare */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } }
+.col { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; box-shadow: var(--shadow); min-width: 0; }
+.col h4 { margin: 0 0 .4rem; font-size: .95rem; }
+
+table.t { width: 100%; border-collapse: collapse; margin: 1.1rem 0; font-size: .9rem;
+  background: var(--panel); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+table.t th, table.t td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--line); }
+table.t th { background: var(--panel-2); font-size: .8rem; letter-spacing: .02em; }
+table.t tr:last-child td { border-bottom: none; }
+table.t td.mono, table.t td .mono { font-family: ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); }
+@media (max-width: 640px) {
+  /* Wide multi-column tables: scroll within their own box instead of
+     forcing page-level horizontal overflow (which clipped right columns). */
+  table.t { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.t th, table.t td { padding: .5rem .6rem; }
+}
+.selftest { margin: 2.2rem 0 0; border-top: 2px dashed var(--line); padding-top: 1.2rem; }
+.selftest > h2 { margin-top: .2rem; }
+.quiz { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--blue);
+  border-radius: 12px; padding: .9rem 1.1rem; margin: 1rem 0; box-shadow: var(--shadow); }
+.quiz .qn { font-weight: 650; }
+.quiz ol.opts { list-style: upper-alpha; margin: .55rem 0 .6rem 1.5rem; padding: 0; }
+.quiz ol.opts li { margin: .3rem 0; padding-left: .15rem; }
+.quiz details.accordion { margin: .5rem 0 0; }
+.selftest code { font-family: ui-monospace, monospace; font-size: .9em; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 0 .28em; border-radius: 4px; }
+
+/* footer nav */
+.footnav { display: flex; justify-content: space-between; gap: 1rem; margin-top: 3rem;
+  padding-top: 1.4rem; border-top: 1px solid var(--line); }
+.footnav a { flex: 1; padding: .85rem 1.1rem; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow); transition: .15s; }
+.footnav a:hover { border-color: var(--accent); transform: translateY(-1px); }
+.footnav a.next { text-align: right; }
+.footnav .dir { font-size: .72rem; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.footnav .ttl { font-weight: 700; color: var(--ink); margin-top: .15rem; }
+.footnav a.disabled { opacity: .35; pointer-events: none; }
+
+/* index page */
+.toc { display: grid; gap: .7rem; margin-top: 1.6rem; }
+.toc-part { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); margin: 1.4rem 0 .2rem; }
+.toc a { display: flex; align-items: center; gap: .9rem; padding: .85rem 1.05rem; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); transition: .15s; }
+.toc a:hover { border-color: var(--accent); transform: translateX(3px); }
+.toc .n { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; flex-shrink: 0; }
+.toc .tt { font-weight: 650; color: var(--ink); }
+.toc .ts { font-size: .8rem; color: var(--muted); margin-left: auto; text-align: right; }
+.toc-search { position: relative; margin: 1.6rem 0 -.4rem; }
+.toc-search input { width: 100%; box-sizing: border-box; padding: .75rem 2.8rem .75rem 1rem;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  font-size: .98rem; box-shadow: var(--shadow); }
+.toc-search input:focus { outline: none; border-color: var(--accent); }
+.toc-search .qcount { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: .8rem; pointer-events: none; }
+.toc a.hide, .toc .toc-part.hide { display: none; }
+.toc-empty { display: none; color: var(--muted); padding: 1rem; text-align: center; }
+.toc-empty.show { display: block; }
+.hero.index h1 { font-size: 2.3rem; }
+.legend { display:flex; gap:1.2rem; flex-wrap:wrap; margin-top:1rem; font-size:.8rem; color:var(--muted); }
+.legend span { display:flex; align-items:center; gap:.4rem; }
+.legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pdf-btn { display:inline-flex; align-items:center; gap:.4rem; padding:.55rem 1.1rem;
+  background:var(--accent); color:#fff; border-radius:10px; font-size:.9rem; font-weight:650;
+  box-shadow:var(--shadow); transition:.15s; }
+.pdf-btn:hover { background:var(--accent-ink); transform:translateY(-1px); }
+
+/* ---- bilingual language switch ----
+   Contract: <html> must carry data-lang="zh" (default) or "en".
+   page()/index_page() hard-code data-lang="zh"; LANG_BOOT may switch to "en". */
+html[data-lang="en"] .lang-zh { display: none !important; }
+html[data-lang="zh"] .lang-en { display: none !important; }
+.langtoggle { font-size:.72rem; font-weight:700; color:var(--accent-ink);
+  background:var(--accent-soft); border:1px solid var(--accent); border-radius:999px;
+  padding:.22rem .7rem; cursor:pointer; line-height:1.4; white-space:nowrap; }
+.langtoggle:hover { background:var(--accent); color:#fff; }
+
+/* ---- schematic: cell strips (token sequences / quant blocks / KV columns) ---- */
+.cellgroup { margin: 1.2rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.cellgroup .cg-cap { font-size: .82rem; color: var(--muted); margin-bottom: .55rem; }
+.cellgroup .cg-cap b { color: var(--ink); }
+.cells { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.cells + .cells { margin-top: .5rem; }
+.cell { min-width: 2.1rem; padding: .38rem .5rem; text-align: center; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); font-size: .78rem;
+  font-family: ui-monospace, monospace; white-space: nowrap; }
+.cell.scale { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); font-weight: 700; }
+.cell.hl    { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.cell.q     { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.cell.dim   { opacity: .45; }
+.cells .lab { font-size: .76rem; color: var(--faint); padding: 0 .35rem; }
+.cells .sep { color: var(--faint); padding: 0 .1rem; }
+
+/* ---- schematic: timeline lanes (prefill vs decode, step-by-step) ---- */
+.timeline { margin: 1.2rem 0; display: flex; flex-direction: column; gap: .5rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.timeline .lane { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.timeline .lane-label { min-width: 6rem; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.timeline .tslot { padding: .4rem .6rem; border-radius: 8px; background: var(--panel-2);
+  border: 1px solid var(--line); font-size: .78rem; text-align: center; font-family: ui-monospace, monospace; }
+.timeline .tslot.span { flex: 1; min-width: 8rem; background: var(--blue-soft); border-color: var(--blue);
+  color: var(--blue); font-weight: 700; }
+.timeline .tslot.now { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* ---- worked-example trace: one concrete input, stepped through ---- */
+.trace { margin: 1.3rem 0; background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+.trace .tcap { font-size: .82rem; color: var(--muted); margin-bottom: .7rem; }
+.trace .tcap b { color: var(--accent-ink); }
+.trace .stations { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+.trace .stn { flex: 1 1 0; min-width: 116px; border: 1px solid var(--line); border-radius: 10px;
+  padding: .55rem; background: var(--bg); }
+.trace .stn h5 { margin: 0 0 .45rem; font-size: .8rem; color: var(--ink); }
+.trace .cellrow { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.trace .vc { min-width: 2.1rem; padding: .32rem .45rem; text-align: center; border-radius: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); font: 600 .76rem ui-monospace, monospace; white-space: nowrap; }
+.trace .vc.hot  { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.trace .vc.blue { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+.trace .vc.dim  { opacity: .42; }
+.trace .tlab { font-size: .68rem; color: var(--faint); margin-top: .35rem; }
+.trace .op { align-self: center; color: var(--accent); font: 700 .72rem ui-monospace, monospace;
+  padding: 0 .5rem; text-align: center; white-space: nowrap; }
+.trace svg { max-width: 100%; height: auto; display: block; margin: .3rem auto; }
+@media (max-width: 640px) { .trace .stations { flex-direction: column; } .trace .op { padding: .3rem 0; } }
+</style>
+</head><body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
+    <span class="pill"><span class="lang-zh">第七部分 · 进阶专题</span><span class="lang-en">Part 7 · Advanced topics</span></span>
+    <span class="pill">35 / 35</span>
+    <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
+  </div>
+  <div class="progress"><span style="width:100%"></span></div>
+</div>
+<div class="wrap">
+  <div class="hero">
+    <div class="part"><span class="lang-zh">第七部分 · 进阶专题</span><span class="lang-en">Part 7 · Advanced topics</span></div>
+    <h1><span class="lang-zh">MoE 专家混合</span><span class="lang-en">Mixture of experts</span></h1>
+  </div>
+  <div class="lang-zh">
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
 前面每一层 FFN（前馈网络，L11），都是"每个 token 都老老实实从头到尾过一遍"。可现在最大的那些开源模型（Mixtral、DeepSeek、Qwen-MoE…）几乎都不这么干了——它们把一层 FFN 拆成几十甚至上百个"专家"（expert），每个 token 只挑其中两三个走。这就是 MoE（Mixture of Experts，专家混合）。这一课看 ggml 怎么实现它：一个 token 怎么被"路由"到几个专家、又怎么只算这几个而不浪费算力。这不是什么边角技巧——它已经是当下最强开源模型的标配架构，理解它，你才能读懂这一代模型为什么能又大又跑得动。
 </p>
@@ -359,8 +453,55 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
   <div class="tag">💡 设计洞察</div>
   MoE 和上一课的投机解码，骨子里是同一种智慧的两面：<strong>不是所有计算都同等重要，找出真正需要的那部分、只算它</strong>。投机解码在"时间"维度上偷懒（猜对的步骤不用真算），MoE 在"参数"维度上偷懒（不相关的专家不用激活）。这种"条件计算 / 稀疏激活"的思路，正在成为大模型继续变大的主要出路——因为稠密地把每个参数都用上，算力很快就撑不住了。往深一层看，这也很像生物大脑：你读这行字时，并没有点亮整个大脑，而只激活了相关的少数区域。顺便说，MoE 也提醒我们一件事：模型变强未必靠"让每个零件都更努力"，也可以靠"把零件分工得更聪明"——这种结构性的进步，往往比单纯堆算力更划算，也正是读底层实现最有意思的回报：你看到的不只是"怎么算得快"，还有"为什么这样组织最聪明"。下一课我们换一个维度：多模态——让模型不只读 token，还能"看见"图像，看 ggml 怎么把一张图变成模型能懂的 embedding。
 </div>
-""",
-    "en": r"""
+<div class="selftest">
+<h2>🧪 自测 · 想一想为什么这么设计</h2>
+<div class="quiz">
+  <div class="qn">1. MoE 的核心取舍是什么？</div>
+  <ol class="opts">
+    <li>参数容量像大模型，但单 token 的算力只花用到的那几个专家——参数大、算力小</li>
+    <li>参数和算力都不变，只是更快</li>
+    <li>参数更多、算力也更多</li>
+    <li>参数更少、算力也更少</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：A</strong>。MoE 把一个大 FFN 拆成 N 个专家，但每个 token 只激活其中 top-k 个（比如 8 选 2）。于是模型“装得下”的知识由总参数量决定（像一个很大的稠密模型），而每个 token 真正要算的乘加只来自被选中的 k 个专家（像一个小模型）。代价是显存要装下全部专家的权重、路由不规整带来访存和负载均衡的麻烦。一句话：拿显存换算力，用稀疏激活把“大容量”和“低单步算力”同时拿到手。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. ggml 为什么要专门做一个 ggml_mul_mat_id 算子，而不是用普通的矩阵乘？</div>
+  <ol class="opts">
+    <li>因为它能压缩权重</li>
+    <li>因为它跳过了 softmax</li>
+    <li>因为它算得更精确</li>
+    <li>要按每个 token 选出的专家 id，只取对应专家的权重去算——真正做到“只算被选中的 k 个”</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。稀疏的关键在“只算被选中的专家”。如果用普通 mul_mat 把 8 个专家全乘一遍再扔掉 6 个，参数是稀疏了、算力一点没省。ggml_mul_mat_id 接收一个 ids 张量（top-k 路由的结果），按 id 去 gather 对应专家的权重列、只对选中的 k 个做乘加。这正是 MoE 省算力的落地点——没有这个算子，“8 选 2 省 3/4 算力”就只是纸面上的话。</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. 关于 MoE 的显存占用，下面哪句对？</div>
+  <ol class="opts">
+    <li>显存和专家数量无关</li>
+    <li>显存比同算力的稠密模型还小</li>
+    <li>显存要装下全部专家的权重，按总参数算；省的是每步算力，不是显存</li>
+    <li>显存只需装下被激活的 k 个专家</li>
+  </ol>
+  <details class="accordion">
+    <summary>看答案与解析 <span class="hint">点击展开</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：C</strong>。哪个 token 会路由到哪个专家是运行时才知道的，所以全部专家的权重都得常驻显存待命——显存按“总参数量”算，不按“激活的 k 个”算。这就是为什么 MoE 模型的 GGUF 文件和显存需求往往很大（DeepSeek、Mixtral 都是几十上百 GB）。MoE 省的是“每个 token 的乘加次数”（算力 / 时间），不是“要装多少权重”（显存）。把这两件事分开看，才不会对 MoE 的资源需求产生误解。</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 发散思考（没有标准答案，动手或动脑想想）</div>
+  <ul>
+    <li>MoE 的路由用 argsort 取 top-k，是一个“硬选择”（要么选中、要么没选中），它对每个专家的输入不是连续可微的。请想一想：训练时这种硬路由会带来什么麻烦（比如某些专家总没人选、梯度怎么传）？真实系统是怎么缓解的（提示：归一化、负载均衡损失、专家分组 n_expert_groups）？再把它和你学过的稠密 FFN 对比：稠密 FFN 为什么没有“专家饿死”这种问题？</li>
+  </ul>
+</div>
+</div></div>
+  <div class="lang-en">
 <p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
 Every FFN (feed-forward network, L11) so far has every token dutifully pass through the whole thing end to end. But the largest open models today (Mixtral, DeepSeek, Qwen-MoE...) almost all do otherwise - they split one FFN into dozens or even hundreds of "experts", and each token picks only two or three to go through. This is MoE (Mixture of Experts). This lesson looks at how ggml implements it: how one token is "routed" to a few experts, and how only those few are computed without wasting compute. This is no fringe trick - it is already the default architecture of today's strongest open models, and understanding it is what lets you grasp why this generation can be both huge and runnable.
 </p>
@@ -485,5 +626,65 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
   <div class="tag">💡 Design insight</div>
   MoE and last lesson's speculative decoding are two faces of the same wisdom at heart: <strong>not all computation is equally important - find the part you actually need and compute only that</strong>. Speculative decoding economizes in the "time" dimension (steps guessed right need no real compute); MoE economizes in the "parameter" dimension (irrelevant experts need not activate). This "conditional computation / sparse activation" idea is becoming the main way for large models to keep growing - because using every parameter densely soon outstrips the compute budget. Deeper still, this resembles a biological brain: reading this line, you do not light up the whole brain, only the few relevant regions. By the way, MoE reminds us of something: a model gets stronger not only by "making every part work harder" but also by "dividing the parts' labor more cleverly" - this structural progress is often a better deal than piling on compute, and it is the most interesting reward of reading low-level implementations: you see not only "how to compute fast" but "why this organization is the smartest". Next lesson we switch dimensions: multimodal - letting the model not only read tokens but "see" images, watching how ggml turns a picture into an embedding the model understands.
 </div>
-""",
+<div class="selftest">
+<h2>🧪 Self-test - think about the design</h2>
+<div class="quiz">
+  <div class="qn">1. What is the core tradeoff of MoE?</div>
+  <ol class="opts">
+    <li>parameter capacity like a big model, but per-token compute only pays for the few experts used - big params, small compute</li>
+    <li>params and compute unchanged, just faster</li>
+    <li>more parameters and more compute</li>
+    <li>fewer parameters and less compute</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">2. Why does ggml need a dedicated ggml_mul_mat_id op instead of a plain matmul?</div>
+  <ol class="opts">
+    <li>because it compresses the weights</li>
+    <li>because it skips the softmax</li>
+    <li>because it computes more accurately</li>
+    <li>to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.</div></div></div>
+  </details>
+</div>
+<div class="quiz">
+  <div class="qn">3. Regarding MoE's VRAM footprint, which is correct?</div>
+  <ol class="opts">
+    <li>VRAM is unrelated to the number of experts</li>
+    <li>VRAM is smaller than a dense model of equal compute</li>
+    <li>VRAM must hold every expert's weights, sized by total params; what is saved is per-step compute, not VRAM</li>
+    <li>VRAM only needs to hold the k activated experts</li>
+  </ol>
+  <details class="accordion">
+    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.</div></div></div>
+  </details>
+</div>
+<div class="card spark">
+  <div class="tag">💭 Open questions (no single right answer - just think or try)</div>
+  <ul>
+    <li>MoE routing uses argsort to take top-k, a 'hard selection' (selected or not) that is not continuously differentiable in each expert's input. Consider: what trouble does such hard routing cause in training (e.g. some experts never get picked, how do gradients flow)? How do real systems mitigate it (hint: normalization, load-balancing loss, expert grouping n_expert_groups)? Then contrast with the dense FFN you learned: why does a dense FFN have no 'expert starvation' problem?</li>
+  </ul>
+</div>
+</div></div>
+  <div class="footnav"><a class="prev" href="34-speculative-decoding.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">投机解码</span><span class="lang-en">Speculative decoding</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+</div>
+<script>
+function lcvgSetLang(l){
+  l=(l==='en')?'en':'zh';
+  var d=document.documentElement;
+  d.dataset.lang=l; d.lang=(l==='en'?'en':'zh-CN');
+  try{localStorage.setItem('lcvg-lang',l);}catch(e){}
 }
+function lcvgToggleLang(){
+  lcvgSetLang(document.documentElement.dataset.lang==='en'?'zh':'en');
+}
+</script>
+</body></html>

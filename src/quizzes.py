@@ -2236,6 +2236,67 @@ QUIZZES = {
             },
         ],
     },
+    "35-moe.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "MoE 的核心取舍是什么？",
+                    "en": "What is the core tradeoff of MoE?",
+                },
+                "opts": [
+                    {"zh": "参数容量像大模型，但单 token 的算力只花用到的那几个专家——参数大、算力小", "en": "parameter capacity like a big model, but per-token compute only pays for the few experts used - big params, small compute"},
+                    {"zh": "参数更少、算力也更少", "en": "fewer parameters and less compute"},
+                    {"zh": "参数更多、算力也更多", "en": "more parameters and more compute"},
+                    {"zh": "参数和算力都不变，只是更快", "en": "params and compute unchanged, just faster"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "MoE 把一个大 FFN 拆成 N 个专家，但每个 token 只激活其中 top-k 个（比如 8 选 2）。于是模型“装得下”的知识由总参数量决定（像一个很大的稠密模型），而每个 token 真正要算的乘加只来自被选中的 k 个专家（像一个小模型）。代价是显存要装下全部专家的权重、路由不规整带来访存和负载均衡的麻烦。一句话：拿显存换算力，用稀疏激活把“大容量”和“低单步算力”同时拿到手。",
+                    "en": "MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml 为什么要专门做一个 ggml_mul_mat_id 算子，而不是用普通的矩阵乘？",
+                    "en": "Why does ggml need a dedicated ggml_mul_mat_id op instead of a plain matmul?",
+                },
+                "opts": [
+                    {"zh": "要按每个 token 选出的专家 id，只取对应专家的权重去算——真正做到“只算被选中的 k 个”", "en": "to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'"},
+                    {"zh": "因为它算得更精确", "en": "because it computes more accurately"},
+                    {"zh": "因为它能压缩权重", "en": "because it compresses the weights"},
+                    {"zh": "因为它跳过了 softmax", "en": "because it skips the softmax"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "稀疏的关键在“只算被选中的专家”。如果用普通 mul_mat 把 8 个专家全乘一遍再扔掉 6 个，参数是稀疏了、算力一点没省。ggml_mul_mat_id 接收一个 ids 张量（top-k 路由的结果），按 id 去 gather 对应专家的权重列、只对选中的 k 个做乘加。这正是 MoE 省算力的落地点——没有这个算子，“8 选 2 省 3/4 算力”就只是纸面上的话。",
+                    "en": "Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "关于 MoE 的显存占用，下面哪句对？",
+                    "en": "Regarding MoE's VRAM footprint, which is correct?",
+                },
+                "opts": [
+                    {"zh": "显存要装下全部专家的权重，按总参数算；省的是每步算力，不是显存", "en": "VRAM must hold every expert's weights, sized by total params; what is saved is per-step compute, not VRAM"},
+                    {"zh": "显存只需装下被激活的 k 个专家", "en": "VRAM only needs to hold the k activated experts"},
+                    {"zh": "显存比同算力的稠密模型还小", "en": "VRAM is smaller than a dense model of equal compute"},
+                    {"zh": "显存和专家数量无关", "en": "VRAM is unrelated to the number of experts"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "哪个 token 会路由到哪个专家是运行时才知道的，所以全部专家的权重都得常驻显存待命——显存按“总参数量”算，不按“激活的 k 个”算。这就是为什么 MoE 模型的 GGUF 文件和显存需求往往很大（DeepSeek、Mixtral 都是几十上百 GB）。MoE 省的是“每个 token 的乘加次数”（算力 / 时间），不是“要装多少权重”（显存）。把这两件事分开看，才不会对 MoE 的资源需求产生误解。",
+                    "en": "Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "MoE 的路由用 argsort 取 top-k，是一个“硬选择”（要么选中、要么没选中），它对每个专家的输入不是连续可微的。请想一想：训练时这种硬路由会带来什么麻烦（比如某些专家总没人选、梯度怎么传）？真实系统是怎么缓解的（提示：归一化、负载均衡损失、专家分组 n_expert_groups）？再把它和你学过的稠密 FFN 对比：稠密 FFN 为什么没有“专家饿死”这种问题？",
+                "en": "MoE routing uses argsort to take top-k, a 'hard selection' (selected or not) that is not continuously differentiable in each expert's input. Consider: what trouble does such hard routing cause in training (e.g. some experts never get picked, how do gradients flow)? How do real systems mitigate it (hint: normalization, load-balancing loss, expert grouping n_expert_groups)? Then contrast with the dense FFN you learned: why does a dense FFN have no 'expert starvation' problem?",
+            },
+        ],
+    },
 }
 
 

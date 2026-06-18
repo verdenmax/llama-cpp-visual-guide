@@ -114,6 +114,8 @@ PAGES = [
      "第六部分 · 底层内核", "Part 6 · Low-level kernels"),
     ("34-speculative-decoding.html", "投机解码", "Speculative decoding",
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
+    ("35-moe.html", "MoE 专家混合", "Mixture of experts",
+     "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
 ]
 
 
@@ -616,6 +618,8 @@ SUBTITLES = {
                                   "ggml-backend: the abstraction, registry & dynamic load, scheduling, the backend zoo"),
     "34-speculative-decoding.html": ("draft model / n-gram 提候选 · target 并行验证 · 接受率",
                                      "draft model / n-gram propose, target verifies in parallel, acceptance rate"),
+    "35-moe.html": ("router 门控 -> top-k 选专家 -> ggml_mul_mat_id 稀疏算 -> 加权合并",
+                    "router gating -> top-k experts -> ggml_mul_mat_id sparse compute -> weighted combine"),
 }
 
 
