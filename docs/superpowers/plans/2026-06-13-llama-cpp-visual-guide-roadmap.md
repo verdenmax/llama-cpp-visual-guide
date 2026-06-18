@@ -28,7 +28,7 @@ llama.cpp 图解教程（9 部分 40 课）。
 | **M4b** | 第四部分下 · llama 推理内部 | 20-24 | 5 课（词表/采样/对话模板/语法/LoRA） | `...-M4b-part4-llama-internals.md` | 完成 |
 | **M5** | 第五部分 · 公共 API 与工具 | 25-30 | 6 课 | `...-M5-part5-tools.md` | 完成 |
 | **M6** | 第六部分 · 底层内核 | 31-33 | 3 课（CPU/CUDA 主线 + 其它后端概览） | `...-M6-part6-kernels.md` | 完成 |
-| **M7** | 第七部分 · 进阶专题 | 34-37 | 4 课 | `...-M7-part7-advanced.md` | 待写 |
+| **M7** | 第七部分 · 进阶专题 | 34-37 | 4 课 | `...-M7-part7-advanced.md` | 完成 |
 | **M8** | 第八部分 · 实战与贡献 + 第九部分 · 速查 | 38-40 | 3 课（含术语表） | `...-M8-part8-9-contrib-glossary.md` | 待写 |
 | **M9** | 配套收尾 | - | quizzes 补全 · `build_print.py` 双语 PDF · `deploy.yml`/`ci.yml` · README · LICENSE | `...-M9-pdf-ci-readme.md` | 待写 |
 
@@ -93,6 +93,6 @@ M0 (脚手架, 一切的基础)
 - [x] M4 第四部分（llama 推理内部）— M4a（14-19）+ M4b（20-24）完成
 - [x] M5 第五部分（公共 API 与工具）
 - [x] M6 第六部分（底层内核）
-- [ ] M7 第七部分（进阶专题）
+- [x] M7 第七部分（进阶专题）
 - [ ] M8 第八部分 + 第九部分（实战/贡献 + 术语表）
 - [ ] M9 配套收尾（PDF / CI / README）
