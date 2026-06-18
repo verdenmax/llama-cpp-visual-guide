@@ -118,6 +118,8 @@ PAGES = [
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
     ("36-multimodal.html", "多模态", "Multimodal",
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
+    ("37-state-space.html", "状态空间模型", "State-space models",
+     "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
 ]
 
 
@@ -624,6 +626,8 @@ SUBTITLES = {
                     "router gating -> top-k experts -> ggml_mul_mat_id sparse compute -> weighted combine"),
     "36-multimodal.html": ("mtmd 管线: 图像 -> clip(ViT) -> projector(mmproj) -> embedding -> 与文本交织",
                            "mtmd pipeline: image -> clip(ViT) -> projector(mmproj) -> embeddings -> interleave with text"),
+    "37-state-space.html": ("Mamba/RWKV: 递推状态替代 KV cache · ggml_ssm_conv/scan · O(1) 显存",
+                            "Mamba/RWKV: recurrent state instead of KV cache; ggml_ssm_conv/scan; O(1) memory"),
 }
 
 

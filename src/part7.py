@@ -718,3 +718,272 @@ std::vector&lt;float&gt; out_vec;
 
 """,
 }
+
+LESSON_37 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+transformer 的注意力有个绕不开的代价：要记住整段历史，它得把每个 token 的 Key/Value 都存进 KV cache，于是显存随序列<strong>线性</strong>地涨（L19 讲过），每生成一个新 token 还得回头看全部历史（算力 O(n^2)）。状态空间模型（State-Space Model，SSM；代表是 Mamba 和 RWKV）走了另一条完全不同的路：它不存全部历史，而是把历史<strong>压进一个固定大小的"状态" h_t</strong>，每来一个新 token，就用上一个状态 h_(t-1) 和当前输入算出新状态——显存 O(1)、不随序列长度涨。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这是注意力之外的另一条技术路线。它不是要彻底取代 transformer，而是换一种"怎么记住历史"的办法：注意力把历史摊开、一条条存着随时回查；SSM 把历史卷进一个滚动更新的状态里，只留摘要。两条路各有所长，所以这一课的落点，不只是看懂 Mamba/RWKV 怎么算，更是看懂"固定状态 vs 全量 KV"这个贯穿始终的取舍。把这层取舍想透，你以后再看到任何"线性注意力""高效 transformer 替代品"，都能一眼问到点子上：它拿什么压缩了历史？又因此丢了什么？</p>
+<p style="color:var(--muted)">路线图：先把"递推 vs 注意力"摆在一起对照（一个把历史摊开存、一个把历史卷进一个状态），配一张图追踪状态怎么沿时间扫描；再看 ggml 用哪两个算子（<span class="mono">ggml_ssm_conv</span> + <span class="mono">ggml_ssm_scan</span>）实现它、状态怎么从 recurrent cache 读出写回；接着把"选择性扫描"这个核心概念讲清楚（A/B/C/Δ 各是什么、"选择性"到底选什么）；最后两个折叠聊 SSM 的代价和当下流行的"混合架构"。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  SSM 的核心，是把 transformer "记住一切" 的奢侈，换成 "记住一个摘要" 的精打细算。注意力的记忆方式是"把每个 token 的 KV 都留着、要用时回头查"——准，但越攒越多。SSM 换了个思路：维护一个<strong>固定大小的状态向量 h</strong>，把"到目前为止读到的东西"不断压缩进这个 h 里，每步只更新它、不另存历史。于是不管序列多长，状态都那么大——显存 O(1)、每步算力 O(1)，整段序列就是 O(n) 而不是注意力的 O(n^2)。代价也藏在这里：一个固定大小的状态装不下无限的历史，它是一种<strong>有损压缩</strong>，长程的精确检索（"第 3000 个 token 到底是什么"）不如能回头逐个查 KV 的注意力。理解这个取舍，你就理解了为什么 SSM 在超长序列、流式场景里特别香，却又常常要和注意力混着用。这一点本课最后会回到——纯粹路线很少是终点，工程上往往是"取两者之长"。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  注意力像一个<strong>带着全套逐字笔记的人</strong>：每听一句就原样记一条，要回答问题时翻笔记、逐条查——准确，但笔记越积越厚（KV cache 越来越大）。SSM 则像一个<strong>只在脑子里滚动更新一句话摘要的人</strong>：每听一句，就把"目前为止的大意"在心里更新一下，旧的原话不留。无论听多久，他脑子里要记的东西都是<strong>同样一句话那么多</strong>（状态固定大小）。代价也很真实：你问他"刚才第几句话的原话是什么"，带笔记的人能精确翻出来，只记摘要的人多半已经忘了细节——这正是 SSM "有损压缩" 的生活版。两种人没有谁更聪明，只是适合的场合不同：开会做纪要，摘要派更省力；法庭上要逐字举证，笔记派才靠得住。
+</div>
+<h2>递推 vs 注意力：两种记住历史的方式</h2>
+<p>先把两条路并排放在一起。注意力（你在 L19 学的）记历史的方式是"全都留着"：每个 token 算出的 Key/Value 都进 KV cache，第 t 步要看前面所有 t 个位置——所以显存随序列<strong>线性</strong>增长，单步算力随历史<strong>线性</strong>增长（整段就是 O(n^2)）。SSM 反过来，把历史<strong>卷进一个固定大小的状态 h</strong>：第 t 步只拿上一步的状态 h_(t-1) 和当前输入 x_t，算出新状态 h_t——和 t 之前有多长完全无关。状态多大，是模型定死的超参（<span class="mono">ssm_d_state</span>），跟序列长度没关系。这一句听着平平无奇，却是 SSM 全部优势的源头：序列从 1k 拉到 100k，注意力的开销翻了一百倍，SSM 每步的开销却一个字节都没多。</p>
+<div class="cols">
+  <div class="col"><h4>注意力（KV cache）</h4><p>每个 token 的 KV 都存下来，一路变长。第 t 步回看全部 t 个历史：显存 O(n)、算力 O(n^2)。长程精确，但越来越重。</p></div>
+  <div class="col"><h4>SSM（递推状态）</h4><p>只维护一个固定大小的状态 h，原地更新。第 t 步只看 h_(t-1) 和 x_t：显存 O(1)、算力 O(n)。轻、稳，但状态是有损摘要。</p></div>
+</div>
+<p>这个差别最直观的画面，就是"状态沿时间扫描"：输入 x_0, x_1, ... 一个个进来，状态 h 在原地一步步更新，每一步只依赖上一个状态和当前输入，旁边再顺手吐出一个输出 y。看下面这张图——注意 h 那一行<strong>始终是同样大的一个格子</strong>，不像 KV cache 那样越拖越长：</p>
+<div class="trace">
+  <div class="tcap"><b>追踪一次状态扫描</b>：输入 x_0..x_4 依次进来，固定大小的状态 h 原地递推 h_0 -&gt; h_1 -&gt; ... -&gt; h_4，每步只依赖上一个 h 和当前 x，同时产出 y。状态大小自始至终不变（示意）。</div>
+<svg viewBox="0 0 680 268" width="100%" role="img" aria-label="状态空间模型的状态扫描：输入 x0..x4 依次进来，一个固定大小的状态 h 原地递推 h0 -> h1 -> ... -> h4，每步只依赖上一个 h 和当前 x，并产出 y">
+<g font-family="ui-monospace,monospace">
+<text x="40" y="54" text-anchor="middle" fill="#5b6470" font-size="10">输入 x</text>
+<text x="40" y="142" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="10">h</text>
+<text x="40" y="224" text-anchor="middle" fill="#5b6470" font-size="10">输出 y</text>
+<rect x="68" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="96" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x0</text>
+<line x1="96" y1="64" x2="96" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 96 115 L 92 107 L 100 107 z" fill="#9aa6b2"/>
+<rect x="68" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="96" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h0</text>
+<line x1="96" y1="160" x2="96" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 96 205 L 92 197 L 100 197 z" fill="#9aa6b2"/>
+<rect x="68" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="96" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y0</text>
+<rect x="184" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="212" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x1</text>
+<line x1="212" y1="64" x2="212" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 212 115 L 208 107 L 216 107 z" fill="#9aa6b2"/>
+<rect x="184" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="212" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h1</text>
+<line x1="126" y1="138" x2="178" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 183 138 L 175 134 L 175 142 z" fill="#7c3aed"/>
+<line x1="212" y1="160" x2="212" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 212 205 L 208 197 L 216 197 z" fill="#9aa6b2"/>
+<rect x="184" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="212" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y1</text>
+<rect x="300" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="328" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x2</text>
+<line x1="328" y1="64" x2="328" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 328 115 L 324 107 L 332 107 z" fill="#9aa6b2"/>
+<rect x="300" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="328" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h2</text>
+<line x1="242" y1="138" x2="294" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 299 138 L 291 134 L 291 142 z" fill="#7c3aed"/>
+<line x1="328" y1="160" x2="328" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 328 205 L 324 197 L 332 197 z" fill="#9aa6b2"/>
+<rect x="300" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="328" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y2</text>
+<rect x="416" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="444" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x3</text>
+<line x1="444" y1="64" x2="444" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 444 115 L 440 107 L 448 107 z" fill="#9aa6b2"/>
+<rect x="416" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="444" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h3</text>
+<line x1="358" y1="138" x2="410" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 415 138 L 407 134 L 407 142 z" fill="#7c3aed"/>
+<line x1="444" y1="160" x2="444" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 444 205 L 440 197 L 448 197 z" fill="#9aa6b2"/>
+<rect x="416" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="444" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y3</text>
+<rect x="532" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="560" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x4</text>
+<line x1="560" y1="64" x2="560" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 560 115 L 556 107 L 564 107 z" fill="#9aa6b2"/>
+<rect x="532" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="560" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h4</text>
+<line x1="474" y1="138" x2="526" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 531 138 L 523 134 L 523 142 z" fill="#7c3aed"/>
+<line x1="560" y1="160" x2="560" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 560 205 L 556 197 L 564 197 z" fill="#9aa6b2"/>
+<rect x="532" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="560" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y4</text>
+<text x="154" y="129" text-anchor="middle" fill="#7c3aed" font-size="10">h=f(h,x)</text>
+<text x="340" y="256" text-anchor="middle" fill="#5b6470" font-size="11">状态大小始终不变 -> 显存 O(1)，不随序列变长</text>
+</g></svg>
+</div>
+<h2>ggml 怎么实现：两个算子 + 递推状态</h2>
+<p>SSM 在 ggml 里主要落到两个算子上，加一套"递推状态"的读写。先是 <span class="mono">ggml_ssm_conv</span>——一个<strong>因果 1D 卷积</strong>：在做扫描之前，先让每个位置和它前面几个位置做一次局部混合（卷积宽度就是 <span class="mono">ssm_d_conv</span>，通常很小，比如 4）。它的作用类似给输入加一点"短期记忆"，让相邻 token 的信息先交融一下。然后是真正的核心 <span class="mono">ggml_ssm_scan</span>——<strong>选择性扫描</strong>，它吃一大把张量：状态 <span class="mono">s</span>、输入 <span class="mono">x</span>、时间步 <span class="mono">dt</span>(Δ)、状态矩阵 <span class="mono">A</span>/<span class="mono">B</span>/<span class="mono">C</span>、还有序列索引 <span class="mono">ids</span>，一趟把整段序列的递推都算出来。来看一个 Mamba 层里这两个算子的真实调用（出自 <span class="mono">src/models/mamba-base.cpp</span>）：</p>
+<pre class="code"><span class="cm">// Mamba 层核心 (简化自 src/models/mamba-base.cpp)</span>
+x = <span class="fn">ggml_ssm_conv</span>(ctx0, conv_x, layer.ssm_conv1d); <span class="cm">// 1) 因果卷积: 局部短期混合</span>
+x = <span class="fn">ggml_silu</span>(ctx0, x);                          <span class="cm">//    激活</span>
+<span class="cm">// 2) 从 x 投影出 dt, B, C —— 注意这几个量都依赖输入 x (这就是"选择性")</span>
+dt = <span class="fn">build_lora_mm</span>(layer.ssm_dt, dt);            <span class="cm">//    每步的步长 Δ</span>
+A  = layer.ssm_a;                                <span class="cm">//    状态转移矩阵 (学到的参数, 不随输入变)</span>
+<span class="cm">// 3) 选择性扫描: 按 A/B/C/dt 把状态沿时间递推</span>
+y = <span class="fn">ggml_ssm_scan</span>(ctx0, ssm, x, dt, A, B, C, ids);</pre>
+<p>注意第 2 步那个关键细节：<span class="mono">dt</span>、<span class="mono">B</span>、<span class="mono">C</span> 都是从当前输入 <span class="mono">x</span> 算出来的（输入相关），而 <span class="mono">A</span> 是学到的固定参数。这正是 Mamba 比老式 SSM 强的地方——下一节细讲。这里还有一个容易被忽略的问题：状态 h 存在哪？它<strong>不进 KV cache</strong>，而是进一套专门的"递推状态缓存"（<span class="mono">llama-memory-recurrent</span>），每个序列只占<strong>固定大小</strong>的一块。<span class="mono">build_rs</span>（rs = recurrent state）就负责把上一步的状态从这块缓存里读出来、喂给 scan、再把更新后的新状态写回去：</p>
+<pre class="code"><span class="cm">// 递推状态的读出 - 更新 - 写回 (示意; 见 src/llama-graph.cpp build_rs)</span>
+<span class="cm">// 1) 从 recurrent cache 读出这些序列上一步的状态</span>
+states = <span class="fn">get_state_rows</span>(state_cache, ids);
+<span class="cm">// 2) 用 scan 在这些状态上往前推一段</span>
+y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
+<span class="cm">// 3) 把最后的新状态写回 cache, 留给下一步用</span>
+<span class="fn">ggml_cpy</span>(ctx0, last_state, state_cache_view);</pre>
+<p>对照 L17/L19 你会发现一个漂亮的呼应：transformer 用 KV cache 存"历史的全部 KV"，SSM 用 recurrent cache 存"历史压成的那个状态"。两者都是"把上一步的东西留到下一步"的缓存，但一个随序列变大、一个永远固定大小。这也是为什么 llama.cpp 要专门给 SSM 做一套 <span class="mono">llama-memory-recurrent</span>，而不是塞进原来的 KV cache——它们的"记忆形状"根本不同。也正因如此，一个纯 SSM 模型跑起来时，你在显存里几乎看不到"KV cache 随对话变长"这件事——取而代之的，是每个序列一小块大小恒定的状态。</p>
+<h2>选择性扫描：A / B / C / Δ 到底在干什么</h2>
+<p>"扫描"（scan）就是上面那个递推：从头到尾走一遍序列，状态一步步往前推。难点在"选择性"（selective）这三个字。先看最朴素的递推，去掉所有花哨，它就两行：</p>
+<pre class="code"><span class="cm"># 选择性扫描的核心递推 (概念伪代码, 非真实 kernel)</span>
+<span class="kw">for</span> t <span class="kw">in</span> 0..n:
+    h = A * h + B * x[t]     <span class="cm"># 用上一个状态 h 和当前输入 x[t] 算新状态</span>
+    y[t] = C * h             <span class="cm"># 从新状态读出这一步的输出</span></pre>
+<p>四个量各司其职：<span class="mono">A</span> 管"上一个状态要保留多少"（衰减 / 记忆），<span class="mono">B</span> 管"当前输入怎么写进状态"，<span class="mono">C</span> 管"从状态里读出什么当输出"，<span class="mono">Δ</span>(dt) 是"步长"，控制这一步更新得多猛（可以理解成离散化的时间间隔：Δ 大≈多看一眼当前输入、Δ 小≈更依赖旧状态）。如果 A/B/C/Δ 都是<strong>固定不变</strong>的常数，那就是经典的线性 SSM——快，但呆板：它对每个 token 一视同仁，没法"看人下菜碟"。这也是早期 SSM 一直打不过 transformer 的根本原因——它记东西一视同仁，可语言里偏偏有的词关键、有的词是废话。</p>
+<p>Mamba 的关键创新就一句话：<strong>让 B、C、Δ 随输入变化</strong>（前一节代码里 dt/B/C 都是从 x 投影出来的，就是这个意思）。这叫"选择性"——模型可以根据当前读到的内容，<strong>动态决定</strong>"这个 token 重要、多写进状态一点"或"这个 token 没用、让状态忽略它"。打个比方：固定 SSM 像一台匀速传送带，什么都按同样节奏处理；选择性 SSM 像一个会<strong>自己调速</strong>的阅读者，遇到关键句就放慢、细记，遇到废话就快进、略过。正是这点"输入相关的门控"，让 Mamba 在语言这种"信息密度不均"的任务上，第一次追平了 transformer。<span class="mono">A</span> 之所以仍保持固定（是学到的参数、不随输入变），是因为它管的是状态自身的稳定衰减，让它随输入乱跳反而会让递推不稳定——这是一个精心保留的"锚"。换句话说，Mamba 把 SSM 里"该死板的"（A，保稳定）和"该灵活的"（B/C/Δ，随输入）拆开对待，这种"有所变、有所不变"的拿捏，正是它比前代 SSM 高明的地方。</p>
+<p>真实的 kernel 当然比这两行复杂得多：要做离散化（把连续的 A/Δ 变成每步的乘子）、要在 GPU 上做并行前缀和（parallel scan，把看似串行的递推拆成可并行的部分，这就是 Mamba 论文里那个"associative scan"），还要处理多头、分组。但抓住"<span class="mono">h = A*h + B*x; y = C*h</span>，而且 B/C/Δ 随输入走"这条主线，你就抓住了 SSM 的灵魂——剩下的都是把它高效地搬上硬件的工程。</p>
+<table class="t">
+  <tr><th>维度</th><th>注意力 (transformer)</th><th>SSM (Mamba/RWKV)</th></tr>
+  <tr><td>记忆方式</td><td>存全部 token 的 KV</td><td>一个固定大小的状态 h</td></tr>
+  <tr><td>显存随序列</td><td>线性增长 O(n)</td><td>不变 O(1)</td></tr>
+  <tr><td>整段算力</td><td>O(n^2)</td><td>O(n)</td></tr>
+  <tr><td>最擅长</td><td>长程精确检索 / copy</td><td>超长序列 / 流式 / 省显存</td></tr>
+  <tr><td>llama.cpp 缓存</td><td>KV cache (L19)</td><td>llama-memory-recurrent</td></tr>
+</table>
+<h2>深入：长序列的甜与苦、混合架构</h2>
+<p>最后两个折叠，回答 SSM 落地时最值得想清楚的两个问题。</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> SSM 为什么适合长序列？代价又是什么？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>先说甜。注意力的 KV cache 随序列线性变大，第 t 步还要和前面全部 t 个位置算注意力——序列拉到几十万 token，显存和算力都会爆。SSM 的状态固定大小、每步只看上一个状态：显存 O(1)、整段算力 O(n)，序列再长，单步开销纹丝不动。这让它在<strong>超长上下文、流式输入、端侧低显存</strong>这些场景里格外香——你甚至可以近乎无限地往里喂 token，显存都不涨。再说苦。一个固定大小的状态，本质是把任意长的历史<strong>有损压缩</strong>进一个小向量。该记的太多、状态装不下时，它只能取舍着忘。于是 SSM 在"精确检索"类任务上天然吃亏：比如"把第 3000 个 token 原样复制出来"（copy 任务）、或者需要回头精确比对很久以前的某个细节——注意力能回头逐个查 KV，SSM 却只有一个被反复覆写的摘要。这不是实现不好，是"固定状态"这个选择的根本代价：你用"不随长度涨的开销"换走了"对任意历史的精确随机访问"。所以一个实用的直觉是：任务越偏"顺序处理、不怎么回头"（长文摘要、流式转写、音频），SSM 越占便宜；越偏"精确回查、大海捞针"（按 ID 检索、长文档里找某句原话），注意力越稳。</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> 既然各有长短，为什么不把两者混着用？ <span class="hint">点击展开</span></summary>
+  <div class="acc-body">
+    <p>这正是当下最流行的做法——<strong>混合架构</strong>。既然注意力擅长精确检索、SSM 擅长高效处理长序列，那就让一部分层用 SSM、一部分层用注意力，各取所长。很多新模型（如 Jamba，以及各种 Mamba-Transformer 混合）就这么搭：大多数层用 SSM 扛长度、省显存，少数几层插注意力补上精确检索的能力。llama.cpp 为此专门做了 <span class="mono">llama-memory-hybrid</span>——一个能<strong>同时</strong>管理两种记忆的内存子系统：注意力层那部分走 KV cache、SSM 层那部分走 recurrent state cache，两套缓存在同一个模型里并存。这也呼应了前面几课反复出现的态度：架构不是非此即彼的信仰之争，而是工程上的权衡组合。你前六部分搭好的那套地基（计算图 L09/L10、内存管理 L17、KV cache L19），到了混合架构这里依然管用——只是现在同一个模型里，有的层记"全部 KV"、有的层记"一个状态"，调度器要把两者都照顾好。这恰好说明了一件事：你学透的那套 transformer 缓存与调度，并不会因为 SSM 出现而作废——反而正是看懂混合架构的前提。</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>核心取舍：注意力存全部 KV（显存 O(n)、算力 O(n^2)，长程精确）；SSM 用固定大小的递推状态 h（显存 O(1)、算力 O(n)，有损摘要）。</li>
+    <li>递推：<span class="mono">h_t = f(A,B,C,Δ; h_(t-1), x_t)</span>，<span class="mono">y_t = C·h_t</span>——每步只看上一个状态和当前输入，状态大小由 <span class="mono">ssm_d_state</span> 定死。</li>
+    <li>ggml 两算子：<span class="mono">ggml_ssm_conv</span>（因果卷积、局部混合）+ <span class="mono">ggml_ssm_scan(s,x,dt,A,B,C,ids)</span>（选择性扫描）；状态经 <span class="mono">build_rs</span> 从 <span class="mono">llama-memory-recurrent</span> 读出写回。</li>
+    <li>"选择性"= 让 <span class="mono">B/C/Δ</span> 随输入变化（输入相关门控），模型学会动态"记住 / 忽略"——这是 Mamba 追平 transformer 的关键。</li>
+    <li>代价：固定状态是有损压缩，长程精确检索（copy 类）不如注意力；故常用<strong>混合架构</strong>（<span class="mono">llama-memory-hybrid</span>）取两者之长。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  状态空间模型最该带走的，不是 Mamba 的某个公式，而是它逼你重新审视一个你早已习以为常的假设：<strong>"模型必须记住全部历史"其实是一个选择，不是一条定律</strong>。注意力选择了"全记下来、随时回查"，于是有了 O(n^2) 的代价；SSM 选择了"只记一个滚动摘要"，于是换来 O(n) 的轻盈，也接受了"记不清细节"的损失。没有哪个绝对更好——它们只是在"精确 vs 高效"这根轴上站了不同的位置。这正是第七部分四课共同的母题：投机解码重新看"出 token 的串行性"、MoE 重新看"算力和参数的绑定"、多模态重新看"输入的形态"、SSM 重新看"历史的存法"。每一课都在挑战一个"本来以为天经地义"的默认，再给出另一种可能。而它们全都站在你前六部分搭好的地基上——这，正是从"会用 llama.cpp"走向"看懂 llama.cpp、甚至改进它"的那一步。
+</div>
+
+<p>第七部分到此收束。从投机解码、MoE、多模态到状态空间模型，我们把四个"标准 transformer 之外"的进阶机制逐一拆开看了一遍——它们要么换个角度榨瓶颈、要么换种结构换效率、要么干脆换掉一根支柱。下一站，第八部分把视线从"模型怎么算"转向"工程怎么落地"：怎么把 HuggingFace 的模型转成 GGUF、怎么编译调试和测试、怎么真正参与到 llama.cpp 的贡献里来。学完前七部分，你已经从"模型怎么跑"一路看到了"前沿架构怎么变"；接下来，该把这份理解落到手上了。</p>
+
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+The attention in a transformer has an unavoidable cost: to remember the whole history, it must store every token's Key/Value in the KV cache, so memory grows <strong>linearly</strong> with the sequence (as L19 showed), and emitting each new token means looking back over the whole history (compute O(n^2)). State-space models (SSMs; the well-known ones are Mamba and RWKV) take a completely different road: they do not store the whole history but <strong>compress it into a fixed-size "state" h_t</strong>; each new token computes a new state from the previous state h_(t-1) and the current input - memory O(1), not growing with sequence length.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This is a technical road alongside attention, not a replacement for the transformer - just a different way to "remember the history": attention spreads the history out and stores it entry by entry to look up at will; an SSM rolls the history into a continuously updated state and keeps only the gist. Each road has its strengths, so this lesson lands not only on how Mamba/RWKV compute, but on the through-line tradeoff of "fixed state vs full KV". Think this tradeoff through and, whenever you later meet any "linear attention" or "efficient transformer alternative", you can cut straight to the point: what did it use to compress the history, and what did it lose for it?</p>
+<p style="color:var(--muted)">Roadmap: first put "recurrence vs attention" side by side (one spreads the history out and stores it, one rolls the history into a single state), with a trace of how the state scans along time; then the two ggml ops that implement it (<span class="mono">ggml_ssm_conv</span> + <span class="mono">ggml_ssm_scan</span>) and how the state is read from and written back to a recurrent cache; then the core concept of "selective scan" (what A/B/C/Delta are, what "selective" actually selects); and finally two folds on SSM's cost and today's popular "hybrid architectures".</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  At its core, an SSM trades the transformer's luxury of "remember everything" for the thrift of "remember a summary". Attention remembers by "keeping every token's KV and looking back when needed" - accurate, but ever-growing. An SSM takes a different tack: maintain a <strong>fixed-size state vector h</strong>, continuously compressing "what has been read so far" into this h, updating it each step and storing no separate history. So however long the sequence, the state stays that size - memory O(1), per-step compute O(1), the whole sequence O(n) instead of attention's O(n^2). The cost hides right here: a fixed-size state cannot hold infinite history, it is a <strong>lossy compression</strong>, and long-range exact retrieval ("what exactly was the 3000th token") is worse than attention, which can look back and check each KV. Grasp this tradeoff and you see why SSMs are especially sweet for very long sequences and streaming, yet so often get mixed with attention. We will return to this at the end - a pure route is rarely the destination; engineering usually "takes the best of both".
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  Attention is like a person <strong>carrying a full verbatim transcript</strong>: each sentence heard is jotted down as-is, and to answer a question they flip through and look it up - accurate, but the notes pile up ever thicker (the KV cache keeps growing). An SSM is like a person <strong>keeping only a rolling one-sentence summary in their head</strong>: each sentence heard, they update "the gist so far" a little, keeping none of the old verbatim. However long they listen, what they hold in mind is always <strong>the same one sentence's worth</strong> (fixed-size state). The cost is real too: ask them "what exactly was the n-th sentence", the one with notes can find it precisely, the one with only a summary has likely forgotten the detail - exactly the lived version of SSM's "lossy compression". Neither person is smarter, they just suit different occasions: for meeting minutes the summary type is less work; in court, where every word must be cited, only the note-taker is reliable.
+</div>
+<h2>Recurrence vs attention: two ways to remember history</h2>
+<p>First put the two roads side by side. Attention (which you learned in L19) remembers by "keeping it all": every token's Key/Value goes into the KV cache, and step t looks at all t positions before it - so memory grows <strong>linearly</strong> with the sequence and per-step compute grows <strong>linearly</strong> with the history (O(n^2) over the whole sequence). An SSM does the reverse, rolling the history <strong>into a fixed-size state h</strong>: step t takes only the previous state h_(t-1) and the current input x_t to compute the new state h_t - completely independent of how long the history before t is. How big the state is, is a hyperparameter the model fixes (<span class="mono">ssm_d_state</span>), unrelated to sequence length. That sentence sounds unremarkable but is the source of all of SSM's advantage: stretch the sequence from 1k to 100k and attention's cost grows a hundredfold, while an SSM's per-step cost does not gain a single byte.</p>
+<div class="cols">
+  <div class="col"><h4>Attention (KV cache)</h4><p>Every token's KV is stored, growing ever longer. Step t looks back over all t history: memory O(n), compute O(n^2). Long-range exact, but ever heavier.</p></div>
+  <div class="col"><h4>SSM (recurrent state)</h4><p>Maintain only one fixed-size state h, updated in place. Step t sees only h_(t-1) and x_t: memory O(1), compute O(n). Light and steady, but the state is a lossy summary.</p></div>
+</div>
+<p>The most vivid picture of this difference is "the state scanning along time": inputs x_0, x_1, ... arrive one by one, the state h updates step by step in place, each step depending only on the previous state and the current input, emitting an output y on the side. In the figure below - note that the h row is <strong>always the same single cell</strong>, not dragging ever longer like the KV cache:</p>
+<div class="trace">
+  <div class="tcap"><b>Tracing one state scan</b>: inputs x_0..x_4 arrive in turn, the fixed-size state h recurs h_0 -&gt; h_1 -&gt; ... -&gt; h_4, each step depending only on the previous h and the current x, while producing y. The state size never changes throughout (illustrative).</div>
+<svg viewBox="0 0 680 268" width="100%" role="img" aria-label="State-space model state scan: inputs x0..x4 arrive in turn, a fixed-size state h recurs h0 -> h1 -> ... -> h4, each step depending only on the previous h and the current x, producing y">
+<g font-family="ui-monospace,monospace">
+<text x="40" y="54" text-anchor="middle" fill="#5b6470" font-size="10">input x</text>
+<text x="40" y="142" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="10">h</text>
+<text x="40" y="224" text-anchor="middle" fill="#5b6470" font-size="10">output y</text>
+<rect x="68" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="96" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x0</text>
+<line x1="96" y1="64" x2="96" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 96 115 L 92 107 L 100 107 z" fill="#9aa6b2"/>
+<rect x="68" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="96" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h0</text>
+<line x1="96" y1="160" x2="96" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 96 205 L 92 197 L 100 197 z" fill="#9aa6b2"/>
+<rect x="68" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="96" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y0</text>
+<rect x="184" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="212" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x1</text>
+<line x1="212" y1="64" x2="212" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 212 115 L 208 107 L 216 107 z" fill="#9aa6b2"/>
+<rect x="184" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="212" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h1</text>
+<line x1="126" y1="138" x2="178" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 183 138 L 175 134 L 175 142 z" fill="#7c3aed"/>
+<line x1="212" y1="160" x2="212" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 212 205 L 208 197 L 216 197 z" fill="#9aa6b2"/>
+<rect x="184" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="212" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y1</text>
+<rect x="300" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="328" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x2</text>
+<line x1="328" y1="64" x2="328" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 328 115 L 324 107 L 332 107 z" fill="#9aa6b2"/>
+<rect x="300" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="328" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h2</text>
+<line x1="242" y1="138" x2="294" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 299 138 L 291 134 L 291 142 z" fill="#7c3aed"/>
+<line x1="328" y1="160" x2="328" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 328 205 L 324 197 L 332 197 z" fill="#9aa6b2"/>
+<rect x="300" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="328" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y2</text>
+<rect x="416" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="444" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x3</text>
+<line x1="444" y1="64" x2="444" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 444 115 L 440 107 L 448 107 z" fill="#9aa6b2"/>
+<rect x="416" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="444" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h3</text>
+<line x1="358" y1="138" x2="410" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 415 138 L 407 134 L 407 142 z" fill="#7c3aed"/>
+<line x1="444" y1="160" x2="444" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 444 205 L 440 197 L 448 197 z" fill="#9aa6b2"/>
+<rect x="416" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="444" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y3</text>
+<rect x="532" y="36" width="56" height="28" rx="5" fill="#ffffff" stroke="#2563eb"/><text x="560" y="54" text-anchor="middle" fill="#2563eb" font-weight="700" font-size="12">x4</text>
+<line x1="560" y1="64" x2="560" y2="110" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 560 115 L 556 107 L 564 107 z" fill="#9aa6b2"/>
+<rect x="532" y="116" width="56" height="44" rx="6" fill="#ece3fb" stroke="#7c3aed"/><text x="560" y="143" text-anchor="middle" fill="#7c3aed" font-weight="700" font-size="13">h4</text>
+<line x1="474" y1="138" x2="526" y2="138" stroke="#7c3aed" stroke-width="2"/><path d="M 531 138 L 523 134 L 523 142 z" fill="#7c3aed"/>
+<line x1="560" y1="160" x2="560" y2="200" stroke="#9aa6b2" stroke-width="1.4"/><path d="M 560 205 L 556 197 L 564 197 z" fill="#9aa6b2"/>
+<rect x="532" y="206" width="56" height="28" rx="5" fill="#ffffff" stroke="#c2630e"/><text x="560" y="224" text-anchor="middle" fill="#c2630e" font-weight="700" font-size="12">y4</text>
+<text x="154" y="129" text-anchor="middle" fill="#7c3aed" font-size="10">h=f(h,x)</text>
+<text x="340" y="256" text-anchor="middle" fill="#5b6470" font-size="11">state size never changes -> O(1) memory, does not grow with the sequence</text>
+</g></svg>
+</div>
+<h2>How ggml implements it: two ops + a recurrent state</h2>
+<p>In ggml an SSM mainly comes down to two ops, plus a "recurrent state" read/write. First is <span class="mono">ggml_ssm_conv</span> - a <strong>causal 1D convolution</strong>: before the scan, it lets each position mix locally with the few positions before it (the convolution width is <span class="mono">ssm_d_conv</span>, usually small, e.g. 4). It acts like adding a bit of "short-term memory" to the input, letting neighboring tokens' information blend first. Then the real core, <span class="mono">ggml_ssm_scan</span> - the <strong>selective scan</strong>, which eats a whole armful of tensors: the state <span class="mono">s</span>, the input <span class="mono">x</span>, the timestep <span class="mono">dt</span> (Delta), the state matrices <span class="mono">A</span>/<span class="mono">B</span>/<span class="mono">C</span>, and the sequence indices <span class="mono">ids</span>, computing the whole sequence's recurrence in one pass. Here is the real call of these two ops in a Mamba layer (from <span class="mono">src/models/mamba-base.cpp</span>):</p>
+<pre class="code"><span class="cm">// Mamba layer core (simplified from src/models/mamba-base.cpp)</span>
+x = <span class="fn">ggml_ssm_conv</span>(ctx0, conv_x, layer.ssm_conv1d); <span class="cm">// 1) causal conv: local short-term mixing</span>
+x = <span class="fn">ggml_silu</span>(ctx0, x);                          <span class="cm">//    activation</span>
+<span class="cm">// 2) project dt, B, C from x - note these all depend on input x (this is "selective")</span>
+dt = <span class="fn">build_lora_mm</span>(layer.ssm_dt, dt);            <span class="cm">//    the per-step step size Delta</span>
+A  = layer.ssm_a;                                <span class="cm">//    state-transition matrix (learned param, input-independent)</span>
+<span class="cm">// 3) selective scan: recur the state along time by A/B/C/dt</span>
+y = <span class="fn">ggml_ssm_scan</span>(ctx0, ssm, x, dt, A, B, C, ids);</pre>
+<p>Note the key detail in step 2: <span class="mono">dt</span>, <span class="mono">B</span>, <span class="mono">C</span> are all computed from the current input <span class="mono">x</span> (input-dependent), while <span class="mono">A</span> is a learned fixed parameter. This is exactly where Mamba beats old-style SSMs - detailed next section. There is also an easily-missed question: where does the state h live? It does <strong>not</strong> enter the KV cache, but a dedicated "recurrent state cache" (<span class="mono">llama-memory-recurrent</span>), each sequence taking a <strong>fixed-size</strong> block. <span class="mono">build_rs</span> (rs = recurrent state) reads the previous step's state out of this cache, feeds it to the scan, and writes the updated new state back:</p>
+<pre class="code"><span class="cm">// recurrent state read - update - writeback (illustrative; see src/llama-graph.cpp build_rs)</span>
+<span class="cm">// 1) read these sequences' previous-step state out of the recurrent cache</span>
+states = <span class="fn">get_state_rows</span>(state_cache, ids);
+<span class="cm">// 2) use the scan to advance those states forward a stretch</span>
+y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
+<span class="cm">// 3) write the final new state back to cache for the next step</span>
+<span class="fn">ggml_cpy</span>(ctx0, last_state, state_cache_view);</pre>
+<p>Against L17/L19 you find a neat echo: the transformer uses the KV cache to store "all the KV of the history", an SSM uses a recurrent cache to store "the one state the history compressed into". Both are caches that "keep the previous step's stuff for the next step", but one grows with the sequence and one is forever fixed-size. This is also why llama.cpp builds a dedicated <span class="mono">llama-memory-recurrent</span> for SSMs rather than stuffing them into the original KV cache - their "memory shapes" are fundamentally different. For the same reason, when a pure SSM model runs you will hardly see "the KV cache growing with the conversation" in VRAM - in its place is a small, constant-size block of state per sequence.</p>
+<h2>Selective scan: what A / B / C / Delta actually do</h2>
+<p>The "scan" is that recurrence above: walk the sequence start to end, pushing the state forward step by step. The hard part is the word "selective". First, the plainest recurrence, stripped of all frills, is just two lines:</p>
+<pre class="code"><span class="cm"># the core recurrence of the selective scan (conceptual pseudo-code, not the real kernel)</span>
+<span class="kw">for</span> t <span class="kw">in</span> 0..n:
+    h = A * h + B * x[t]     <span class="cm"># new state from previous state h and current input x[t]</span>
+    y[t] = C * h             <span class="cm"># read this step's output from the new state</span></pre>
+<p>The four quantities each have a job: <span class="mono">A</span> governs "how much of the previous state to keep" (decay / memory), <span class="mono">B</span> governs "how the current input is written into the state", <span class="mono">C</span> governs "what is read out of the state as output", and <span class="mono">Delta</span> (dt) is the "step size", controlling how hard this step updates (think of it as the discretized time interval: large Delta ~= take one more look at the current input, small Delta ~= lean more on the old state). If A/B/C/Delta are all <strong>fixed</strong> constants, that is the classic linear SSM - fast, but rigid: it treats every token alike, unable to "tailor to who it sees". This is also the root reason early SSMs kept losing to transformers - they remember everything alike, yet in language some words are crucial and some are filler.</p>
+<p>Mamba's key innovation is one sentence: <strong>let B, C, Delta vary with the input</strong> (in the previous section's code dt/B/C were all projected from x - that is what this means). This is "selectivity" - the model can, based on what it is currently reading, <strong>dynamically decide</strong> "this token matters, write it into the state a bit more" or "this token is useless, let the state ignore it". By analogy: a fixed SSM is a constant-speed conveyor belt, processing everything at the same pace; a selective SSM is a reader who <strong>adjusts their own speed</strong>, slowing to note key sentences and fast-forwarding past filler. It is exactly this "input-dependent gating" that let Mamba, for the first time, match transformers on a task like language with its uneven information density. <span class="mono">A</span> stays fixed (a learned parameter, input-independent) because it governs the state's own stable decay, and letting it jump around with the input would make the recurrence unstable - a carefully kept "anchor". In other words, Mamba treats separately what "should be rigid" in an SSM (A, for stability) and what "should be flexible" (B/C/Delta, following the input), and this judgment of "some things vary, some stay fixed" is exactly where it outdoes earlier SSMs.</p>
+<p>The real kernel is of course far more complex than these two lines: it must discretize (turn the continuous A/Delta into per-step multipliers), do a parallel prefix-sum on the GPU (a parallel scan, splitting the seemingly-serial recurrence into parallelizable parts - this is the "associative scan" from the Mamba paper), and handle multiple heads and groups. But hold the through-line "<span class="mono">h = A*h + B*x; y = C*h</span>, with B/C/Delta following the input" and you have the soul of an SSM - the rest is engineering to move it efficiently onto hardware.</p>
+<table class="t">
+  <tr><th>Dimension</th><th>Attention (transformer)</th><th>SSM (Mamba/RWKV)</th></tr>
+  <tr><td>How it remembers</td><td>stores every token's KV</td><td>one fixed-size state h</td></tr>
+  <tr><td>Memory vs sequence</td><td>grows linearly O(n)</td><td>constant O(1)</td></tr>
+  <tr><td>Whole-sequence compute</td><td>O(n^2)</td><td>O(n)</td></tr>
+  <tr><td>Best at</td><td>long-range exact retrieval / copy</td><td>very long sequences / streaming / low VRAM</td></tr>
+  <tr><td>llama.cpp cache</td><td>KV cache (L19)</td><td>llama-memory-recurrent</td></tr>
+</table>
+<h2>Deeper: the sweet and bitter of long sequences, and hybrid architectures</h2>
+<p>Two last folds, answering the two questions most worth thinking through when deploying SSMs.</p>
+<details class="accordion">
+  <summary><span class="badge-num">1</span> Why are SSMs good for long sequences? And what is the cost? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>The sweet first. Attention's KV cache grows linearly with the sequence, and step t must compute attention against all t positions before it - push the sequence to hundreds of thousands of tokens and both memory and compute blow up. An SSM's state is fixed-size and each step sees only the previous state: memory O(1), whole-sequence compute O(n), and however long the sequence the per-step cost does not budge. This makes it especially sweet for <strong>very long context, streaming input, and low-VRAM on-device</strong> - you can even feed tokens in almost endlessly and memory does not grow. Now the bitter. A fixed-size state is in essence a <strong>lossy compression</strong> of arbitrarily long history into a small vector. When there is too much worth remembering and the state cannot hold it, it can only forget selectively. So SSMs are naturally handicapped on "exact retrieval" tasks: e.g. "copy out the 3000th token verbatim" (the copy task), or needing to look back and exactly compare some detail from long ago - attention can look back and check each KV, while an SSM has only one repeatedly-overwritten summary. This is not poor implementation, it is the fundamental cost of choosing "fixed state": you traded "exact random access to arbitrary history" for "cost that does not grow with length". So a practical intuition: the more a task leans "sequential, rarely looking back" (long-document summary, streaming transcription, audio), the more SSM wins; the more it leans "exact look-up, needle-in-a-haystack" (retrieval by ID, finding one verbatim sentence in a long doc), the steadier attention is.</p>
+  </div>
+</details>
+<details class="accordion">
+  <summary><span class="badge-num">2</span> Since each has strengths, why not mix the two? <span class="hint">click to expand</span></summary>
+  <div class="acc-body">
+    <p>That is exactly today's most popular approach - the <strong>hybrid architecture</strong>. Since attention excels at exact retrieval and SSMs at efficiently handling long sequences, let some layers use SSM and some use attention, each playing to its strength. Many new models (like Jamba, and various Mamba-Transformer hybrids) are built this way: most layers use SSM to carry the length and save memory, a few layers insert attention to restore exact-retrieval ability. llama.cpp built <span class="mono">llama-memory-hybrid</span> for this - a memory subsystem that manages both kinds <strong>at once</strong>: the attention layers' part goes through the KV cache, the SSM layers' part through the recurrent state cache, the two caches coexisting in one model. This echoes an attitude recurring across these lessons: architecture is not an either/or article of faith but an engineering combination of tradeoffs. The foundation you built in the first six parts (compute graph L09/L10, memory management L17, KV cache L19) still holds up here at the hybrid architecture - only now, within one model, some layers remember "all the KV" and some remember "one state", and the scheduler must serve both. This neatly shows one thing: mastering the transformer's caching and scheduling does not become obsolete when SSMs appear - it is precisely the prerequisite for understanding hybrid architectures.</p>
+  </div>
+</details>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>Core tradeoff: attention stores all KV (memory O(n), compute O(n^2), long-range exact); an SSM uses a fixed-size recurrent state h (memory O(1), compute O(n), a lossy summary).</li>
+    <li>Recurrence: <span class="mono">h_t = f(A,B,C,Delta; h_(t-1), x_t)</span>, <span class="mono">y_t = C.h_t</span> - each step sees only the previous state and current input, state size fixed by <span class="mono">ssm_d_state</span>.</li>
+    <li>ggml's two ops: <span class="mono">ggml_ssm_conv</span> (causal conv, local mixing) + <span class="mono">ggml_ssm_scan(s,x,dt,A,B,C,ids)</span> (selective scan); the state is read/written via <span class="mono">build_rs</span> from <span class="mono">llama-memory-recurrent</span>.</li>
+    <li>"Selectivity" = let <span class="mono">B/C/Delta</span> vary with the input (input-dependent gating), the model learning to dynamically "remember / ignore" - the key to Mamba matching transformers.</li>
+    <li>Cost: a fixed state is lossy compression, long-range exact retrieval (copy-like) worse than attention; hence the common <strong>hybrid architecture</strong> (<span class="mono">llama-memory-hybrid</span>) taking the best of both.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  The thing to take from state-space models is not some Mamba formula, but how it forces you to re-examine an assumption you long took for granted: <strong>"the model must remember the whole history" is actually a choice, not a law</strong>. Attention chose "keep it all, look back anytime", and got the O(n^2) cost; the SSM chose "keep only a rolling summary", and won the O(n) lightness while accepting the loss of being "fuzzy on details". Neither is absolutely better - they merely stand at different points on the "exact vs efficient" axis. This is precisely the shared motif of Part 7's four lessons: speculative decoding re-examined "the seriality of emitting tokens", MoE re-examined "the binding of compute and parameters", multimodality re-examined "the form of the input", and the SSM re-examined "how history is stored". Each challenges a default "taken as self-evident" and offers another possibility. And all of them stand on the foundation you built in the first six parts - which is exactly the step from "using llama.cpp" toward "understanding llama.cpp, even improving it".
+</div>
+
+<p>Part 7 closes here. From speculative decoding, MoE, and multimodality to state-space models, we have taken apart four advanced mechanisms "outside the standard transformer" one by one - each either squeezing the bottleneck from a new angle, trading structure for efficiency, or outright replacing a pillar. Next stop, Part 8 turns from "how the model computes" to "how the engineering lands": converting a HuggingFace model to GGUF, compiling/debugging/testing, and how to genuinely contribute to llama.cpp. Having finished the first seven parts, you have followed the path from "how a model runs" to "how frontier architectures change"; next, it is time to put that understanding into your own hands.</p>
+
+""",
+}

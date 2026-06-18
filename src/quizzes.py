@@ -2358,6 +2358,67 @@ QUIZZES = {
             },
         ],
     },
+    "37-state-space.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "相比注意力，SSM（Mamba/RWKV）的显存随序列长度怎么变？",
+                    "en": "Compared with attention, how does an SSM's (Mamba/RWKV) memory change with sequence length?",
+                },
+                "opts": [
+                    {"zh": "不变（O(1)）——用一个固定大小的递推状态概括历史，不随序列变长", "en": "constant (O(1)) - a fixed-size recurrent state summarizes the history, not growing with the sequence"},
+                    {"zh": "线性增长，和注意力一样", "en": "grows linearly, same as attention"},
+                    {"zh": "平方增长", "en": "grows quadratically"},
+                    {"zh": "先涨后降", "en": "rises then falls"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是 SSM 最大的卖点。注意力要把每个 token 的 KV 都存进 KV cache（显存随序列线性涨，L19），第 t 步还要回看全部历史（整段 O(n^2)）。SSM 反过来：维护一个固定大小的状态 h（大小由 ssm_d_state 定死），每步只用上一个状态 h_(t-1) 和当前输入 x_t 算出新状态——和历史多长无关。所以显存 O(1)、整段算力 O(n)，序列拉到几十万 token 单步开销也纹丝不动。这让它在超长上下文、流式、端侧低显存场景特别香。",
+                    "en": "This is the SSM's biggest selling point. Attention must store every token's KV in the KV cache (memory grows linearly, L19) and step t looks back over all history (O(n^2) overall). The SSM does the reverse: maintain a fixed-size state h (size fixed by ssm_d_state), and each step computes the new state from only the previous state h_(t-1) and current input x_t - independent of history length. So memory is O(1), whole-sequence compute O(n), and even at hundreds of thousands of tokens the per-step cost does not budge. This makes it especially sweet for very long context, streaming, and low-VRAM on-device.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_ssm_scan(s, x, dt, A, B, C, ids) 算的是什么？“选择性”体现在哪？",
+                    "en": "What does ggml_ssm_scan(s, x, dt, A, B, C, ids) compute? Where is the 'selectivity'?",
+                },
+                "opts": [
+                    {"zh": "选择性扫描：按 A/B/C/dt 把状态沿时间递推；“选择性”指 B/C/dt 随输入变化", "en": "the selective scan: recur the state along time by A/B/C/dt; 'selectivity' means B/C/dt vary with the input"},
+                    {"zh": "把所有 token 的注意力分数算出来", "en": "computes the attention scores of all tokens"},
+                    {"zh": "对权重做量化压缩", "en": "quantizes and compresses the weights"},
+                    {"zh": "把图像编码成 embedding", "en": "encodes an image into embeddings"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "ggml_ssm_scan 做的是核心递推 h = A*h + B*x；y = C*h，从头到尾扫一遍序列、状态一步步往前推。A 管“上一个状态保留多少”、B 管“输入怎么写进状态”、C 管“从状态读出什么”、dt(Δ) 是步长。关键在“选择性”：Mamba 让 B、C、dt 都从当前输入 x 投影出来（输入相关），于是模型能动态决定“这个 token 重要就多写进状态、没用就忽略”——这正是它追平 transformer 的关键。A 仍保持固定（学到的参数），管状态自身的稳定衰减。",
+                    "en": "ggml_ssm_scan does the core recurrence h = A*h + B*x; y = C*h, scanning the sequence start to end and pushing the state forward step by step. A governs 'how much of the previous state to keep', B 'how the input is written into the state', C 'what is read out of the state', and dt (Delta) is the step size. The key is 'selectivity': Mamba projects B, C, dt from the current input x (input-dependent), so the model can dynamically decide 'write an important token into the state more, ignore a useless one' - exactly what let it match transformers. A stays fixed (a learned parameter), governing the state's own stable decay.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "SSM 用固定状态换来了 O(1) 显存，代价是什么？",
+                    "en": "The SSM trades a fixed state for O(1) memory; what is the cost?",
+                },
+                "opts": [
+                    {"zh": "状态是有损压缩，长程精确检索（如逐字 copy）不如能回查 KV 的注意力", "en": "the state is lossy compression; long-range exact retrieval (e.g. verbatim copy) is worse than attention, which can look up KV"},
+                    {"zh": "它比注意力慢得多", "en": "it is much slower than attention"},
+                    {"zh": "它不能处理长序列", "en": "it cannot handle long sequences"},
+                    {"zh": "它需要更多显存", "en": "it needs more memory"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "天下没有免费的午餐。把任意长的历史压进一个固定大小的状态，本质是有损压缩：该记的太多、状态装不下时，它只能取舍着忘。于是 SSM 在“精确检索”类任务上天然吃亏——比如把很久以前第 3000 个 token 原样复制出来（copy 任务），或回头精确比对某个细节。注意力能回头逐个查 KV，SSM 却只有一个被反复覆写的摘要。这不是实现问题，是“固定状态”这个选择的根本代价。正因如此，实践中常用混合架构（llama-memory-hybrid）：多数层用 SSM 扛长度，少数层插注意力补精确检索。",
+                    "en": "No free lunch. Compressing arbitrarily long history into a fixed-size state is inherently lossy: when there is too much worth remembering and the state cannot hold it, it must forget selectively. So SSMs are handicapped on 'exact retrieval' tasks - e.g. copying out the 3000th token from long ago verbatim (the copy task), or looking back to compare a detail exactly. Attention can look back and check each KV; the SSM has only one repeatedly-overwritten summary. This is not an implementation flaw but the fundamental cost of choosing 'fixed state'. Hence the common hybrid architecture (llama-memory-hybrid): most layers use SSM to carry length, a few insert attention for exact retrieval.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "本课的母题是：“模型必须记住全部历史”其实是一个选择、不是一条定律。注意力选了“全记下来、随时回查”，SSM 选了“只记一个滚动摘要”。请顺着这个视角想：(1) 为什么 llama.cpp 要给 SSM 单独做一套 llama-memory-recurrent，而不复用 KV cache（提示：两者的“记忆形状”不同）？(2) 如果一个任务要在 100 万 token 的日志里精确找出某一行，你会更信任纯 SSM 还是带注意力的模型，为什么？(3) 把第七部分四课串起来看——投机解码、MoE、多模态、SSM 各自挑战了哪个“本以为天经地义”的默认假设？",
+                "en": "This lesson's motif: 'the model must remember the whole history' is a choice, not a law. Attention chose 'keep it all, look back anytime', the SSM chose 'keep only a rolling summary'. Follow that view: (1) why does llama.cpp build a dedicated llama-memory-recurrent for SSMs instead of reusing the KV cache (hint: their 'memory shapes' differ)? (2) if a task must find one exact line in a 1-million-token log, would you trust a pure SSM or an attention-bearing model more, and why? (3) tying Part 7's four lessons together - which 'taken-as-self-evident' default did speculative decoding, MoE, multimodality, and the SSM each challenge?",
+            },
+        ],
+    },
 }
 
 

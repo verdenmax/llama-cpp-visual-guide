@@ -50,4 +50,5 @@ CONTENT = {
     "34-speculative-decoding.html": part7.LESSON_34,
     "35-moe.html": part7.LESSON_35,
     "36-multimodal.html": part7.LESSON_36,
+    "37-state-space.html": part7.LESSON_37,
 }
