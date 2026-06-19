@@ -1,0 +1,298 @@
+"""Content for Part 9 (quick reference)."""
+
+LESSON_40 = {
+    "zh": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+到这里，全书 40 课讲完了。从"llama.cpp 是什么"出发，你一路走过了 ggml 的张量与计算图、llama 的模型加载与推理主循环、公共 API 与命令行工具、底层 CPU/CUDA 内核，再到投机解码、MoE、多模态、状态空间模型这些进阶机制，最后学会了怎么把一个 HuggingFace 模型转成 GGUF、怎么给这个项目提一个站得住的 PR。这套推理引擎，你已经从上到下走了一遍。
+</p>
+<p style="color:var(--muted);margin-top:.4rem">这最后一课不教任何新东西，而是给你一张<strong>速查地图</strong>：先用一条"学习路径"把九个部分怎么层层递进看清楚，再用一张<strong>概念依赖图</strong>把核心概念之间"谁建立在谁之上"画出来，最后给一份<strong>分类术语表</strong>——每个术语一句话定义、标好它在源码里的位置、再附上"点一下跳回讲它的那一课"的链接。往后你忘了某个概念，不必从头翻，来这里一查、一跳就回到现场。</p>
+<p style="color:var(--muted)">怎么用它：当你在读代码或调试时撞见一个似曾相识的名词（<span class="mono">ggml_cgraph</span>?<span class="mono">llama_batch</span>?），先在术语表里扫一眼"它大概是什么、在哪定义"，需要细看就顺着链接回到对应课。这一课本身很短，价值全在"查得快、跳得准"。 换句话说，前面的课教你"怎么从零理解"，这一课帮你"以后怎么快速回忆"。</p>
+
+<div class="card macro">
+  <div class="tag">🌍 宏观理解</div>
+  把这一课当成全书的<strong>索引页</strong>。前面三十九课是"线性"的——一课接一课地讲；但你脑子里的知识其实是一张<strong>网</strong>：<span class="mono">llama_decode</span> 牵着 KV cache，KV cache 活在 <span class="mono">llama_context</span> 里，context 靠 <span class="mono">ggml_backend</span> 执行 <span class="mono">ggml_cgraph</span>，而图又是由 <span class="mono">ggml_tensor</span> 连起来的……这些概念彼此咬合，缺一块就转不动。线性的课程没法同时把这张网摊开给你看，于是有了这一课：用一张依赖图把"谁撑着谁"画清楚，再用分类术语表把散落在四十课里的名词收拢成可一眼检索的清单。读懂这张网，你对 llama.cpp 的理解就从"记得每一课讲了啥"升级成了"知道每个零件在整机里的位置"——而后者，才是真正能拿来读源码、查 bug、做贡献的地图。 顺带说一个读法：这张网没有"最重要的那一个零件"，只有"谁离硬件近、谁离用户近"——越往下越通用（ggml 那几样几乎任何模型都用），越往上越具体（多模态、SSM 只在特定模型里才出现）。看清这条"通用到专门"的轴，你就知道哪些值得先吃透、哪些可以等用到时再回来查。
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 生活类比</div>
+  前面的课像是带你<strong>逐个房间参观一栋大楼</strong>：这间是张量、那间是 KV cache、楼上是采样……每间都看仔细了，但你未必拼得出整栋楼的<strong>结构图</strong>。这一课就是大堂墙上那张<strong>楼层索引 + 平面图</strong>：平面图（概念依赖图）告诉你哪间撑着哪间、走廊怎么连；楼层索引（分类术语表）则是"想找某个房间？在第几层、门牌多少、点一下直接带你过去"。参观时你靠脚走、靠记忆；但等你要真在这栋楼里<strong>干活</strong>（改代码、修 bug），靠的就是这张图——它让你不必每次都从一楼重新找起。 也正因为它是一张"图"，天然支持<strong>非线性</strong>地用：你不必从第一课重读，哪里不懂点哪里——这恰恰是参考资料和教程最大的不同。
+</div>
+<h2>全书地图：九个部分怎么层层递进</h2>
+<p>先看整体。这门课的九个部分不是随便排的，而是<strong>从外到内、再从内到外</strong>：先建立全局印象，再一层层钻进 ggml 和 llama 的内部，摸透了内部再回到工具、内核、进阶机制，最后落到实战与速查。每一部分都<strong>站在前一部分的肩膀上</strong>——所以哪一课要是觉得跳跃，往前回翻往往就接上了。 一个小提示：如果你是带着某个具体目的来的（比如"我只想搞懂量化"），完全可以直接跳到对应部分；但若想建立整体直觉，按顺序走一遍仍是最省力的路。</p>
+<div class="trace">
+  <div class="tcap"><b>全书学习路径</b>：九个部分层层递进，从"llama.cpp 是什么"一路通到"能改、能贡献、能速查"（每站标了对应课号）。</div>
+  <div class="stations">
+    <div class="stn"><h5>① 宏观全景</h5><div class="cellrow"><span class="vc">L01-03</span></div><div class="tlab">这是什么、为什么</div></div>
+    <div class="op">基础</div>
+    <div class="stn"><h5>② 前置基础</h5><div class="cellrow"><span class="vc">L04-07</span></div><div class="tlab">推理 / 张量 / 量化</div></div>
+    <div class="op">引擎</div>
+    <div class="stn"><h5>③ ggml 引擎</h5><div class="cellrow"><span class="vc blue">L08-13</span></div><div class="tlab">图 / 算子 / GGUF</div></div>
+    <div class="op">内部</div>
+    <div class="stn"><h5>④ llama 内部</h5><div class="cellrow"><span class="vc blue">L14-24</span></div><div class="tlab">加载 / 推理主循环</div></div>
+    <div class="op">外围</div>
+    <div class="stn"><h5>⑤ API 与工具</h5><div class="cellrow"><span class="vc">L25-30</span></div><div class="tlab">C API / cli / server</div></div>
+    <div class="op">底层</div>
+    <div class="stn"><h5>⑥ 底层内核</h5><div class="cellrow"><span class="vc hot">L31-33</span></div><div class="tlab">CPU / CUDA / 调度</div></div>
+    <div class="op">进阶</div>
+    <div class="stn"><h5>⑦ 进阶专题</h5><div class="cellrow"><span class="vc hot">L34-37</span></div><div class="tlab">投机 / MoE / 多模态</div></div>
+    <div class="op">实战</div>
+    <div class="stn"><h5>⑧ 实战贡献</h5><div class="cellrow"><span class="vc">L38-39</span></div><div class="tlab">转换 / 编译 / 贡献</div></div>
+    <div class="op">速查</div>
+    <div class="stn"><h5>⑨ 速查</h5><div class="cellrow"><span class="vc blue">L40</span></div><div class="tlab">就是这一课</div></div>
+  </div>
+</div>
+<p>这张图也回答了一个常见疑问："该按什么顺序读？"答案就是<strong>从左到右</strong>：每一部分都默认你已经消化了它左边的内容。当然，作为速查页，你也完全可以从任意一格跳进去——这正是下面那份术语表存在的意义。 这也是为什么前面每一课的开头，几乎都在用一两句话先接上前一课——课程的"层层递进"，在这张地图上一眼就能看明白。</p>
+<p>再往深一层看，这九个部分其实是三段式的：<strong>第一段（一到三部分）建立"它是什么"的整体印象</strong>，让你不至于一上来就淹没在细节里；<strong>第二段（四到七部分）一头扎进引擎内部</strong>，把张量、计算图、KV cache、采样、内核这些"机器零件"逐个拆开看清；<strong>第三段（八到九部分）再从内部走出来</strong>，落到"怎么用、怎么改、怎么查"。很多人学一个大项目卡住，往往是因为跳过第一段直接抠细节，或者抠完细节却没回到第三段去真正用它——这门课特意把这三段都给你铺齐了。</p>
+<h2>概念依赖图：谁建立在谁之上</h2>
+<p>九个部分是<strong>时间</strong>上的顺序；但概念之间还有一层<strong>逻辑</strong>上的依赖——谁是地基、谁建在谁之上。下面这张图把最核心的几个概念按依赖关系摞了起来：最底下是 <span class="mono">ggml_tensor</span>（一切数据的基本单位），往上每一层都<strong>建立在下一层之上</strong>，最顶上才是你最熟悉的"一次 <span class="mono">llama_decode</span>"。 注意"依赖"和"调用顺序"不是一回事：运行时是自上而下地发起（decode 调 context、context 调 backend），但<strong>构建</strong>和<strong>理解</strong>却最好自下而上——先懂张量，才谈得上懂图、懂后端。</p>
+<p>举个具体例子，把这张图"走"一遍：你在 <span class="mono">llama-cli</span> 里输入一句话，它先经 <span class="mono">vocab</span> 切成 token，装进一个 <span class="mono">llama_batch</span>，交给 <span class="mono">llama_context</span> 的 <span class="mono">llama_decode</span>；context 内部建起一张 <span class="mono">ggml_cgraph</span>（里面全是 <span class="mono">ggml_tensor</span> 节点），交给某个 <span class="mono">ggml_backend</span> 执行，算的过程中读写 KV cache；最后吐出 logits，<span class="mono">sampler</span> 从中挑出下一个 token。看——从输入到输出，恰好把图里每个盒子都点了一遍。这就是为什么说"读懂这张图，就读懂了一次推理的骨架"。</p>
+<div class="trace">
+  <div class="tcap"><b>核心概念依赖图</b>：竖向箭头 A -&gt; B 读作"A 依赖 B"，两侧箭头则是数据流。自下而上：张量组成计算图、后端执行图、context 持有 KV cache、batch/decode 驱动一步推理；vocab 把文本变成 token 喂进来，sampler 从 logits 里挑下一个 token。</div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="100%" role="img" aria-label="llama.cpp 核心概念依赖图：从 ggml_tensor 到一次推理，每层建立在下一层之上">
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b6470"/></marker></defs>
+<text x="365" y="30" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#5b6470">概念依赖图：谁建立在谁之上</text>
+<line x1="365" y1="123" x2="365" y2="138" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="191" x2="365" y2="206" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="259" x2="365" y2="274" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="327" x2="365" y2="342" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="250" y="72" width="230" height="50" rx="9" fill="#ffffff" stroke="#c2630e" stroke-width="2"/>
+<text x="365" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#c2630e">llama_batch -&gt; llama_decode</text>
+<text x="365" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">一步推理：喂入一批 token、算出 logits</text>
+<rect x="250" y="140" width="230" height="50" rx="9" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+<text x="365" y="160" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#7c3aed">llama_context</text>
+<text x="365" y="178" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">持有运行时状态（含 KV cache）</text>
+<rect x="250" y="208" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="228" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_backend</text>
+<text x="365" y="246" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">执行计算图（CPU / CUDA / ...）</text>
+<rect x="250" y="276" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="296" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_cgraph</text>
+<text x="365" y="314" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">计算图：算子连成的 DAG</text>
+<rect x="250" y="344" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="364" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_tensor</text>
+<text x="365" y="382" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">张量：数据的基本单位</text>
+<text x="36" y="250" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5b6470" transform="rotate(-90 36 250)">越往上越接近一次推理 / 越往下越接近数据与硬件</text>
+<text x="365" y="62" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#5b6470">竖向箭头 A -&gt; B 即 A 依赖 B；两侧箭头为数据流入/流出</text>
+<line x1="482" y1="165" x2="518" y2="165" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="520" y="140" width="168" height="50" rx="9" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+<text x="604" y="160" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#7c3aed">KV cache</text>
+<text x="604" y="178" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">缓存历史 K/V</text>
+<rect x="36" y="72" width="150" height="50" rx="9" fill="#ffffff" stroke="#5b6470" stroke-width="2"/>
+<text x="111" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#5b6470">vocab</text>
+<text x="111" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">token 与文本互转</text>
+<line x1="188" y1="97" x2="248" y2="97" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="520" y="72" width="168" height="50" rx="9" fill="#ffffff" stroke="#c2630e" stroke-width="2"/>
+<text x="604" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#c2630e">sampler</text>
+<text x="604" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">从 logits 选下一个 token</text>
+<line x1="482" y1="97" x2="518" y2="97" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<text x="365" y="416" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#5b6470">地基是 ggml_tensor；越往上越接近 "一次 llama_decode"。</text>
+</svg>
+</div>
+<p>这张图真正的价值，是把"<strong>读源码时该往哪看</strong>"画了出来。比如你在调一个和 KV cache 有关的 bug，顺着图就知道该往 <span class="mono">llama_context</span> 里找（KV cache 归它持有），而不会跑去 <span class="mono">ggml_tensor</span> 那一层瞎转。每一根箭头，都是一条"出了问题该往哪一层追"的线索。</p>
+<h2>分类术语表：一句话查 + 跳回对应课</h2>
+<p>下面把全书最常打交道的术语按四类列出来。每条给三样东西：<strong>一句话定义</strong>（它是什么、管什么）、<strong>源码位置</strong>（想看真身去哪个文件）、<strong>跳转</strong>（点一下回到讲它的那一课）。不求全，只求"撞见时能立刻对上号"。 关于"源码位置"那一列：给的是<strong>单一最佳落脚点</strong>——不是说这个概念只在这一个文件里，而是"想从哪开始读最不会迷路"。比如 KV cache 的实现散在好几个文件，但从 <span class="mono">llama-kv-cache.h</span> 的类定义看起准没错。</p>
+<p>为什么分成这四类？因为它们恰好对应你读源码时的四种"在哪一层"：<strong>核心数据结构</strong>是 ggml 这台计算器的"数据与图"；<strong>推理流程</strong>是 llama 把一次对话跑起来的那条主线；<strong>内核与后端</strong>是"同一张图怎么落到不同硬件上"；<strong>进阶机制与工具</strong>则是标准流程之外的那些特殊玩法。撞见一个陌生符号时，先粗判它属于哪一类，往往就已经知道该去哪个目录找了。</p>
+<h3>① 核心数据结构</h3>
+<table class="t">
+  <tr><th>术语</th><th>一句话定义</th><th>源码位置</th><th>跳转</th></tr>
+  <tr><td><span class="mono">ggml_tensor</span></td><td>张量：ggml 里数据的基本单位，带形状/类型/数据指针，也是计算图的节点</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="05-tensors.html">L05</a></td></tr>
+  <tr><td><span class="mono">ggml_cgraph</span></td><td>计算图：把一串算子按依赖连成的 DAG，先建图、再统一执行</td><td><span class="mono">ggml/src/ggml-impl.h</span></td><td><a href="09-compute-graph.html">L09</a> / <a href="10-graph-execution.html">L10</a></td></tr>
+  <tr><td>GGUF</td><td>llama.cpp 的模型文件格式：自描述的单文件，元数据 + 全部张量都在里面</td><td><span class="mono">ggml/include/gguf.h</span></td><td><a href="13-gguf-format.html">L13</a></td></tr>
+  <tr><td><span class="mono">ggml_type</span></td><td>张量的数据/量化类型（F16、Q4_K 等），决定每个权重怎么存、占多少字节</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="06-quantization-intro.html">L06</a> / <a href="12-quant-formats.html">L12</a></td></tr>
+</table>
+<h3>② 推理流程</h3>
+<table class="t">
+  <tr><th>术语</th><th>一句话定义</th><th>源码位置</th><th>跳转</th></tr>
+  <tr><td><span class="mono">llama_context</span></td><td>一次推理会话：持有 KV cache、计算缓冲、采样状态等全部运行时状态</td><td><span class="mono">src/llama-context.h</span></td><td><a href="17-context-session.html">L17</a></td></tr>
+  <tr><td><span class="mono">llama_batch</span></td><td>一次 decode 喂进去的一批 token（或 embedding），附带位置和序列信息</td><td><span class="mono">include/llama.h</span></td><td><a href="18-batching.html">L18</a></td></tr>
+  <tr><td>KV cache</td><td>缓存历史 token 的 K/V，让每步只算新 token；显存随序列线性增长</td><td><span class="mono">src/llama-kv-cache.h</span></td><td><a href="19-kv-cache.html">L19</a></td></tr>
+  <tr><td><span class="mono">llama_vocab</span></td><td>词表：token id 与文本互转，含特殊 token 与分词器（SentencePiece/BPE）</td><td><span class="mono">src/llama-vocab.h</span></td><td><a href="20-vocabulary.html">L20</a></td></tr>
+  <tr><td><span class="mono">llama_sampler</span></td><td>采样器：从 logits 按策略（top-k/top-p/温度等）挑出下一个 token</td><td><span class="mono">src/llama-sampler.cpp</span></td><td><a href="21-sampling.html">L21</a></td></tr>
+  <tr><td>RoPE</td><td>旋转位置编码：给 Q/K 注入位置信息的算子，相关超参写在模型元数据里</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="15-architecture-hparams.html">L15</a></td></tr>
+</table>
+<h3>③ 内核与后端</h3>
+<table class="t">
+  <tr><th>术语</th><th>一句话定义</th><th>源码位置</th><th>跳转</th></tr>
+  <tr><td><span class="mono">ggml_backend</span></td><td>后端抽象：一种执行计算图的设备实现（CPU/CUDA/Metal/Vulkan...）</td><td><span class="mono">ggml/include/ggml-backend.h</span></td><td><a href="31-cpu-backend.html">L31</a> / <a href="33-backends-dispatch.html">L33</a></td></tr>
+  <tr><td>算子 (op)</td><td>计算图的基本运算（matmul、softmax、rope...），每个后端各实现一份</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="11-core-operators.html">L11</a></td></tr>
+  <tr><td>CPU 后端</td><td>参考实现，是所有后端的 ground truth；带 SIMD 和多线程优化</td><td><span class="mono">ggml/src/ggml-cpu</span></td><td><a href="31-cpu-backend.html">L31</a></td></tr>
+  <tr><td>后端调度</td><td>把一张图的算子分派到合适的后端、处理跨后端的数据搬运</td><td><span class="mono">ggml/include/ggml-backend.h</span></td><td><a href="33-backends-dispatch.html">L33</a></td></tr>
+</table>
+<h3>④ 进阶机制与工具</h3>
+<table class="t">
+  <tr><th>术语</th><th>一句话定义</th><th>源码位置</th><th>跳转</th></tr>
+  <tr><td><span class="mono">build_moe_ffn</span></td><td>MoE：路由器给 token 选 top-k 专家、只算选中的专家再加权合并</td><td><span class="mono">src/llama-graph.cpp</span></td><td><a href="35-moe.html">L35</a></td></tr>
+  <tr><td><span class="mono">common_speculative</span></td><td>投机解码：小模型猜一串、大模型一次并行验证，接受匹配前缀来提速</td><td><span class="mono">common/speculative.h</span></td><td><a href="34-speculative-decoding.html">L34</a></td></tr>
+  <tr><td><span class="mono">mtmd</span></td><td>多模态：clip + projector 把图像编成 embedding，和文本一起 decode</td><td><span class="mono">tools/mtmd/mtmd.h</span></td><td><a href="36-multimodal.html">L36</a></td></tr>
+  <tr><td><span class="mono">ggml_ssm_scan</span></td><td>状态空间模型：用固定大小的递推状态替代 KV cache，显存 O(1)</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="37-state-space.html">L37</a></td></tr>
+  <tr><td>LoRA</td><td>低秩适配器：不改原权重，挂一个小的低秩增量来做微调</td><td><span class="mono">src/llama-adapter.h</span></td><td><a href="24-lora-adapters.html">L24</a></td></tr>
+  <tr><td><span class="mono">convert_hf_to_gguf</span></td><td>把 HF 模型转成 GGUF：认架构 -&gt; 张量改名 -&gt; 写盘的薄 CLI + conversion 包</td><td><span class="mono">convert_hf_to_gguf.py</span></td><td><a href="38-convert-hf.html">L38</a></td></tr>
+</table>
+<h2>怎么用这份速查 + 收个尾</h2>
+<p>用法很简单：把这一页加进收藏。当你读源码或调 bug 撞见一个名词，先来术语表扫一眼"是什么、在哪定义"，需要深入就点链接回到那一课的现场；想理清几个概念的关系，就回头看那张依赖图。它不替代任何一课，只是让你不必为了一个名词把整门课重翻一遍——这正是"速查"二字的全部意义。 也别忘了浏览器自带的页内搜索（Ctrl/Cmd+F）：在这一页直接搜一个英文符号名，往往比你回想"它在第几课"还快。也提醒一句：这二十来个词只是<strong>骨架</strong>，不是全部。书里还讲过不少同样重要、但更专门的概念——比如聊天模板（L22）、语法约束解码（L23）、<span class="mono">llama-server</span> 的连续批处理（L28）、量化工具与评测（L29/L30）。它们没进这张速查表，只是因为速查讲究"少而准"；真要用到，顺着对应课的标题就能找回去。换句话说，这张表是一份<strong>最常用词的索引</strong>，而整门课才是完整的词典。 用熟了你会发现，查得越少、记得越牢——好的速查表，最终是为了让你不再需要它。</p>
+<p>最后，收个尾。四十课走下来，你已经把 llama.cpp 从"一个能跑大模型的神奇程序"，拆成了一台<strong>看得见每个零件、说得清每条数据流</strong>的机器：模型怎么加载、一个 token 怎么从 prompt 一路走到输出、KV cache 怎么省下重复计算、后端怎么把计算图算到 GPU 上、进阶架构怎么在标准 transformer 之外另辟蹊径、又怎么把这一切转换、编译、再贡献回去。读懂一个真实世界的大型 C++ 项目，从来不是靠一口气读完，而是靠<strong>一层层拆、一个个概念啃</strong>——而你，已经做到了。接下来，挑一个你真正好奇或在意的点，去读它的源码、去跑它、去改它。这门图解课到此结束，但你和 llama.cpp 的故事，才刚翻到"自己动手"那一页。</p>
+<p>如果你问"那具体第一步做什么？"——这里有几个低门槛的入口：把 <span class="mono">llama-cli</span> 加上 <span class="mono">-v</span> 跑一遍，对着刷屏的日志，认一认前面学过的加载、建图、decode、采样各个阶段；或者挑一个最小的 <span class="mono">test-*</span> 用例，读懂它、再故意把它改坏，看测试怎么报错；又或者去仓库的 issue 列表里找一个标着 "good first issue" 的小问题练手。重要的从来不是第一步多大，而是<strong>真的迈出去</strong>——你手里已经有了这张地图，不会迷路。祝你玩得开心。</p>
+
+<div class="card key">
+  <div class="tag">✅ 关键要点</div>
+  <ul>
+    <li>全书九部分层层递进：宏观 -&gt; 前置基础 -&gt; ggml 引擎 -&gt; llama 推理内部 -&gt; API 与工具 -&gt; 底层内核 -&gt; 进阶专题 -&gt; 实战贡献 -&gt; 速查。</li>
+    <li>概念依赖：<span class="mono">ggml_tensor</span> 是地基 -&gt; <span class="mono">ggml_cgraph</span> 由张量连成 -&gt; <span class="mono">ggml_backend</span> 执行图 -&gt; <span class="mono">llama_context</span> 持有 KV cache -&gt; <span class="mono">llama_batch/decode</span> 驱动一步推理；<span class="mono">vocab</span> 进、<span class="mono">sampler</span> 出。</li>
+    <li>术语表按四类组织：核心数据结构、推理流程、内核与后端、进阶机制与工具；每条给"一句话定义 + 源码位置 + 跳转课号"。</li>
+    <li>用法：撞见陌生名词先来这查"是什么 + 在哪"，要深入就点链接回到对应课——查得快、跳得准是这页唯一的目标。</li>
+    <li>表外还有更专门的词（聊天模板 L22、语法 L23、<span class="mono">llama-server</span> L28、量化工具与评测 L29/L30 等）——速查只收最常用的。</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 设计洞察</div>
+  走到终点，值得回头看一眼这四十课其实在反复讲<strong>同一件事</strong>：一个庞大的系统，是怎么被拆成一层层<strong>各司其职、又彼此咬合</strong>的小零件的。ggml 把"算什么"（计算图）和"用什么算"（后端）分开；llama 把"模型是什么"（架构/权重）和"怎么跑一步"（context/batch）分开；工具层把"库能力"和"命令行体验"分开……每一处分层，都是同一种智慧：<strong>让每个零件只懂自己那摊事，靠清晰的接口和别人对接</strong>。这正是你能"一课只啃一个概念"却最终拼出整机的原因——因为系统本身就是这么设计的。把这张概念依赖图记在心里，你手里就有了一把通用的钥匙：面对任何一个陌生的大型系统，先问"它分了哪几层、每层对谁负责、接口在哪"，你就总能找到看懂它的入口。这门课会结束，但这套<strong>拆解系统</strong>的眼光，会一直跟着你。 这，也许才是这门课留给你最值钱的东西——它比任何一个具体的函数名都耐用。
+</div>
+""",
+    "en": r"""
+<p class="lead" style="font-size:1.06rem;color:var(--muted);margin-top:-.6rem">
+Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have walked through ggml's tensors and compute graphs, llama's model loading and inference loop, the public API and command-line tools, the low-level CPU/CUDA kernels, on through advanced mechanisms like speculative decoding, MoE, multimodality, and state-space models, and finally how to convert a HuggingFace model to GGUF and how to open a PR this project will accept. You have been through this inference engine top to bottom.
+</p>
+<p style="color:var(--muted);margin-top:.4rem">This last lesson teaches nothing new; it hands you a <strong>quick-reference map</strong>: first a "learning path" making clear how the nine parts build up step by step, then a <strong>concept dependency map</strong> drawing "who builds on whom" among the core concepts, and finally a <strong>categorized glossary</strong> - each term a one-line definition, marked with where it lives in the source, plus a "click to jump back to the lesson that covers it" link. Forget a concept later and you need not page through from the start; come here, look it up, jump back to the scene.</p>
+<p style="color:var(--muted)">How to use it: when reading code or debugging you hit a half-familiar term (<span class="mono">ggml_cgraph</span>? <span class="mono">llama_batch</span>?), first scan the glossary for "roughly what it is, where it is defined", and follow the link back to its lesson when you need detail. This lesson itself is short; its whole value is "look up fast, jump accurately". In other words, the earlier lessons teach "how to understand from scratch"; this one helps you "recall quickly later".</p>
+
+<div class="card macro">
+  <div class="tag">🌍 Big picture</div>
+  Treat this lesson as the book's <strong>index page</strong>. The previous thirty-nine lessons are "linear" - one after another; but the knowledge in your head is really a <strong>web</strong>: <span class="mono">llama_decode</span> pulls on the KV cache, the KV cache lives inside <span class="mono">llama_context</span>, the context relies on <span class="mono">ggml_backend</span> to execute a <span class="mono">ggml_cgraph</span>, and the graph in turn is wired from <span class="mono">ggml_tensor</span>s... these concepts interlock, and missing one piece stalls the whole thing. A linear course cannot spread that web out for you all at once, so here is this lesson: a dependency map drawing "who holds up whom" clearly, and a categorized glossary gathering terms scattered across forty lessons into a list you can scan at a glance. Read this web and your grasp of llama.cpp upgrades from "remembering what each lesson said" to "knowing where each part sits in the whole machine" - and the latter is the map you actually use to read source, chase bugs, and contribute. A reading tip: this web has no "single most important part", only "who is close to the hardware and who is close to the user" - the lower you go the more universal (the ggml pieces are used by almost any model), the higher you go the more specific (multimodality and SSM appear only in particular models). See this "universal to specialized" axis and you know which to master first and which to come back and look up only when needed.
+</div>
+
+<div class="card analogy">
+  <div class="tag">🔌 Analogy</div>
+  The earlier lessons were like <strong>touring a big building room by room</strong>: this one is tensors, that one the KV cache, upstairs is sampling... you saw each room closely, but you may not be able to assemble the building's <strong>structural plan</strong>. This lesson is the <strong>floor index plus floor plan</strong> on the lobby wall: the floor plan (the concept dependency map) tells you which room holds up which and how the corridors connect; the floor index (the categorized glossary) is "looking for a room? which floor, which number, click to be taken there". On the tour you go on foot and by memory; but when you actually have to <strong>work</strong> in this building (change code, fix bugs), you rely on this map - it spares you starting over from the ground floor every time. And precisely because it is a "map", it naturally supports <strong>non-linear</strong> use: you need not reread from lesson one - click wherever you are stuck. That is exactly what sets reference material apart from a tutorial.
+</div>
+<h2>The whole-book map: how the nine parts build up</h2>
+<p>Start with the whole. The nine parts of this course are not in random order; they go <strong>from outside in, then inside out</strong>: first build a global picture, then drill layer by layer into ggml and llama internals, and once the internals are clear, come back out to tools, kernels, advanced mechanisms, and finally practice and quick reference. Each part <strong>stands on the shoulders of the one before</strong> - so if a lesson feels like a jump, paging back usually reconnects it. A small tip: if you came with a specific goal (say "I only want to get quantization"), feel free to jump straight to that part; but to build whole-picture intuition, going through in order is still the least-effort path.</p>
+<div class="trace">
+  <div class="tcap"><b>The whole-book learning path</b>: the nine parts build up step by step, from "what is llama.cpp" all the way to "can change, can contribute, can look up" (each station tagged with its lesson range).</div>
+  <div class="stations">
+    <div class="stn"><h5>(1) Overview</h5><div class="cellrow"><span class="vc">L01-03</span></div><div class="tlab">what it is, and why</div></div>
+    <div class="op">basics</div>
+    <div class="stn"><h5>(2) Foundations</h5><div class="cellrow"><span class="vc">L04-07</span></div><div class="tlab">inference / tensors / quant</div></div>
+    <div class="op">engine</div>
+    <div class="stn"><h5>(3) ggml engine</h5><div class="cellrow"><span class="vc blue">L08-13</span></div><div class="tlab">graph / ops / GGUF</div></div>
+    <div class="op">internals</div>
+    <div class="stn"><h5>(4) llama internals</h5><div class="cellrow"><span class="vc blue">L14-24</span></div><div class="tlab">loading / inference loop</div></div>
+    <div class="op">around</div>
+    <div class="stn"><h5>(5) API & tools</h5><div class="cellrow"><span class="vc">L25-30</span></div><div class="tlab">C API / cli / server</div></div>
+    <div class="op">low-level</div>
+    <div class="stn"><h5>(6) Kernels</h5><div class="cellrow"><span class="vc hot">L31-33</span></div><div class="tlab">CPU / CUDA / dispatch</div></div>
+    <div class="op">advanced</div>
+    <div class="stn"><h5>(7) Advanced</h5><div class="cellrow"><span class="vc hot">L34-37</span></div><div class="tlab">spec / MoE / multimodal</div></div>
+    <div class="op">practice</div>
+    <div class="stn"><h5>(8) Contributing</h5><div class="cellrow"><span class="vc">L38-39</span></div><div class="tlab">convert / build / PR</div></div>
+    <div class="op">reference</div>
+    <div class="stn"><h5>(9) Quick ref</h5><div class="cellrow"><span class="vc blue">L40</span></div><div class="tlab">this very lesson</div></div>
+  </div>
+</div>
+<p>This map also answers a common question: "in what order should I read?" The answer is <strong>left to right</strong>: each part assumes you have digested what is to its left. Of course, as a quick-reference page you can also jump into any cell - which is exactly what the glossary below is for. This is also why almost every earlier lesson opens by connecting back to the previous one in a sentence or two - the course's "building up step by step" is visible at a glance on this map.</p>
+<p>Look one level deeper and the nine parts are really in three movements: <strong>movement one (parts 1-3) builds the "what is it" big picture</strong>, so you are not drowned in detail from the start; <strong>movement two (parts 4-7) dives into the engine</strong>, taking apart the "machine parts" - tensors, compute graph, KV cache, sampling, kernels - one by one; <strong>movement three (parts 8-9) comes back out of the internals</strong>, landing on "how to use it, change it, look it up". Many people stall on a big project because they skip movement one and dig straight into detail, or finish the detail but never return to movement three to actually use it - this course deliberately lays out all three for you.</p>
+<h2>The concept dependency map: who builds on whom</h2>
+<p>The nine parts are an order in <strong>time</strong>; but among the concepts there is another layer of <strong>logical</strong> dependency - who is the foundation, who is built on whom. The map below stacks the most core concepts by dependency: at the very bottom is <span class="mono">ggml_tensor</span> (the basic unit of all data), each layer above <strong>builds on the one below</strong>, and only at the very top sits the "one <span class="mono">llama_decode</span>" you know best. Note that "dependency" and "call order" are not the same: at runtime things are initiated top-down (decode calls context, context calls the backend), but <strong>building</strong> and <strong>understanding</strong> are best done bottom-up - understand tensors before you can talk about graphs and backends.</p>
+<p>For a concrete example, "walk" the map once: you type a sentence into <span class="mono">llama-cli</span>; it first goes through <span class="mono">vocab</span> into tokens, packed into a <span class="mono">llama_batch</span>, handed to <span class="mono">llama_decode</span> on the <span class="mono">llama_context</span>; inside, the context builds a <span class="mono">ggml_cgraph</span> (all <span class="mono">ggml_tensor</span> nodes), handed to some <span class="mono">ggml_backend</span> to execute, reading and writing the KV cache along the way; finally it emits logits and the <span class="mono">sampler</span> picks the next token. See - from input to output, that touched every box in the map exactly once. This is why "read this map and you have read the skeleton of one inference".</p>
+<div class="trace">
+  <div class="tcap"><b>Core concept dependency map</b>: a vertical arrow A -&gt; B reads "A depends on B", while the side arrows are data flow. Bottom-up: tensors compose the compute graph, the backend executes the graph, the context holds the KV cache, batch/decode drives one inference step; vocab turns text into tokens to feed in, the sampler picks the next token from logits.</div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="100%" role="img" aria-label="llama.cpp core concept dependency map: from ggml_tensor up to one inference step, each layer building on the one below">
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b6470"/></marker></defs>
+<text x="365" y="30" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#5b6470">Concept dependency map: who builds on whom</text>
+<line x1="365" y1="123" x2="365" y2="138" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="191" x2="365" y2="206" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="259" x2="365" y2="274" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="365" y1="327" x2="365" y2="342" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="250" y="72" width="230" height="50" rx="9" fill="#ffffff" stroke="#c2630e" stroke-width="2"/>
+<text x="365" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#c2630e">llama_batch -&gt; llama_decode</text>
+<text x="365" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">one step: feed a batch of tokens, get logits</text>
+<rect x="250" y="140" width="230" height="50" rx="9" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+<text x="365" y="160" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#7c3aed">llama_context</text>
+<text x="365" y="178" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">holds runtime state (incl. KV cache)</text>
+<rect x="250" y="208" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="228" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_backend</text>
+<text x="365" y="246" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">executes the graph (CPU / CUDA / ...)</text>
+<rect x="250" y="276" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="296" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_cgraph</text>
+<text x="365" y="314" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">compute graph: a DAG of ops</text>
+<rect x="250" y="344" width="230" height="50" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="365" y="364" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#2563eb">ggml_tensor</text>
+<text x="365" y="382" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">tensor: the basic data unit</text>
+<text x="36" y="250" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#5b6470" transform="rotate(-90 36 250)">up = closer to one inference step / down = closer to data and hardware</text>
+<text x="365" y="62" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#5b6470">vertical arrow A -&gt; B: A depends on B; side arrows are data flow</text>
+<line x1="482" y1="165" x2="518" y2="165" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="520" y="140" width="168" height="50" rx="9" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+<text x="604" y="160" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#7c3aed">KV cache</text>
+<text x="604" y="178" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">caches past K/V</text>
+<rect x="36" y="72" width="150" height="50" rx="9" fill="#ffffff" stroke="#5b6470" stroke-width="2"/>
+<text x="111" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#5b6470">vocab</text>
+<text x="111" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">tokens to/from text</text>
+<line x1="188" y1="97" x2="248" y2="97" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="520" y="72" width="168" height="50" rx="9" fill="#ffffff" stroke="#c2630e" stroke-width="2"/>
+<text x="604" y="92" text-anchor="middle" font-family="monospace" font-size="13.5" font-weight="700" fill="#c2630e">sampler</text>
+<text x="604" y="110" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#1d2129">pick next token from logits</text>
+<line x1="482" y1="97" x2="518" y2="97" stroke="#5b6470" stroke-width="2" marker-end="url(#ah)"/>
+<text x="365" y="416" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#5b6470">the foundation is ggml_tensor; the higher you go, the closer to "one llama_decode".</text>
+</svg>
+</div>
+<p>The real value of this map is that it draws "<strong>where to look when reading source</strong>". Say you are debugging something to do with the KV cache: follow the map and you know to look inside <span class="mono">llama_context</span> (which holds the KV cache), rather than wandering off into the <span class="mono">ggml_tensor</span> layer. Every arrow is a clue for "which layer to chase when something goes wrong".</p>
+<h2>Categorized glossary: look up in one line, jump back to the lesson</h2>
+<p>Below are the terms you deal with most across the book, in four groups. Each entry gives three things: a <strong>one-line definition</strong> (what it is, what it handles), a <strong>source location</strong> (which file to read for the real thing), and a <strong>jump</strong> (click to return to the lesson that covers it). Not exhaustive - just enough to "recognize it the moment you bump into it". About the "source location" column: it gives a <strong>single best entry point</strong> - not that the concept lives in only that one file, but "where to start reading so you least get lost". The KV cache implementation, for instance, spreads across several files, but starting from the class definition in <span class="mono">llama-kv-cache.h</span> is never wrong.</p>
+<p>Why these four groups? Because they line up with the four "which layer am I in" you face when reading source: <strong>core data structures</strong> are the "data and graph" of the ggml calculator; <strong>the inference flow</strong> is llama's main line that runs one conversation; <strong>kernels and backends</strong> is "how the same graph lands on different hardware"; and <strong>advanced mechanisms and tools</strong> are the special plays beyond the standard flow. When you hit an unfamiliar symbol, roughly judging which group it belongs to often already tells you which directory to look in.</p>
+<h3>(1) Core data structures</h3>
+<table class="t">
+  <tr><th>term</th><th>one-line definition</th><th>source location</th><th>jump</th></tr>
+  <tr><td><span class="mono">ggml_tensor</span></td><td>tensor: ggml's basic unit of data, with shape/type/data pointer; also a node of the compute graph</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="05-tensors.html">L05</a></td></tr>
+  <tr><td><span class="mono">ggml_cgraph</span></td><td>compute graph: a DAG wiring ops by dependency; build the graph first, then execute it as a whole</td><td><span class="mono">ggml/src/ggml-impl.h</span></td><td><a href="09-compute-graph.html">L09</a> / <a href="10-graph-execution.html">L10</a></td></tr>
+  <tr><td>GGUF</td><td>llama.cpp's model file format: a self-describing single file holding both metadata and all tensors</td><td><span class="mono">ggml/include/gguf.h</span></td><td><a href="13-gguf-format.html">L13</a></td></tr>
+  <tr><td><span class="mono">ggml_type</span></td><td>a tensor's data/quant type (F16, Q4_K, ...), deciding how each weight is stored and how many bytes</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="06-quantization-intro.html">L06</a> / <a href="12-quant-formats.html">L12</a></td></tr>
+</table>
+<h3>(2) The inference flow</h3>
+<table class="t">
+  <tr><th>term</th><th>one-line definition</th><th>source location</th><th>jump</th></tr>
+  <tr><td><span class="mono">llama_context</span></td><td>one inference session: holds the KV cache, compute buffers, sampling state - all runtime state</td><td><span class="mono">src/llama-context.h</span></td><td><a href="17-context-session.html">L17</a></td></tr>
+  <tr><td><span class="mono">llama_batch</span></td><td>the batch of tokens (or embeddings) fed into one decode, with position and sequence info</td><td><span class="mono">include/llama.h</span></td><td><a href="18-batching.html">L18</a></td></tr>
+  <tr><td>KV cache</td><td>caches past tokens' K/V so each step computes only the new token; memory grows linearly with length</td><td><span class="mono">src/llama-kv-cache.h</span></td><td><a href="19-kv-cache.html">L19</a></td></tr>
+  <tr><td><span class="mono">llama_vocab</span></td><td>vocabulary: token ids to/from text, including special tokens and the tokenizer (SentencePiece/BPE)</td><td><span class="mono">src/llama-vocab.h</span></td><td><a href="20-vocabulary.html">L20</a></td></tr>
+  <tr><td><span class="mono">llama_sampler</span></td><td>sampler: picks the next token from logits by a strategy (top-k/top-p/temperature, ...)</td><td><span class="mono">src/llama-sampler.cpp</span></td><td><a href="21-sampling.html">L21</a></td></tr>
+  <tr><td>RoPE</td><td>rotary position encoding: an op injecting position into Q/K; its hyper-params live in model metadata</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="15-architecture-hparams.html">L15</a></td></tr>
+</table>
+<h3>(3) Kernels and backends</h3>
+<table class="t">
+  <tr><th>term</th><th>one-line definition</th><th>source location</th><th>jump</th></tr>
+  <tr><td><span class="mono">ggml_backend</span></td><td>backend abstraction: a device implementation that executes the compute graph (CPU/CUDA/Metal/Vulkan...)</td><td><span class="mono">ggml/include/ggml-backend.h</span></td><td><a href="31-cpu-backend.html">L31</a> / <a href="33-backends-dispatch.html">L33</a></td></tr>
+  <tr><td>op (operator)</td><td>a basic graph operation (matmul, softmax, rope...); each backend implements its own version</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="11-core-operators.html">L11</a></td></tr>
+  <tr><td>CPU backend</td><td>the reference implementation, ground truth for all backends; with SIMD and multithreading</td><td><span class="mono">ggml/src/ggml-cpu</span></td><td><a href="31-cpu-backend.html">L31</a></td></tr>
+  <tr><td>backend dispatch</td><td>assigns a graph's ops to suitable backends and handles cross-backend data movement</td><td><span class="mono">ggml/include/ggml-backend.h</span></td><td><a href="33-backends-dispatch.html">L33</a></td></tr>
+</table>
+<h3>(4) Advanced mechanisms and tools</h3>
+<table class="t">
+  <tr><th>term</th><th>one-line definition</th><th>source location</th><th>jump</th></tr>
+  <tr><td><span class="mono">build_moe_ffn</span></td><td>MoE: the router picks top-k experts per token, computes only the chosen ones, then weight-merges</td><td><span class="mono">src/llama-graph.cpp</span></td><td><a href="35-moe.html">L35</a></td></tr>
+  <tr><td><span class="mono">common_speculative</span></td><td>speculative decoding: a small model guesses a run, the big model verifies in parallel, accept the prefix</td><td><span class="mono">common/speculative.h</span></td><td><a href="34-speculative-decoding.html">L34</a></td></tr>
+  <tr><td><span class="mono">mtmd</span></td><td>multimodal: clip + projector encode an image into embeddings, decoded together with text</td><td><span class="mono">tools/mtmd/mtmd.h</span></td><td><a href="36-multimodal.html">L36</a></td></tr>
+  <tr><td><span class="mono">ggml_ssm_scan</span></td><td>state-space models: a fixed-size recurrent state replaces the KV cache, O(1) memory</td><td><span class="mono">ggml/include/ggml.h</span></td><td><a href="37-state-space.html">L37</a></td></tr>
+  <tr><td>LoRA</td><td>low-rank adapter: fine-tune by hanging a small low-rank delta on top, without changing original weights</td><td><span class="mono">src/llama-adapter.h</span></td><td><a href="24-lora-adapters.html">L24</a></td></tr>
+  <tr><td><span class="mono">convert_hf_to_gguf</span></td><td>convert an HF model to GGUF: recognize arch -&gt; rename tensors -&gt; serialize; a thin CLI + conversion package</td><td><span class="mono">convert_hf_to_gguf.py</span></td><td><a href="38-convert-hf.html">L38</a></td></tr>
+</table>
+<h2>How to use this quick reference, and a closing word</h2>
+<p>Usage is simple: bookmark this page. When reading source or chasing a bug you hit a term, come to the glossary for "what it is, where it is defined", and click the link back to its lesson when you need depth; to untangle how a few concepts relate, look again at that dependency map. It replaces no lesson; it just spares you re-reading the whole course over one term - which is the entire point of "quick reference". And do not forget the browser's in-page search (Ctrl/Cmd+F): searching an English symbol name right on this page is often faster than recalling "which lesson was it in". One more reminder: these twenty-odd terms are only the <strong>skeleton</strong>, not everything. The book covers many equally important but more specialized concepts too - chat templates (L22), grammar-constrained decoding (L23), <span class="mono">llama-server</span>'s continuous batching (L28), the quantize tool and evaluation (L29/L30). They are not in this quick table only because quick reference favors "few and precise"; when you actually need one, the lesson title leads you right back. In other words, this table is an <strong>index of the most-used terms</strong>, while the whole course is the full dictionary. As you grow used to it you will find the less you look up, the better you remember - the best quick reference, in the end, is one that frees you from needing it.</p>
+<p>Finally, a closing word. Forty lessons in, you have taken llama.cpp from "a magical program that runs big models" and turned it into a machine whose <strong>every part is visible and whose every data flow you can articulate</strong>: how a model loads, how one token travels from prompt all the way to output, how the KV cache saves repeated work, how a backend runs the compute graph on a GPU, how advanced architectures find a path beyond the standard transformer, and how to convert, build, and contribute all of it back. Understanding a real-world large C++ project is never about reading it in one breath; it is about <strong>peeling it layer by layer and chewing one concept at a time</strong> - and you have done exactly that. Next, pick a point you are genuinely curious about or care about, and go read its source, run it, change it. This illustrated course ends here, but your story with llama.cpp has just turned to the page titled "do it yourself".</p>
+<p>If you ask "so what is the actual first step?" - here are a few low-barrier entry points: run <span class="mono">llama-cli</span> with <span class="mono">-v</span> and, against the scrolling logs, spot the loading, graph-building, decode, and sampling stages you learned earlier; or pick the smallest <span class="mono">test-*</span> case, understand it, then deliberately break it and watch how the test reports; or go to the repo's issue list and find a small one labeled "good first issue" to practice on. What matters is never how big the first step is, but <strong>actually taking it</strong> - you already hold this map, you will not get lost. Have fun.</p>
+
+<div class="card key">
+  <div class="tag">✅ Key points</div>
+  <ul>
+    <li>The nine parts build up step by step: overview -&gt; foundations -&gt; the ggml engine -&gt; llama inference internals -&gt; API and tools -&gt; low-level kernels -&gt; advanced topics -&gt; practice and contributing -&gt; quick reference.</li>
+    <li>Concept dependency: <span class="mono">ggml_tensor</span> is the foundation -&gt; <span class="mono">ggml_cgraph</span> is wired from tensors -&gt; <span class="mono">ggml_backend</span> executes the graph -&gt; <span class="mono">llama_context</span> holds the KV cache -&gt; <span class="mono">llama_batch/decode</span> drives one inference step; <span class="mono">vocab</span> in, <span class="mono">sampler</span> out.</li>
+    <li>The glossary is organized in four groups: core data structures, the inference flow, kernels and backends, advanced mechanisms and tools; each entry gives "one-line definition + source location + jump-to-lesson".</li>
+    <li>Usage: hit an unfamiliar term, come here for "what it is + where it is", and click the link back to its lesson for depth - look up fast, jump accurately is this page's only goal.</li>
+    <li>Beyond the table are more specialized terms (chat templates L22, grammar L23, <span class="mono">llama-server</span> L28, quantize tool and eval L29/L30) - the quick reference keeps only the most-used.</li>
+  </ul>
+</div>
+
+<div class="card spark">
+  <div class="tag">💡 Design insight</div>
+  At the finish line it is worth looking back: these forty lessons have really been telling <strong>one story</strong> - how a vast system is split into layers of small parts that each <strong>mind their own job yet interlock</strong>. ggml separates "what to compute" (the compute graph) from "what computes it" (the backend); llama separates "what the model is" (architecture/weights) from "how to run one step" (context/batch); the tools layer separates "library capability" from "command-line experience"... every split is the same wisdom: <strong>let each part understand only its own patch, and meet the others through a clear interface</strong>. That is exactly why you could "chew one concept per lesson" yet end up assembling the whole machine - because the system itself is built that way. Keep this concept dependency map in mind and you hold a universal key: facing any unfamiliar large system, first ask "what layers does it split into, what is each responsible for, where are the interfaces", and you will always find a way in. This course ends, but this <strong>system-decomposing</strong> eye will stay with you. That, perhaps, is the most valuable thing this course leaves you - it outlasts any single function name.
+</div>
+""",
+}

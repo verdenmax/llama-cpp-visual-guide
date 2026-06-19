@@ -120,6 +120,12 @@ PAGES = [
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
     ("37-state-space.html", "状态空间模型", "State-space models",
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
+    ("38-convert-hf.html", "从 HF 转换模型", "Converting HF models",
+     "第八部分 · 实战与贡献", "Part 8 · Practice & contributing"),
+    ("39-build-contribute.html", "编译·调试·贡献", "Build & contribute",
+     "第八部分 · 实战与贡献", "Part 8 · Practice & contributing"),
+    ("40-glossary.html", "术语表·索引", "Glossary & index",
+     "第九部分 · 速查", "Part 9 · Quick reference"),
 ]
 
 
@@ -628,6 +634,12 @@ SUBTITLES = {
                            "mtmd pipeline: image -> clip(ViT) -> projector(mmproj) -> embeddings -> interleave with text"),
     "37-state-space.html": ("Mamba/RWKV: 递推状态替代 KV cache · ggml_ssm_conv/scan · O(1) 显存",
                             "Mamba/RWKV: recurrent state instead of KV cache; ggml_ssm_conv/scan; O(1) memory"),
+    "38-convert-hf.html": ("convert_hf_to_gguf.py 薄 CLI + conversion 包 + gguf-py 写盘字节布局",
+                           "convert_hf_to_gguf.py thin CLI + conversion package + gguf-py byte layout"),
+    "39-build-contribute.html": ("CMake 多后端构建 · ctest/test-backend-ops · CONTRIBUTING 的 AI 政策 · clang-format",
+                                 "CMake multi-backend build, ctest/test-backend-ops, CONTRIBUTING AI policy, clang-format"),
+    "40-glossary.html": ("全书 40 课术语一句话查 + 概念依赖图 + 点链接跳到对应课",
+                         "40-lesson glossary one-liners + concept dependency map + jump links"),
 }
 
 

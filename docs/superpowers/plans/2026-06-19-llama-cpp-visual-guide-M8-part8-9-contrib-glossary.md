@@ -66,8 +66,8 @@
     - **trace（Style A·站点流）**：HF 目录 -> `load_hparams` 读架构 -> `get_model_class` 选 `LlamaModel` -> `set_gguf_parameters` 写超参 -> `prepare_tensors` 逐张量 `modify_tensors`+改名 -> `GGUFWriter` 写盘 -> `model.gguf`。
   - `<h2>` 注册表与架构分发：`@ModelBase.register("LlamaForCausalLM", ...)` 怎么把"HF 架构名 -> Python 类"登记进 `_model_classes`；新增模型就是加一个注册子类（指向 HOWTO-add-model）。**真实代码**：装饰器工厂 + `LlamaModel(TextModel)` 子类骨架。
   - `<h2>` 张量改名与超参：`set_gguf_parameters`（n_layer/n_embd/rope 写成 GGUF KV）+ `modify_tensors`/`map_tensor_name`（经 `TensorNameMap` 把 `model.layers.0.self_attn.q_proj.weight` 翻成 `blk.0.attn_q.weight`，Llama 还要 `permute` Q/K）。**真实代码 + 名称对照**（`.cols`：HF 名 vs GGUF 名，至少 3-4 行映射）。
-  - `<h2>` GGUF 文件长什么样：`GGUFWriter` 写盘四段——header（magic/version/tensor_count/kv_count）-> KV 段（带类型标记）-> 张量信息段（名/维度/dtype/offset）-> 对齐 32B -> 原始张量数据。**图（layers）**：GGUF 字节布局自上而下分段堆叠（header / KV / tensor-info / padding / tensor-data）。`--outtype` 在这步决定每张量存 f16/q8_0/...（呼应 L25/L26）。**真实代码**：`write_header_to_file` 的 4 字段 struct.pack 骨架。
-  - `<h2>` 折叠深挖（≥2）：(1) 为什么要"对齐"到 32B（mmap 时按边界对齐才能零拷贝映射，呼应 L05 mmap）；(2) `set_vocab` 与 tokenizer（SentencePiece/BPE 词表 + special token 怎么一并写进 GGUF KV，呼应 L07/L08）。
+  - `<h2>` GGUF 文件长什么样：`GGUFWriter` 写盘四段——header（magic/version/tensor_count/kv_count）-> KV 段（带类型标记）-> 张量信息段（名/维度/dtype/offset）-> 对齐 32B -> 原始张量数据。**图（layers）**：GGUF 字节布局自上而下分段堆叠（header / KV / tensor-info / padding / tensor-data）。`--outtype` 在这步决定每张量存 f16/q8_0/...（呼应 L06/L12）。**真实代码**：`write_header_to_file` 的 4 字段 struct.pack 骨架。
+  - `<h2>` 折叠深挖（≥2）：(1) 为什么要"对齐"到 32B（mmap 时按边界对齐才能零拷贝映射，呼应 L14 mmap）；(2) `set_vocab` 与 tokenizer（SentencePiece/BPE 词表 + special token 怎么一并写进 GGUF KV，呼应 L20）。
   - 硬性：zh CJK≥4000、en CJK==0、逐节对齐、≥3 图（含 1 trace + 1 layers）、≥2 深挖、≥2 真实代码片段（Python）。
 
 - [ ] **Step 5: quiz（38）** 3 MCQ + 1 开放：「`convert_hf_to_gguf.py` 现在的角色？（薄 CLI，机制在 conversion 包）」「`@ModelBase.register` 干什么？（把 HF 架构名登记到子类，实现分发）」「GGUF 文件 header 头四个字段？（magic/version/tensor_count/kv_count）」「开放：新增一个未支持的架构，大致要在 conversion 包里做哪几步？」
@@ -123,7 +123,7 @@
 - 推理流程：context（`src/llama-context.h` `struct llama_context`）、batch（`include/llama.h` `llama_batch`）、KV cache（`src/llama-kv-cache.h` `class llama_kv_cache`）、vocab/tokenizer（`src/llama-vocab.h` `struct llama_vocab`）、sampler（`src/llama-sampler.cpp` `llama_sampler_init`，**注意不是** `llama-sampling.cpp`）、RoPE（`ggml/include/ggml.h` `ggml_rope`）。
 - 内核与后端：backend（`ggml/include/ggml-backend.h` `ggml_backend_t`）、CPU/CUDA 后端（呼应 L31/L32）、后端调度（呼应 L33）。
 - 进阶机制与工具：MoE（`src/llama-graph.cpp` `build_moe_ffn`）、speculative（`common/speculative.h` `common_speculative`）、mtmd 多模态（`tools/mtmd/mtmd.h` `mtmd_context`）、SSM/Mamba（`ggml/include/ggml.h` `ggml_ssm_scan`）、GGUF 转换（`convert_hf_to_gguf.py` + `conversion/`）。
-- 每个术语关联其主讲课号：tensor->L09、cgraph->L09/L10、backend->L31/L33、量化->L25/L26、context->L17、batch->L18、KV cache->L19、vocab->L07/L08、sampler->L21/L22、RoPE->L15、MoE->L35、speculative->L34、mtmd->L36、SSM->L37、GGUF 转换->L38。（链接前先 grep 现有 `lessons/*.html` 文件名核实 slug，避免死链。）
+- 每个术语关联其主讲课号：tensor->L05、cgraph->L09/L10、backend->L31/L33、量化->L06/L12、context->L17、batch->L18、KV cache->L19、vocab->L20、sampler->L21、RoPE->L15、MoE->L35、speculative->L34、mtmd->L36、SSM->L37、GGUF 转换->L38。（链接前先 grep 现有 `lessons/*.html` 文件名核实 slug，避免死链。）
 
 - [ ] **Step 0（控制器先做）: 预生成概念依赖图 SVG**。用 Python 生成 `l40_zh.svg` / `l40_en.svg`（viewBox 约 `0 0 760 360`）：节点画核心概念的依赖层次——底层 `ggml_tensor`（地基）-> `cgraph`（由张量组成）-> `backend`（执行图）；右侧 `llama_context` 持有 `KV cache`，`batch` 驱动 `decode`，末端 `vocab`/`sampler` 收尾；用箭头表示"谁建立在谁之上"。色板：白底框 `#ffffff` + ink `#1d2129`，accent `#c2630e`/blue `#2563eb`/purple `#7c3aed`，自由文字 `#5b6470`。**校验**：`xml.dom.minidom` 可解析、英文 SVG 纯 ASCII（箭头用 `->`，无 `≈`/`×`/`·`）、坐标不溢出 viewBox、`rsvg-convert` 渲染目检在深浅背景都可读。存入会话 files 目录后再嵌入课文。
 

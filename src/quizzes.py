@@ -2419,6 +2419,189 @@ QUIZZES = {
             },
         ],
     },
+    "38-convert-hf.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "现在的 convert_hf_to_gguf.py 在转换里扮演什么角色？",
+                    "en": "What role does today's convert_hf_to_gguf.py play in conversion?",
+                },
+                "opts": [
+                    {"zh": "薄薄的命令行入口：读架构、查到对应转换类后就把活交出去，真正的机制在 conversion/ 包里", "en": "a thin command-line entry: read the architecture, look up the matching converter class, then hand off the work; the real machinery lives in the conversion/ package"},
+                    {"zh": "一个几千行的大文件，所有架构的转换逻辑都堆在里面", "en": "a multi-thousand-line monolith with every architecture's conversion logic piled inside"},
+                    {"zh": "负责训练模型", "en": "it trains the model"},
+                    {"zh": "一个 C++ 程序，运行时加载 gguf", "en": "a C++ program that loads gguf at runtime"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "它已被重构成约 300 行的薄 CLI：main() 只做 load_hparams 读 config.json -> get_model_architecture 取架构名 -> get_model_class 去注册表查类 -> 实例化 -> 调 write()。每种架构的具体转换逻辑都搬进了 conversion/ 包的独立模块（conversion/llama.py 等）。所以读这个脚本别只盯根文件，要看 conversion/base.py 的 ModelBase 和各架构子类。",
+                    "en": "It has been refactored into a ~300-line thin CLI: main() just does load_hparams to read config.json -> get_model_architecture for the arch name -> get_model_class to look up the class in the registry -> instantiate -> call write(). Each architecture's concrete conversion logic moved into its own module under conversion/ (conversion/llama.py and friends). So do not read only the root file - look at ModelBase in conversion/base.py and the per-architecture subclasses.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "@ModelBase.register(\"LlamaForCausalLM\", ...) 这个装饰器是干嘛的？",
+                    "en": "What does the decorator @ModelBase.register(\"LlamaForCausalLM\", ...) do?",
+                },
+                "opts": [
+                    {"zh": "把这些 HF 架构名登记到一张“架构名 -> 转换类”的注册表，让分发能按 config.json 找到对应子类", "en": "registers these HF architecture names into an 'arch name -> converter class' table, so dispatch can find the subclass from config.json"},
+                    {"zh": "把模型权重注册到 GPU", "en": "registers the model weights onto the GPU"},
+                    {"zh": "给函数加一层缓存", "en": "adds a caching layer to a function"},
+                    {"zh": "检查输入是否合法", "en": "validates that the input is well-formed"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "register 是 ModelBase 的类方法，当装饰器工厂用。Python 加载某个架构模块时执行这行，把括号里列的若干 HF 架构名都映射到被装饰的类（一个类可认领多个名字，如 Llama/Mistral/Mixtral 共用）。于是 get_model_class 拿到 config.json 里的 architectures 就能查到该用哪个子类。新增一个架构 = 加一个带 register 的子类、不动主干——这就是“注册表 + 插件”。",
+                    "en": "register is a classmethod on ModelBase used as a decorator factory. Python runs the line when it loads an architecture module, mapping the several HF architecture names in the parentheses onto the decorated class (one class can claim several names, e.g. Llama/Mistral/Mixtral share one). So get_model_class, given config.json's architectures, finds which subclass to use. Adding an architecture = add a subclass with register, no trunk changes - that is 'registry plus plugins'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个 GGUF 文件最开头的 header 是哪四个字段？",
+                    "en": "What four fields make up the header at the very start of a GGUF file?",
+                },
+                "opts": [
+                    {"zh": "magic(\"GGUF\") + version(3) + tensor_count + kv_count", "en": "magic(\"GGUF\") + version(3) + tensor_count + kv_count"},
+                    {"zh": "文件名 + 大小 + 校验和 + 时间戳", "en": "filename + size + checksum + timestamp"},
+                    {"zh": "架构 + 层数 + 维度 + 词表大小", "en": "architecture + layer count + dims + vocab size"},
+                    {"zh": "第一个张量的名字、形状、类型、数据", "en": "the first tensor's name, shape, type, and data"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GGUFWriter.write_header_to_file 只写四个定长字段：magic 0x46554747（\"GGUF\"）、version=3、tensor_count(u64)、kv_count(u64)。加载器先读这四个数，才知道后面有多少元数据 KV、多少张量信息要读。架构/层数/维度/词表这些写在 header 之后的元数据 KV 段，不在 header；张量的名字/形状/类型/偏移在再后面的张量信息段。",
+                    "en": "GGUFWriter.write_header_to_file writes just four fixed-length fields: magic 0x46554747 (\"GGUF\"), version=3, tensor_count (u64), kv_count (u64). The loader reads these four numbers first to know how much metadata KV and how many tensor-info records follow. Architecture/layers/dims/vocab are written in the metadata KV section after the header, not in it; a tensor's name/shape/type/offset live in the tensor-info section further on.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "假设你想让 llama.cpp 支持一个它还不认识的新架构（比如某个新出的 HF 模型 \"FooForCausalLM\"）。顺着这一课的分发流程想：(1) 你会在 conversion/ 里新建一个怎样的类、它继承谁、头顶那行 register 要写什么？(2) 这个类至少要实现哪两个方法、分别负责“超参”和“张量”的哪件事？(3) 如果转换时报 \"Can not map tensor ...\"，通常意味着什么、该去改哪里？(4) 为什么这套“加子类、不动主干”的设计，能让几十种架构互不干扰地共存？",
+                "en": "Suppose you want llama.cpp to support a new architecture it does not yet know (say a freshly released HF model \"FooForCausalLM\"). Follow this lesson's dispatch flow: (1) what kind of class would you add under conversion/, what does it inherit, and what does the register line above it say? (2) which two methods must it implement at minimum, and what part of 'hyper-params' vs 'tensors' does each handle? (3) if conversion raises \"Can not map tensor ...\", what does that usually mean and where do you go fix it? (4) why does this 'add a subclass, do not touch the trunk' design let dozens of architectures coexist without interfering?",
+            },
+        ],
+    },
+    "39-build-contribute.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "想编译一个能用上 NVIDIA GPU 的 llama.cpp，CMake 配置该加哪个开关？",
+                    "en": "To build a llama.cpp that can use an NVIDIA GPU, which flag do you add at CMake configure time?",
+                },
+                "opts": [
+                    {"zh": "-DGGML_CUDA=ON", "en": "-DGGML_CUDA=ON"},
+                    {"zh": "-DGGML_METAL=ON", "en": "-DGGML_METAL=ON"},
+                    {"zh": "--gpu", "en": "--gpu"},
+                    {"zh": "不用开关，会自动检测", "en": "no flag, it auto-detects"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "docs/build.md 里，CUDA 后端在配置那一步加 -DGGML_CUDA=ON，例如 cmake -B build -DGGML_CUDA=ON 再 cmake --build build --config Release。每个后端对应一个 -DGGML_* 开关（Metal 默认开、Vulkan 用 -DGGML_VULKAN=ON 等），换后端只改“配置”这一步、不动源码。--gpu 那种是运行时参数、不是编译开关；llama.cpp 也不会自动替你编进 CUDA。",
+                    "en": "In docs/build.md, the CUDA backend is enabled at configure time with -DGGML_CUDA=ON, e.g. cmake -B build -DGGML_CUDA=ON then cmake --build build --config Release. Each backend has a -DGGML_* flag (Metal on by default, Vulkan via -DGGML_VULKAN=ON, etc.); switching backend only changes the 'configure' step, not the source. --gpu would be a runtime argument, not a build flag; and llama.cpp will not silently compile CUDA in for you.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你改了一个 ggml 算子，CONTRIBUTING.md 要求你必须跑哪个测试？",
+                    "en": "You changed a ggml operator; which test does CONTRIBUTING.md require you to run?",
+                },
+                "opts": [
+                    {"zh": "test-backend-ops", "en": "test-backend-ops"},
+                    {"zh": "test-tokenizer-0", "en": "test-tokenizer-0"},
+                    {"zh": "test-sampling", "en": "test-sampling"},
+                    {"zh": "不用测，CI 会管", "en": "no need, CI will handle it"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CONTRIBUTING 明确：改了或新增 ggml 算子，必须跑（必要时补充）test-backend-ops。它把你改的算子在 CPU 和目标后端上各算一遍、逐元素比对，确保各后端结果一致——这正是 llama.cpp 敢同时维护十几种后端的底气。test-tokenizer-0 / test-sampling 各测分词与采样，与算子正确性无关；而“CI 会管”不是借口：本地先跑过，才不至于提了 PR 才发现挂了。",
+                    "en": "CONTRIBUTING is explicit: if you change or add a ggml operator you must run (and extend if needed) test-backend-ops. It runs the operator on CPU and the target backend and compares elementwise, keeping backends in agreement - exactly what lets llama.cpp maintain a dozen-plus backends at once. test-tokenizer-0 / test-sampling cover tokenization and sampling, unrelated to operator correctness; and 'CI will handle it' is no excuse: running locally first keeps you from discovering a failure only after opening the PR.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama.cpp 的 CONTRIBUTING.md 对“AI 生成的 PR”是什么态度？",
+                    "en": "What is llama.cpp's CONTRIBUTING.md stance on 'AI-generated PRs'?",
+                },
+                "opts": [
+                    {"zh": "不接受完全或主要由 AI 生成的 PR；贡献者须能独立理解和维护自己的代码", "en": "does not accept PRs that are fully or predominantly AI-generated; contributors must be able to independently understand and maintain their code"},
+                    {"zh": "完全禁止使用任何 AI 工具", "en": "bans any use of AI tools entirely"},
+                    {"zh": "没有任何限制", "en": "no restrictions at all"},
+                    {"zh": "只要标注了就随便用", "en": "anything goes as long as you label it"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CONTRIBUTING 靠前的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。",
+                    "en": "The AI policy near the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课反复出现一个词：test-backend-ops。请顺着它把几条看似分散的规范串起来：(1) 为什么 CONTRIBUTING 要求“新功能 CPU 支持优先”，这和 test-backend-ops 把 CPU 当参考实现有什么关系？(2) 为什么说它是“整个多后端体系的正确性地基”，而不只是一个普通测试？(3) CI 里那几十个 build-* workflow，和它在精神上是一回事吗——都在回答同一个什么问题？(4) 把这一课和上一课连起来：从“加一个模型”到“加一个算子”，“先把 CPU / 参考版立起来”这条线是怎么贯穿的？",
+                "en": "One term recurs in this lesson: test-backend-ops. Use it to tie several seemingly scattered rules together: (1) why does CONTRIBUTING require 'CPU support first' for a new feature, and how does that relate to test-backend-ops treating CPU as the reference implementation? (2) why call it 'the correctness foundation of the whole multi-backend system' rather than just an ordinary test? (3) are the dozens of build-* workflows in CI the same thing in spirit - answering which same question? (4) tie this lesson to the previous one: from 'add a model' to 'add an operator', how does the thread 'stand up the CPU / reference version first' run through both?",
+            },
+        ],
+    },
+    "40-glossary.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在这一课的概念依赖图里，谁是最底层的“地基”——其它概念都建立在它之上？",
+                    "en": "In this lesson's concept dependency map, who is the bottom 'foundation' that the others build on?",
+                },
+                "opts": [
+                    {"zh": "ggml_tensor（张量，数据的基本单位）", "en": "ggml_tensor (the tensor, the basic unit of data)"},
+                    {"zh": "llama_context", "en": "llama_context"},
+                    {"zh": "sampler", "en": "the sampler"},
+                    {"zh": "GGUF 文件格式", "en": "the GGUF file format"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "依赖图自下而上：最底是 ggml_tensor（数据的基本单位），张量连成 ggml_cgraph，后端执行图，llama_context 持有 KV cache 并驱动 decode，最上面才是“一次 llama_decode”。所以张量是地基——不理解它，上面的图、后端、context 都无从谈起。这也是建议“自下而上”理解的原因：先懂张量，才谈得上懂图和后端。",
+                    "en": "The map goes bottom-up: at the bottom is ggml_tensor (the basic data unit); tensors compose a ggml_cgraph, the backend executes the graph, llama_context holds the KV cache and drives decode, and only at the top sits 'one llama_decode'. So the tensor is the foundation - without it, the graph, backend, and context above have nothing to stand on. That is why bottom-up understanding is advised: grasp the tensor before graphs and backends.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_cgraph（计算图）的真实结构体定义在哪个文件？",
+                    "en": "In which file is the real struct of ggml_cgraph (the compute graph) defined?",
+                },
+                "opts": [
+                    {"zh": "ggml/src/ggml-impl.h（公开头 ggml.h 里只有前向声明）", "en": "ggml/src/ggml-impl.h (the public ggml.h has only a forward declaration)"},
+                    {"zh": "就在公开头 ggml/include/ggml.h 里", "en": "right in the public header ggml/include/ggml.h"},
+                    {"zh": "src/llama-graph.cpp", "en": "src/llama-graph.cpp"},
+                    {"zh": "ggml/include/gguf.h", "en": "ggml/include/gguf.h"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是个常见的“找不到定义”的坑：公开头 ggml/include/ggml.h 里 ggml_cgraph 只是前向声明，真正的结构体定义在内部头 ggml/src/ggml-impl.h。很多 ggml 类型都这么做——对外暴露不透明指针、把字段藏进内部头，这样实现能改而不破坏 ABI。术语表的“源码位置”列就是帮你避开这种坑、直接指到该看的文件。",
+                    "en": "This is a common 'cannot find the definition' trap: in the public ggml/include/ggml.h, ggml_cgraph is only a forward declaration; the real struct lives in the internal header ggml/src/ggml-impl.h. Many ggml types do this - expose an opaque pointer outward, hide the fields in an internal header, so the implementation can change without breaking the ABI. The glossary's 'source location' column is there to steer you past this trap, straight to the file to read.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "KV cache 在依赖图里“挂在”谁身上——也就是由谁持有？",
+                    "en": "In the map, who does the KV cache 'hang on' - that is, who holds it?",
+                },
+                "opts": [
+                    {"zh": "llama_context（一次推理会话的运行时状态都归它）", "en": "llama_context (it owns the runtime state of one inference session)"},
+                    {"zh": "ggml_tensor", "en": "ggml_tensor"},
+                    {"zh": "ggml_backend", "en": "ggml_backend"},
+                    {"zh": "sampler", "en": "the sampler"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "KV cache 是 llama_context 持有的运行时状态之一（context 还持有计算缓冲、采样状态等）。所以调一个和 KV cache 有关的 bug，顺着依赖图就知道该往 llama_context 里找，而不是去底层的 ggml_tensor 或 ggml_backend 瞎转。这正是依赖图的实用价值：每根箭头都是“出了问题该往哪一层追”的线索。",
+                    "en": "The KV cache is one of the runtime states held by llama_context (which also holds compute buffers, sampling state, etc.). So when debugging something to do with the KV cache, the map tells you to look inside llama_context, not to wander into the low-level ggml_tensor or ggml_backend. That is the practical value of the map: every arrow is a clue for 'which layer to chase when something goes wrong'.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课是全书的索引。请合上它，自己默写一遍这张“地图”：(1) 用一句话分别概括九个部分各解决什么问题（从宏观全景到速查）；(2) 凭记忆画出核心概念的依赖链——从 ggml_tensor 一路到一次 llama_decode，中间经过哪些概念、谁持有 KV cache；(3) 挑三个你印象最深的术语，不看表，说出它大概在哪个文件、属于四类中的哪一类。能流畅做完这三件事，你对 llama.cpp 的整体结构就真正内化了。",
+                "en": "This lesson is the book's index. Close it and write the 'map' from memory: (1) in one sentence each, summarize what problem the nine parts solve (from overview to quick reference); (2) draw the core concepts' dependency chain from memory - from ggml_tensor all the way to one llama_decode, through which concepts, and who holds the KV cache; (3) pick the three terms you remember best and, without the table, say roughly which file each lives in and which of the four groups it belongs to. Do these three fluently and you have truly internalized llama.cpp's overall structure.",
+            },
+        ],
+    },
 }
 
 
