@@ -2529,8 +2529,8 @@ QUIZZES = {
                 ],
                 "answer": 0,
                 "why": {
-                    "zh": "CONTRIBUTING 开篇的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。",
-                    "en": "The AI policy at the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.",
+                    "zh": "CONTRIBUTING 靠前的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。",
+                    "en": "The AI policy near the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.",
                 },
             },
         ],
@@ -2538,6 +2538,67 @@ QUIZZES = {
             {
                 "zh": "这一课反复出现一个词：test-backend-ops。请顺着它把几条看似分散的规范串起来：(1) 为什么 CONTRIBUTING 要求“新功能 CPU 支持优先”，这和 test-backend-ops 把 CPU 当参考实现有什么关系？(2) 为什么说它是“整个多后端体系的正确性地基”，而不只是一个普通测试？(3) CI 里那几十个 build-* workflow，和它在精神上是一回事吗——都在回答同一个什么问题？(4) 把这一课和上一课连起来：从“加一个模型”到“加一个算子”，“先把 CPU / 参考版立起来”这条线是怎么贯穿的？",
                 "en": "One term recurs in this lesson: test-backend-ops. Use it to tie several seemingly scattered rules together: (1) why does CONTRIBUTING require 'CPU support first' for a new feature, and how does that relate to test-backend-ops treating CPU as the reference implementation? (2) why call it 'the correctness foundation of the whole multi-backend system' rather than just an ordinary test? (3) are the dozens of build-* workflows in CI the same thing in spirit - answering which same question? (4) tie this lesson to the previous one: from 'add a model' to 'add an operator', how does the thread 'stand up the CPU / reference version first' run through both?",
+            },
+        ],
+    },
+    "40-glossary.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "在这一课的概念依赖图里，谁是最底层的“地基”——其它概念都建立在它之上？",
+                    "en": "In this lesson's concept dependency map, who is the bottom 'foundation' that the others build on?",
+                },
+                "opts": [
+                    {"zh": "ggml_tensor（张量，数据的基本单位）", "en": "ggml_tensor (the tensor, the basic unit of data)"},
+                    {"zh": "llama_context", "en": "llama_context"},
+                    {"zh": "sampler", "en": "the sampler"},
+                    {"zh": "GGUF 文件格式", "en": "the GGUF file format"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "依赖图自下而上：最底是 ggml_tensor（数据的基本单位），张量连成 ggml_cgraph，后端执行图，llama_context 持有 KV cache 并驱动 decode，最上面才是“一次 llama_decode”。所以张量是地基——不理解它，上面的图、后端、context 都无从谈起。这也是建议“自下而上”理解的原因：先懂张量，才谈得上懂图和后端。",
+                    "en": "The map goes bottom-up: at the bottom is ggml_tensor (the basic data unit); tensors compose a ggml_cgraph, the backend executes the graph, llama_context holds the KV cache and drives decode, and only at the top sits 'one llama_decode'. So the tensor is the foundation - without it, the graph, backend, and context above have nothing to stand on. That is why bottom-up understanding is advised: grasp the tensor before graphs and backends.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "ggml_cgraph（计算图）的真实结构体定义在哪个文件？",
+                    "en": "In which file is the real struct of ggml_cgraph (the compute graph) defined?",
+                },
+                "opts": [
+                    {"zh": "ggml/src/ggml-impl.h（公开头 ggml.h 里只有前向声明）", "en": "ggml/src/ggml-impl.h (the public ggml.h has only a forward declaration)"},
+                    {"zh": "就在公开头 ggml/include/ggml.h 里", "en": "right in the public header ggml/include/ggml.h"},
+                    {"zh": "src/llama-graph.cpp", "en": "src/llama-graph.cpp"},
+                    {"zh": "ggml/include/gguf.h", "en": "ggml/include/gguf.h"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "这是个常见的“找不到定义”的坑：公开头 ggml/include/ggml.h 里 ggml_cgraph 只是前向声明，真正的结构体定义在内部头 ggml/src/ggml-impl.h。很多 ggml 类型都这么做——对外暴露不透明指针、把字段藏进内部头，这样实现能改而不破坏 ABI。术语表的“源码位置”列就是帮你避开这种坑、直接指到该看的文件。",
+                    "en": "This is a common 'cannot find the definition' trap: in the public ggml/include/ggml.h, ggml_cgraph is only a forward declaration; the real struct lives in the internal header ggml/src/ggml-impl.h. Many ggml types do this - expose an opaque pointer outward, hide the fields in an internal header, so the implementation can change without breaking the ABI. The glossary's 'source location' column is there to steer you past this trap, straight to the file to read.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "KV cache 在依赖图里“挂在”谁身上——也就是由谁持有？",
+                    "en": "In the map, who does the KV cache 'hang on' - that is, who holds it?",
+                },
+                "opts": [
+                    {"zh": "llama_context（一次推理会话的运行时状态都归它）", "en": "llama_context (it owns the runtime state of one inference session)"},
+                    {"zh": "ggml_tensor", "en": "ggml_tensor"},
+                    {"zh": "ggml_backend", "en": "ggml_backend"},
+                    {"zh": "sampler", "en": "the sampler"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "KV cache 是 llama_context 持有的运行时状态之一（context 还持有计算缓冲、采样状态等）。所以调一个和 KV cache 有关的 bug，顺着依赖图就知道该往 llama_context 里找，而不是去底层的 ggml_tensor 或 ggml_backend 瞎转。这正是依赖图的实用价值：每根箭头都是“出了问题该往哪一层追”的线索。",
+                    "en": "The KV cache is one of the runtime states held by llama_context (which also holds compute buffers, sampling state, etc.). So when debugging something to do with the KV cache, the map tells you to look inside llama_context, not to wander into the low-level ggml_tensor or ggml_backend. That is the practical value of the map: every arrow is a clue for 'which layer to chase when something goes wrong'.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课是全书的索引。请合上它，自己默写一遍这张“地图”：(1) 用一句话分别概括九个部分各解决什么问题（从宏观全景到速查）；(2) 凭记忆画出核心概念的依赖链——从 ggml_tensor 一路到一次 llama_decode，中间经过哪些概念、谁持有 KV cache；(3) 挑三个你印象最深的术语，不看表，说出它大概在哪个文件、属于四类中的哪一类。能流畅做完这三件事，你对 llama.cpp 的整体结构就真正内化了。",
+                "en": "This lesson is the book's index. Close it and write the 'map' from memory: (1) in one sentence each, summarize what problem the nine parts solve (from overview to quick reference); (2) draw the core concepts' dependency chain from memory - from ggml_tensor all the way to one llama_decode, through which concepts, and who holds the KV cache; (3) pick the three terms you remember best and, without the table, say roughly which file each lives in and which of the four groups it belongs to. Do these three fluently and you have truly internalized llama.cpp's overall structure.",
             },
         ],
     },

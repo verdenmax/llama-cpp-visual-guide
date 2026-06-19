@@ -318,10 +318,10 @@ html[data-lang="zh"] .lang-en { display: none !important; }
   <div class="topbar-inner">
     <a class="home" href="../index.html">🦙 <b class="lang-zh">llama.cpp 图解教程</b><b class="lang-en">llama.cpp Visual Guide</b></a>
     <span class="pill"><span class="lang-zh">第八部分 · 实战与贡献</span><span class="lang-en">Part 8 · Practice &amp; contributing</span></span>
-    <span class="pill">39 / 39</span>
+    <span class="pill">39 / 40</span>
     <button class="langtoggle" onclick="lcvgToggleLang()" aria-label="switch language"><span class="lang-zh">EN</span><span class="lang-en">中</span></button>
   </div>
-  <div class="progress"><span style="width:100%"></span></div>
+  <div class="progress"><span style="width:97%"></span></div>
 </div>
 <div class="wrap">
   <div class="hero">
@@ -412,7 +412,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># 只跑名字含 backen
   <div class="layer l-part"><div class="lh"><span class="badge">测试</span><span class="name">改 ggml 就跑 test-backend-ops</span></div><div class="ld">动了算子要跑、必要时补测例，保证各后端结果一致</div></div>
   <div class="layer l-app"><div class="lh"><span class="badge">风格</span><span class="name">clang-format + 标题格式</span></div><div class="ld">用 clang-format(v15+) 对齐；squash 标题写成 &lt;module&gt; : &lt;title&gt; (#NNNN)</div></div>
 </div>
-<p>最后是最该认真对待的一条——<strong>AI 使用政策</strong>。<span class="mono">CONTRIBUTING.md</span> 开宗明义：<strong>不接受完全或主要由 AI 生成的 PR</strong>；用 AI 先写、人再改，仍算 AI 生成。它要求贡献者能<strong>独立理解、调试、维护</strong>自己提交的代码，如实<strong>披露</strong> AI 的使用方式，并明确禁止用 AI 代写 PR 描述、issue、评论这类与人沟通的内容。这条政策的用意不难理解：一个 PR 是一份长期承诺——维护者要审它、集成它、长期支持它；项目要的从来不是"代码从哪来"，而是背后有没有一个能为它负责的人。所以如果你正用 AI 学这门课，最稳的姿势是：让它帮你<strong>读懂</strong>代码，而把"设计、决策、能讲清楚为什么"牢牢留在自己手里。说白了，这条政策保护的从来不是"纯手写"这个形式，而是"真有人懂这段代码、能在它出问题时扛起来"这个实质——而后者，恰恰是这整门课想帮你抵达的状态：不只是会用工具，而是心里真有底。</p>
+<p>最后是最该认真对待的一条——<strong>AI 使用政策</strong>。<span class="mono">CONTRIBUTING.md</span> 在很靠前的位置就写明：<strong>不接受完全或主要由 AI 生成的 PR</strong>；用 AI 先写、人再改，仍算 AI 生成。它要求贡献者能<strong>独立理解、调试、维护</strong>自己提交的代码，如实<strong>披露</strong> AI 的使用方式，并明确禁止用 AI 代写 PR 描述、issue、评论这类与人沟通的内容。这条政策的用意不难理解：一个 PR 是一份长期承诺——维护者要审它、集成它、长期支持它；项目要的从来不是"代码从哪来"，而是背后有没有一个能为它负责的人。所以如果你正用 AI 学这门课，最稳的姿势是：让它帮你<strong>读懂</strong>代码，而把"设计、决策、能讲清楚为什么"牢牢留在自己手里。说白了，这条政策保护的从来不是"纯手写"这个形式，而是"真有人懂这段代码、能在它出问题时扛起来"这个实质——而后者，恰恰是这整门课想帮你抵达的状态：不只是会用工具，而是心里真有底。</p>
 <h2>深入：CPU 优先 与 CI 矩阵</h2>
 <p>两个折叠，回答两个"为什么要这样规定"的问题——理解了它们，前面那些规矩就不再是死板的条文，而是有道理的工程选择。这也是读规范的正确姿势：别把它当成必须背的教条，而是去问每一条"它在防什么坏情况"——想通了防的是什么，你自然就记住了、也更愿意守。</p>
 <details class="accordion">
@@ -424,7 +424,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># 只跑名字含 backen
 <details class="accordion">
   <summary><span class="badge-num">2</span> CI 为什么有几十个 workflow？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
-    <p>翻一眼 <span class="mono">.github/workflows/</span>，你会看到几十个 yml 文件，乍看吓人。但理出来其实就两类。一类是<strong>构建矩阵</strong>：每个后端、每个平台各一套——<span class="mono">build-cpu</span>、<span class="mono">build-cuda-ubuntu</span> / <span class="mono">build-cuda-windows</span>、<span class="mono">build-vulkan</span>、<span class="mono">build-sycl</span>、<span class="mono">build-apple</span>、<span class="mono">build-android</span>……为什么这么多？因为 llama.cpp 的卖点就是"哪儿都能跑"（呼应 L33 后端调度），那就得在哪儿都编一遍、测一遍，少测一个组合就可能悄悄坏掉。另一类是<strong>质量门</strong>：<span class="mono">code-style</span>（clang-format 检查）、<span class="mono">editorconfig</span>、<span class="mono">python-lint</span> / <span class="mono">python-type-check</span>、<span class="mono">build-sanitize</span>（ASan/UBSan）等，把"风格统一、没低级错误"也自动卡住。你提一个 PR，这一整套会自动在各平台跑一遍——这就是为什么"在我机器上能编"远远不够：得在这个矩阵的每一格里都绿，才算真的没破坏跨平台支持。看懂这一点，你对"开源大项目怎么在几十种环境里保持不崩"也就有了答案：不是靠人去手动测，而是把"每种环境编一遍、测一遍"写成了自动跑的 CI。这也解释了一个常让新人困惑的现象：一个在自己电脑上明明没问题的 PR，却被 CI 拦了下来——很可能只是某个你手头根本没有的平台编不过。而正因为 CI 替所有人把这些平台都试了一遍，你才不必自己去凑一屋子设备，这是开源协作里一种隐形却巨大的便利。</p>
+    <p>翻一眼 <span class="mono">.github/workflows/</span>，你会看到几十个 yml 文件，乍看吓人。但理出来其实就两类。一类是<strong>构建矩阵</strong>：每个后端、每个平台各一套——<span class="mono">build-cpu</span>、<span class="mono">build-cuda-ubuntu</span> / <span class="mono">build-cuda-windows</span>、<span class="mono">build-vulkan</span>、<span class="mono">build-sycl</span>、<span class="mono">build-apple</span>、<span class="mono">build-android</span>……为什么这么多？因为 llama.cpp 的卖点就是"哪儿都能跑"（呼应 L33 后端调度），那就得在哪儿都编一遍、测一遍，少测一个组合就可能悄悄坏掉。另一类是<strong>质量门</strong>：<span class="mono">code-style</span>（命名 / 风格约定检查）、<span class="mono">editorconfig</span>、<span class="mono">python-lint</span> / <span class="mono">python-type-check</span>、<span class="mono">build-sanitize</span>（ASan/UBSan）等，把"风格统一、没低级错误"也自动卡住。你提一个 PR，这一整套会自动在各平台跑一遍——这就是为什么"在我机器上能编"远远不够：得在这个矩阵的每一格里都绿，才算真的没破坏跨平台支持。看懂这一点，你对"开源大项目怎么在几十种环境里保持不崩"也就有了答案：不是靠人去手动测，而是把"每种环境编一遍、测一遍"写成了自动跑的 CI。这也解释了一个常让新人困惑的现象：一个在自己电脑上明明没问题的 PR，却被 CI 拦了下来——很可能只是某个你手头根本没有的平台编不过。而正因为 CI 替所有人把这些平台都试了一遍，你才不必自己去凑一屋子设备，这是开源协作里一种隐形却巨大的便利。</p>
   </div>
 </details>
 
@@ -481,7 +481,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># 只跑名字含 backen
   </ol>
   <details class="accordion">
     <summary>看答案与解析 <span class="hint">点击展开</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。CONTRIBUTING 开篇的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>答案：D</strong>。CONTRIBUTING 靠前的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。</div></div></div>
   </details>
 </div>
 <div class="card spark">
@@ -587,7 +587,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
 <details class="accordion">
   <summary><span class="badge-num">2</span> Why does CI have dozens of workflows? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p>Glance at <span class="mono">.github/workflows/</span> and you see dozens of yml files, daunting at first. But sorted out they are just two kinds. One is the <strong>build matrix</strong>: one per backend, per platform - <span class="mono">build-cpu</span>, <span class="mono">build-cuda-ubuntu</span> / <span class="mono">build-cuda-windows</span>, <span class="mono">build-vulkan</span>, <span class="mono">build-sycl</span>, <span class="mono">build-apple</span>, <span class="mono">build-android</span>... why so many? Because llama.cpp's whole selling point is "runs anywhere" (recall backend dispatch in L33), so it must compile and test everywhere; skip testing one combination and it can quietly break. The other kind is <strong>quality gates</strong>: <span class="mono">code-style</span> (clang-format check), <span class="mono">editorconfig</span>, <span class="mono">python-lint</span> / <span class="mono">python-type-check</span>, <span class="mono">build-sanitize</span> (ASan/UBSan), and so on, automatically blocking "inconsistent style, silly mistakes". When you open a PR this whole set runs across platforms automatically - which is why "it builds on my machine" is nowhere near enough: it must be green in every cell of this matrix to count as truly not breaking cross-platform support. See this and you also have the answer to "how does a big open-source project stay un-broken across dozens of environments": not by manual testing, but by writing "compile and test in each environment" into CI that runs itself. This also explains a thing that often puzzles newcomers: a PR that clearly works on your own machine gets blocked by CI - likely just because some platform you do not even have fails to compile. And precisely because CI tries all those platforms for everyone, you do not have to assemble a roomful of devices yourself - an invisible but huge convenience of open-source collaboration.</p>
+    <p>Glance at <span class="mono">.github/workflows/</span> and you see dozens of yml files, daunting at first. But sorted out they are just two kinds. One is the <strong>build matrix</strong>: one per backend, per platform - <span class="mono">build-cpu</span>, <span class="mono">build-cuda-ubuntu</span> / <span class="mono">build-cuda-windows</span>, <span class="mono">build-vulkan</span>, <span class="mono">build-sycl</span>, <span class="mono">build-apple</span>, <span class="mono">build-android</span>... why so many? Because llama.cpp's whole selling point is "runs anywhere" (recall backend dispatch in L33), so it must compile and test everywhere; skip testing one combination and it can quietly break. The other kind is <strong>quality gates</strong>: <span class="mono">code-style</span> (naming / style-convention check), <span class="mono">editorconfig</span>, <span class="mono">python-lint</span> / <span class="mono">python-type-check</span>, <span class="mono">build-sanitize</span> (ASan/UBSan), and so on, automatically blocking "inconsistent style, silly mistakes". When you open a PR this whole set runs across platforms automatically - which is why "it builds on my machine" is nowhere near enough: it must be green in every cell of this matrix to count as truly not breaking cross-platform support. See this and you also have the answer to "how does a big open-source project stay un-broken across dozens of environments": not by manual testing, but by writing "compile and test in each environment" into CI that runs itself. This also explains a thing that often puzzles newcomers: a PR that clearly works on your own machine gets blocked by CI - likely just because some platform you do not even have fails to compile. And precisely because CI tries all those platforms for everyone, you do not have to assemble a roomful of devices yourself - an invisible but huge convenience of open-source collaboration.</p>
   </div>
 </details>
 
@@ -644,7 +644,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
   </ol>
   <details class="accordion">
     <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
-    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The AI policy at the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.</div></div></div>
+    <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The AI policy near the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.</div></div></div>
   </details>
 </div>
 <div class="card spark">
@@ -654,7 +654,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
   </ul>
 </div>
 </div></div>
-  <div class="footnav"><a class="prev" href="38-convert-hf.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">从 HF 转换模型</span><span class="lang-en">Converting HF models</span></div></a><a class="next" href="../index.html"><div class="dir"><span class="lang-zh">完成 →</span><span class="lang-en">Done →</span></div><div class="ttl"><span class="lang-zh">返回目录</span><span class="lang-en">Back to index</span></div></a></div>
+  <div class="footnav"><a class="prev" href="38-convert-hf.html"><div class="dir"><span class="lang-zh">← 上一课</span><span class="lang-en">← Prev</span></div><div class="ttl"><span class="lang-zh">从 HF 转换模型</span><span class="lang-en">Converting HF models</span></div></a><a class="next" href="40-glossary.html"><div class="dir"><span class="lang-zh">下一课 →</span><span class="lang-en">Next →</span></div><div class="ttl"><span class="lang-zh">术语表·索引</span><span class="lang-en">Glossary &amp; index</span></div></a></div>
 </div>
 <script>
 function lcvgSetLang(l){
