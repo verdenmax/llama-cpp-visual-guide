@@ -120,6 +120,8 @@ PAGES = [
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
     ("37-state-space.html", "状态空间模型", "State-space models",
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
+    ("38-convert-hf.html", "从 HF 转换模型", "Converting HF models",
+     "第八部分 · 实战与贡献", "Part 8 · Practice & contributing"),
 ]
 
 
@@ -628,6 +630,8 @@ SUBTITLES = {
                            "mtmd pipeline: image -> clip(ViT) -> projector(mmproj) -> embeddings -> interleave with text"),
     "37-state-space.html": ("Mamba/RWKV: 递推状态替代 KV cache · ggml_ssm_conv/scan · O(1) 显存",
                             "Mamba/RWKV: recurrent state instead of KV cache; ggml_ssm_conv/scan; O(1) memory"),
+    "38-convert-hf.html": ("convert_hf_to_gguf.py 薄 CLI + conversion 包 + gguf-py 写盘字节布局",
+                           "convert_hf_to_gguf.py thin CLI + conversion package + gguf-py byte layout"),
 }
 
 

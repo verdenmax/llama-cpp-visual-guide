@@ -2419,6 +2419,67 @@ QUIZZES = {
             },
         ],
     },
+    "38-convert-hf.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "现在的 convert_hf_to_gguf.py 在转换里扮演什么角色？",
+                    "en": "What role does today's convert_hf_to_gguf.py play in conversion?",
+                },
+                "opts": [
+                    {"zh": "薄薄的命令行入口：读架构、查到对应转换类后就把活交出去，真正的机制在 conversion/ 包里", "en": "a thin command-line entry: read the architecture, look up the matching converter class, then hand off the work; the real machinery lives in the conversion/ package"},
+                    {"zh": "一个几千行的大文件，所有架构的转换逻辑都堆在里面", "en": "a multi-thousand-line monolith with every architecture's conversion logic piled inside"},
+                    {"zh": "负责训练模型", "en": "it trains the model"},
+                    {"zh": "一个 C++ 程序，运行时加载 gguf", "en": "a C++ program that loads gguf at runtime"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "它已被重构成约 300 行的薄 CLI：main() 只做 load_hparams 读 config.json -> get_model_architecture 取架构名 -> get_model_class 去注册表查类 -> 实例化 -> 调 write()。每种架构的具体转换逻辑都搬进了 conversion/ 包的独立模块（conversion/llama.py 等）。所以读这个脚本别只盯根文件，要看 conversion/base.py 的 ModelBase 和各架构子类。",
+                    "en": "It has been refactored into a ~300-line thin CLI: main() just does load_hparams to read config.json -> get_model_architecture for the arch name -> get_model_class to look up the class in the registry -> instantiate -> call write(). Each architecture's concrete conversion logic moved into its own module under conversion/ (conversion/llama.py and friends). So do not read only the root file - look at ModelBase in conversion/base.py and the per-architecture subclasses.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "@ModelBase.register(\"LlamaForCausalLM\", ...) 这个装饰器是干嘛的？",
+                    "en": "What does the decorator @ModelBase.register(\"LlamaForCausalLM\", ...) do?",
+                },
+                "opts": [
+                    {"zh": "把这些 HF 架构名登记到一张“架构名 -> 转换类”的注册表，让分发能按 config.json 找到对应子类", "en": "registers these HF architecture names into an 'arch name -> converter class' table, so dispatch can find the subclass from config.json"},
+                    {"zh": "把模型权重注册到 GPU", "en": "registers the model weights onto the GPU"},
+                    {"zh": "给函数加一层缓存", "en": "adds a caching layer to a function"},
+                    {"zh": "检查输入是否合法", "en": "validates that the input is well-formed"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "register 是 ModelBase 的类方法，当装饰器工厂用。Python 加载某个架构模块时执行这行，把括号里列的若干 HF 架构名都映射到被装饰的类（一个类可认领多个名字，如 Llama/Mistral/Mixtral 共用）。于是 get_model_class 拿到 config.json 里的 architectures 就能查到该用哪个子类。新增一个架构 = 加一个带 register 的子类、不动主干——这就是“注册表 + 插件”。",
+                    "en": "register is a classmethod on ModelBase used as a decorator factory. Python runs the line when it loads an architecture module, mapping the several HF architecture names in the parentheses onto the decorated class (one class can claim several names, e.g. Llama/Mistral/Mixtral share one). So get_model_class, given config.json's architectures, finds which subclass to use. Adding an architecture = add a subclass with register, no trunk changes - that is 'registry plus plugins'.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "一个 GGUF 文件最开头的 header 是哪四个字段？",
+                    "en": "What four fields make up the header at the very start of a GGUF file?",
+                },
+                "opts": [
+                    {"zh": "magic(\"GGUF\") + version(3) + tensor_count + kv_count", "en": "magic(\"GGUF\") + version(3) + tensor_count + kv_count"},
+                    {"zh": "文件名 + 大小 + 校验和 + 时间戳", "en": "filename + size + checksum + timestamp"},
+                    {"zh": "架构 + 层数 + 维度 + 词表大小", "en": "architecture + layer count + dims + vocab size"},
+                    {"zh": "第一个张量的名字、形状、类型、数据", "en": "the first tensor's name, shape, type, and data"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "GGUFWriter.write_header_to_file 只写四个定长字段：magic 0x46554747（\"GGUF\"）、version=3、tensor_count(u64)、kv_count(u64)。加载器先读这四个数，才知道后面有多少元数据 KV、多少张量信息要读。架构/层数/维度/词表这些写在 header 之后的元数据 KV 段，不在 header；张量的名字/形状/类型/偏移在再后面的张量信息段。",
+                    "en": "GGUFWriter.write_header_to_file writes just four fixed-length fields: magic 0x46554747 (\"GGUF\"), version=3, tensor_count (u64), kv_count (u64). The loader reads these four numbers first to know how much metadata KV and how many tensor-info records follow. Architecture/layers/dims/vocab are written in the metadata KV section after the header, not in it; a tensor's name/shape/type/offset live in the tensor-info section further on.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "假设你想让 llama.cpp 支持一个它还不认识的新架构（比如某个新出的 HF 模型 \"FooForCausalLM\"）。顺着这一课的分发流程想：(1) 你会在 conversion/ 里新建一个怎样的类、它继承谁、头顶那行 register 要写什么？(2) 这个类至少要实现哪两个方法、分别负责“超参”和“张量”的哪件事？(3) 如果转换时报 \"Can not map tensor ...\"，通常意味着什么、该去改哪里？(4) 为什么这套“加子类、不动主干”的设计，能让几十种架构互不干扰地共存？",
+                "en": "Suppose you want llama.cpp to support a new architecture it does not yet know (say a freshly released HF model \"FooForCausalLM\"). Follow this lesson's dispatch flow: (1) what kind of class would you add under conversion/, what does it inherit, and what does the register line above it say? (2) which two methods must it implement at minimum, and what part of 'hyper-params' vs 'tensors' does each handle? (3) if conversion raises \"Can not map tensor ...\", what does that usually mean and where do you go fix it? (4) why does this 'add a subclass, do not touch the trunk' design let dozens of architectures coexist without interfering?",
+            },
+        ],
+    },
 }
 
 
