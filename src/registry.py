@@ -53,4 +53,5 @@ CONTENT = {
     "36-multimodal.html": part7.LESSON_36,
     "37-state-space.html": part7.LESSON_37,
     "38-convert-hf.html": part8.LESSON_38,
+    "39-build-contribute.html": part8.LESSON_39,
 }

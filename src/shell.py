@@ -122,6 +122,8 @@ PAGES = [
      "第七部分 · 进阶专题", "Part 7 · Advanced topics"),
     ("38-convert-hf.html", "从 HF 转换模型", "Converting HF models",
      "第八部分 · 实战与贡献", "Part 8 · Practice & contributing"),
+    ("39-build-contribute.html", "编译·调试·贡献", "Build & contribute",
+     "第八部分 · 实战与贡献", "Part 8 · Practice & contributing"),
 ]
 
 
@@ -632,6 +634,8 @@ SUBTITLES = {
                             "Mamba/RWKV: recurrent state instead of KV cache; ggml_ssm_conv/scan; O(1) memory"),
     "38-convert-hf.html": ("convert_hf_to_gguf.py 薄 CLI + conversion 包 + gguf-py 写盘字节布局",
                            "convert_hf_to_gguf.py thin CLI + conversion package + gguf-py byte layout"),
+    "39-build-contribute.html": ("CMake 多后端构建 · ctest/test-backend-ops · CONTRIBUTING 的 AI 政策 · clang-format",
+                                 "CMake multi-backend build, ctest/test-backend-ops, CONTRIBUTING AI policy, clang-format"),
 }
 
 

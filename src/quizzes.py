@@ -2480,6 +2480,67 @@ QUIZZES = {
             },
         ],
     },
+    "39-build-contribute.html": {
+        "mcq": [
+            {
+                "q": {
+                    "zh": "想编译一个能用上 NVIDIA GPU 的 llama.cpp，CMake 配置该加哪个开关？",
+                    "en": "To build a llama.cpp that can use an NVIDIA GPU, which flag do you add at CMake configure time?",
+                },
+                "opts": [
+                    {"zh": "-DGGML_CUDA=ON", "en": "-DGGML_CUDA=ON"},
+                    {"zh": "-DGGML_METAL=ON", "en": "-DGGML_METAL=ON"},
+                    {"zh": "--gpu", "en": "--gpu"},
+                    {"zh": "不用开关，会自动检测", "en": "no flag, it auto-detects"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "docs/build.md 里，CUDA 后端在配置那一步加 -DGGML_CUDA=ON，例如 cmake -B build -DGGML_CUDA=ON 再 cmake --build build --config Release。每个后端对应一个 -DGGML_* 开关（Metal 默认开、Vulkan 用 -DGGML_VULKAN=ON 等），换后端只改“配置”这一步、不动源码。--gpu 那种是运行时参数、不是编译开关；llama.cpp 也不会自动替你编进 CUDA。",
+                    "en": "In docs/build.md, the CUDA backend is enabled at configure time with -DGGML_CUDA=ON, e.g. cmake -B build -DGGML_CUDA=ON then cmake --build build --config Release. Each backend has a -DGGML_* flag (Metal on by default, Vulkan via -DGGML_VULKAN=ON, etc.); switching backend only changes the 'configure' step, not the source. --gpu would be a runtime argument, not a build flag; and llama.cpp will not silently compile CUDA in for you.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "你改了一个 ggml 算子，CONTRIBUTING.md 要求你必须跑哪个测试？",
+                    "en": "You changed a ggml operator; which test does CONTRIBUTING.md require you to run?",
+                },
+                "opts": [
+                    {"zh": "test-backend-ops", "en": "test-backend-ops"},
+                    {"zh": "test-tokenizer-0", "en": "test-tokenizer-0"},
+                    {"zh": "test-sampling", "en": "test-sampling"},
+                    {"zh": "不用测，CI 会管", "en": "no need, CI will handle it"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CONTRIBUTING 明确：改了或新增 ggml 算子，必须跑（必要时补充）test-backend-ops。它把你改的算子在 CPU 和目标后端上各算一遍、逐元素比对，确保各后端结果一致——这正是 llama.cpp 敢同时维护十几种后端的底气。test-tokenizer-0 / test-sampling 各测分词与采样，与算子正确性无关；而“CI 会管”不是借口：本地先跑过，才不至于提了 PR 才发现挂了。",
+                    "en": "CONTRIBUTING is explicit: if you change or add a ggml operator you must run (and extend if needed) test-backend-ops. It runs the operator on CPU and the target backend and compares elementwise, keeping backends in agreement - exactly what lets llama.cpp maintain a dozen-plus backends at once. test-tokenizer-0 / test-sampling cover tokenization and sampling, unrelated to operator correctness; and 'CI will handle it' is no excuse: running locally first keeps you from discovering a failure only after opening the PR.",
+                },
+            },
+            {
+                "q": {
+                    "zh": "llama.cpp 的 CONTRIBUTING.md 对“AI 生成的 PR”是什么态度？",
+                    "en": "What is llama.cpp's CONTRIBUTING.md stance on 'AI-generated PRs'?",
+                },
+                "opts": [
+                    {"zh": "不接受完全或主要由 AI 生成的 PR；贡献者须能独立理解和维护自己的代码", "en": "does not accept PRs that are fully or predominantly AI-generated; contributors must be able to independently understand and maintain their code"},
+                    {"zh": "完全禁止使用任何 AI 工具", "en": "bans any use of AI tools entirely"},
+                    {"zh": "没有任何限制", "en": "no restrictions at all"},
+                    {"zh": "只要标注了就随便用", "en": "anything goes as long as you label it"},
+                ],
+                "answer": 0,
+                "why": {
+                    "zh": "CONTRIBUTING 开篇的 AI 政策写得很清楚：不接受完全或主要由 AI 生成的 PR，用 AI 先写、人再改仍算 AI 生成；AI 只能起辅助作用，贡献者必须能独立理解、调试、维护自己提交的代码，并如实披露 AI 的使用方式。它不是“完全禁止 AI”，也不是“随便用”——核心诉求是“背后得有个真正懂这段代码、能为它负责的人”。这也提醒用 AI 学习的人：让它帮你读懂，别让它替你思考。",
+                    "en": "The AI policy at the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.",
+                },
+            },
+        ],
+        "open": [
+            {
+                "zh": "这一课反复出现一个词：test-backend-ops。请顺着它把几条看似分散的规范串起来：(1) 为什么 CONTRIBUTING 要求“新功能 CPU 支持优先”，这和 test-backend-ops 把 CPU 当参考实现有什么关系？(2) 为什么说它是“整个多后端体系的正确性地基”，而不只是一个普通测试？(3) CI 里那几十个 build-* workflow，和它在精神上是一回事吗——都在回答同一个什么问题？(4) 把这一课和上一课连起来：从“加一个模型”到“加一个算子”，“先把 CPU / 参考版立起来”这条线是怎么贯穿的？",
+                "en": "One term recurs in this lesson: test-backend-ops. Use it to tie several seemingly scattered rules together: (1) why does CONTRIBUTING require 'CPU support first' for a new feature, and how does that relate to test-backend-ops treating CPU as the reference implementation? (2) why call it 'the correctness foundation of the whole multi-backend system' rather than just an ordinary test? (3) are the dozens of build-* workflows in CI the same thing in spirit - answering which same question? (4) tie this lesson to the previous one: from 'add a model' to 'add an operator', how does the thread 'stand up the CPU / reference version first' run through both?",
+            },
+        ],
+    },
 }
 
 
