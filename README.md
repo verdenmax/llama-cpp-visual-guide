@@ -1,5 +1,15 @@
 # llama.cpp Visual Guide / llama.cpp 图解学习指南
 
+[![Read online](https://img.shields.io/badge/Read_online-Live_Demo-6d5ce7?logo=githubpages&logoColor=white)](https://verdenmax.github.io/llama-cpp-visual-guide/)
+[![CI](https://github.com/verdenmax/llama-cpp-visual-guide/actions/workflows/ci.yml/badge.svg)](https://github.com/verdenmax/llama-cpp-visual-guide/actions/workflows/ci.yml)
+[![Deploy](https://github.com/verdenmax/llama-cpp-visual-guide/actions/workflows/deploy.yml/badge.svg)](https://github.com/verdenmax/llama-cpp-visual-guide/actions/workflows/deploy.yml)
+[![Lessons](https://img.shields.io/badge/lessons-40-6d5ce7)](https://verdenmax.github.io/llama-cpp-visual-guide/)
+[![Parts](https://img.shields.io/badge/parts-9-7048e8)](https://verdenmax.github.io/llama-cpp-visual-guide/)
+[![Explains llama.cpp](https://img.shields.io/badge/explains-llama.cpp-0b7285?logo=github&logoColor=white)](https://github.com/ggml-org/llama.cpp)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-2b8a3e)](#build--validate)
+[![Code: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](LICENSE)
+[![Content: CC BY 4.0](https://img.shields.io/badge/content-CC_BY_4.0-blue.svg)](LICENSE-CONTENT)
+
 A visual, bilingual (English + 中文) guide to the internals of [llama.cpp](https://github.com/ggml-org/llama.cpp) - **40 lessons** that take you from "what is llama.cpp" all the way to "how to convert a model and contribute a PR".
 
 > **Disclaimer:** This is **third-party, unofficial** educational material *about* llama.cpp. It contains **no llama.cpp source code**; it explains llama.cpp by quoting small, cited snippets. llama.cpp itself is MIT-licensed by its own authors.
