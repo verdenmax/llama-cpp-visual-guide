@@ -1,7 +1,5 @@
 __pycache__/
 *.pyc
 .DS_Store
-print-zh.html
-print-en.html
 *.pdf
 .venv/
