@@ -797,7 +797,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>how many threads this kernel launched in total</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. blockIdx.x is 'which block', blockDim.x is 'threads per block', threadIdx.x is 'which thread within the block'; together they form a globally unique thread id tid. This is the first line of almost every CUDA kernel - all threads run the same code, landing on different data only through their different tid (SIMT). When data exceeds threads, a grid-stride loop lets each thread handle a few more, hopping by stride.</div></div></div>
   </details>
 </div>
@@ -810,7 +810,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>because global VRAM cannot hold the whole matrix</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In the naive version each thread reads a whole row/column from global, neighboring threads duplicating reads and wasting bandwidth, so the bottleneck is 'waiting for data'. Tiling has the block's threads cooperatively load a small tile into on-chip shared memory (one-to-two orders faster), then reuse it repeatedly; a T x T tile is reused about T-fold, slashing slow global traffic. This is L31's 'load once, reuse many' moved to the GPU - the CPU reuses cache, the GPU reuses shared memory.</div></div></div>
   </details>
 </div>
@@ -823,7 +823,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>not writing the huge N x N attention-score matrix back to VRAM and reading it again - saving VRAM and bandwidth</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Naive attention computes the whole N x N score matrix, writes it to VRAM, reads it back for softmax, reads it again to multiply V - writing N x N once and reading it three times burns the bandwidth. Flash attention uses an 'online softmax' to compute and correct tile by tile, never materializing the full N x N, writing out only the final O. Note: the compute is not reduced (those scores are still computed); what is saved is the costliest memory traffic, and the longer the sequence the more it saves - so it is especially key for long context.</div></div></div>
   </details>
 </div>

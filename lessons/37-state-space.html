@@ -651,7 +651,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>constant (O(1)) - a fixed-size recurrent state summarizes the history, not growing with the sequence</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. This is the SSM's biggest selling point. Attention must store every token's KV in the KV cache (memory grows linearly, L19) and step t looks back over all history (O(n^2) overall). The SSM does the reverse: maintain a fixed-size state h (size fixed by ssm_d_state), and each step computes the new state from only the previous state h_(t-1) and current input x_t - independent of history length. So memory is O(1), whole-sequence compute O(n), and even at hundreds of thousands of tokens the per-step cost does not budge. This makes it especially sweet for very long context, streaming, and low-VRAM on-device.</div></div></div>
   </details>
 </div>
@@ -664,7 +664,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>the selective scan: recur the state along time by A/B/C/dt; 'selectivity' means B/C/dt vary with the input</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. ggml_ssm_scan does the core recurrence h = A*h + B*x; y = C*h, scanning the sequence start to end and pushing the state forward step by step. A governs 'how much of the previous state to keep', B 'how the input is written into the state', C 'what is read out of the state', and dt (Delta) is the step size. The key is 'selectivity': Mamba projects B, C, dt from the current input x (input-dependent), so the model can dynamically decide 'write an important token into the state more, ignore a useless one' - exactly what let it match transformers. A stays fixed (a learned parameter), governing the state's own stable decay.</div></div></div>
   </details>
 </div>
@@ -677,7 +677,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>the state is lossy compression; long-range exact retrieval (e.g. verbatim copy) is worse than attention, which can look up KV</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. No free lunch. Compressing arbitrarily long history into a fixed-size state is inherently lossy: when there is too much worth remembering and the state cannot hold it, it must forget selectively. So SSMs are handicapped on 'exact retrieval' tasks - e.g. copying out the 3000th token from long ago verbatim (the copy task), or looking back to compare a detail exactly. Attention can look back and check each KV; the SSM has only one repeatedly-overwritten summary. This is not an implementation flaw but the fundamental cost of choosing 'fixed state'. Hence the common hybrid architecture (llama-memory-hybrid): most layers use SSM to carry length, a few insert attention for exact retrieval.</div></div></div>
   </details>
 </div>

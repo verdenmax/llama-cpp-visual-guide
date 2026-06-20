@@ -711,7 +711,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>general.file_type</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The loader reads the general.architecture string and looks it up in LLM_ARCH_NAMES to get an enum like LLM_ARCH_LLAMA; that enum decides the KV/tensor conventions and graph builder used (L16).</div></div></div>
   </details>
 </div>
@@ -724,7 +724,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>it is a typo; it should be a field</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. In modern architectures per-layer attention configs can differ (GQA gives fewer KV than Q heads; hybrids differ by layer), so head counts are stored per layer in n_head_arr, and n_head(il) is an accessor method (not a field) fetching by layer.</div></div></div>
   </details>
 </div>
@@ -737,7 +737,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>by random matching</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Tensor names follow LLM_TENSOR_NAMES templates (blk.%d filled with the layer index), built by LLM_TN's tn(); graph-building fetches weights from weights_map by name. A name is a stable contract, robust across tools and splits.</div></div></div>
   </details>
 </div>

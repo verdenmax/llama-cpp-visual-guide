@@ -794,7 +794,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>It modifies the contents of a</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. ggml builds graphs lazily: an operator function only builds the result tensor and fills op/src back-pointers; the real math waits for execution (next lesson).</div></div></div>
   </details>
 </div>
@@ -807,7 +807,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>nodes are leaves, leafs are branches</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The criterion is whether it has an origin: op==NONE means a leaf (input/constant, used directly); having an op means a node (computed in dependency order).</div></div></div>
   </details>
 </div>
@@ -820,7 +820,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>It immediately executes the whole graph</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. "Recurse to collect dependencies first, then add itself" naturally yields topological order: earlier never depends on later, so execution just goes front to back.</div></div></div>
   </details>
 </div>

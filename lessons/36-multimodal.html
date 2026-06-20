@@ -613,7 +613,7 @@ std::vector&lt;float&gt; out_vec;
     <li>a set of special token ids looked up in the vocabulary</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Key insight: the LLM body only ever processes sequences of embedding vectors - it has no idea what a 'token' looks like. So multimodality does not change the model body; it encodes the image into N embeddings too (clip encodes + projector projects into the LLM's embedding space), spliced into the text sequence at the &lt;image&gt; marker. Handed this run of vectors, the LLM cannot tell which came from text and which from the image - it just runs forward. This is also why llama_batch can carry both token and embd (L18): images go in through the embd entry.</div></div></div>
   </details>
 </div>
@@ -626,7 +626,7 @@ std::vector&lt;float&gt; out_vec;
     <li>project clip's visual features into the LLM's embedding dimension and space, making them 'look like a token embedding'</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. clip's visual features and the LLM's token embeddings are not in the same space - dimensions may differ, and value distributions and semantics are two different systems, so feeding them in directly is unreadable to the model. The projector is that bridge: a small network aligning visual features to the LLM's embedding dimension/space. clip_n_mmproj_embd must equal the LLM's embedding dimension or the vectors will not fit. Because it is trained for one specific 'this clip + this LLM' pairing, it is a separate mmproj file loaded separately; without it the model only reads text and cannot see images.</div></div></div>
   </details>
 </div>
@@ -639,7 +639,7 @@ std::vector&lt;float&gt; out_vec;
     <li>images do not enter the KV cache, they exist only briefly during encoding</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Once image embeddings are spliced in, to the LLM they are N real positions: assigned positions, written into the KV cache (L19), and joining the attention of every later token. So one high-res image can take hundreds or thousands of positions, and a few images in the KV cache rivals long text - a '32K-context multimodal model' shares that 32K between images and text. clip_n_output_tokens sets this N, and some projectors (resamplers) actively compress N to save KV. This echoes L19: the longer the sequence, the bigger the KV cache, the fewer concurrent requests.</div></div></div>
   </details>
 </div>

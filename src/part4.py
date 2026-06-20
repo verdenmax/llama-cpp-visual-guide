@@ -905,7 +905,7 @@ L09 covered the essence of such graphs; this lesson just lets you see that a rea
 <h2>Reusable blocks and graph inputs</h2>
 <p>Underpinning this assembly is a set of <strong>reusable blocks</strong> and <strong>graph inputs</strong> on <span class="mono">llm_graph_context</span>. The blocks are methods like <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>; the graph inputs are the entry points that wire "external data" into the graph.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) · pos (positions) · attn_kv (KV cache)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) - pos (positions) - attn_kv (KV cache)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">blocks</span><span class="name">build_attn / build_ffn / build_norm</span></div><div class="ld">assemble weights + inputs into a subgraph, internally L11 operators</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">product</span><span class="name">llm_graph_result -&gt; ggml_cgraph</span></div><div class="ld">all blocks chained; get_gf() hands out the final graph(L09)</div></div>
 </div>
@@ -1178,8 +1178,8 @@ the KV cache (memory), the backend scheduler (sched), and output buffers; <span 
 <h2>model vs context: read-only knowledge vs stateful session</h2>
 <p>This is the cut to grasp first: <strong>weights are read-only knowledge, a session is stateful progress</strong>, and the two are deliberately split into two objects.</p>
 <div class="cols">
-  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights · hyperparameters · vocab · <strong>read-only</strong> · one is enough · <strong>shareable by many contexts</strong></p></div>
-  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits · <strong>stateful</strong> · <strong>one per session</strong> · remembers where this conversation is</p></div>
+  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights - hyperparameters - vocab - <strong>read-only</strong> - one is enough - <strong>shareable by many contexts</strong></p></div>
+  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits - <strong>stateful</strong> - <strong>one per session</strong> - remembers where this conversation is</p></div>
 </div>
 <p>Why split this way? Because weights are several GB, loaded once and unchanging, and ought to be <strong>shared</strong>; while "conversation progress" (KV cache, current position) is <strong>per-session state</strong> that must be stored separately. Splitting unchanging knowledge from changing state, one copy of weights can hold up many concurrent sessions - the basis of multi-user serving.</p>
 <p>An analogy: the model is like a dictionary (everyone consults it, its content fixed), the context like each person's scratch paper (each writes their own, none interfering). You would never print a separate dictionary per reader, but everyone needs their own scratch paper. llama.cpp's cut is exactly between "shared knowledge" and "private state".</p>
@@ -2915,7 +2915,7 @@ M4a let the model compute, L20 cut text into tokens, L21 taught it to pick the n
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
 </div>
-<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure, but rather a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
+<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure - it eats a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
 <p>The assembled string, besides each message's body, inserts a pile of <strong>special markers</strong>: marking where each message starts, ends, and who spoke. These markers correspond to special tokens in the vocab (L20), and the model relies on them to recognize "it is the assistant's turn now", "the user is done with this turn".</p>
 <p>The order is: message list -&gt; apply the template into a string -&gt; hand to the vocab to tokenize -&gt; into the model. The template handles "structure to text", tokenize handles "text to tokens" - two relays, neither dispensable. This is also why this lesson follows the vocab (L20) closely - its product is exactly tokenize's input.</p>
 <div class="card detail">
@@ -3393,7 +3393,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 <rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">val</text>
 <rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">end</text>
 <rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">done</text>
-<text x="19" y="138" fill="#5b6470" font-size="12">state need ':' - which candidate tokens survive:</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">state needs ':' - which candidate tokens survive:</text>
 <rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
 <text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">keep</text>
 <rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>

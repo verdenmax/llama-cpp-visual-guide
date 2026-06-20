@@ -466,7 +466,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <summary><span class="badge-num">2</span> KV cache 到底省了什么？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
     <p><strong>省的是"重算过去"：</strong>没有它，每生成一个新 token 都要把前面所有 token <strong>重算一遍</strong> -&gt; <strong>重算成本</strong>约 <span class="mono">O(n^2)</span>；有了它每步只算<strong>新 token</strong> 的 K/V 并追加进缓存 -&gt; <strong>重算降到</strong> <span class="mono">O(n)</span>。</p>
-    <p><strong>给个体感：</strong>假设上下文已经有 1000 个 token，现在要生成第 1001 个。没有缓存，这一步得把前面 1000 个 token 的 K/V <strong>全部重算一遍</strong>；有了缓存，只需算<strong>第 1001 个</strong>这一个 token 的 K/V，再追加到缓存末尾，省下的几乎是整段历史的重复前向。把每一步都这么省下来，一整段生成累计省掉的计算量，就从 <span class="mono">O(n^2)</span> 量级压到 <span class="mono">O(n)</span> 量级——这正是自回归生成能在本地"<strong>一直往下写而不越写越慢</strong>"的根本。</p>
+    <p><strong>给个体感：</strong>假设上下文已经有 1000 个 token，现在要生成第 1001 个。没有缓存，这一步得把前面 1000 个 token 的 K/V <strong>全部重算一遍</strong>；有了缓存，只需算<strong>第 1001 个</strong>这一个 token 的 K/V，再追加到缓存末尾，省下的几乎是整段历史的重复前向。把每一步都这么省下来，一整段生成累计的<strong>重算量</strong>，就从 <span class="mono">O(n^2)</span> 量级压到 <span class="mono">O(n)</span> 量级——这正是自回归生成能在本地"<strong>一直往下写而不越写越慢</strong>"的根本。</p>
     <p><strong>注意别夸大：</strong>注意力对历史的<strong>扫描</strong>仍是每步 <span class="mono">O(n)</span>（要看过去所有 token），省掉的是<strong>重复计算过去 token 的 K/V</strong>，不是把注意力也变成常数。</p>
     <p><strong>为什么长上下文这么"吃"硬件：</strong>KV cache 的占用大致正比于"<strong>层数 × 上下文长度 × 每层 K/V 的宽度</strong>"——层数和宽度由模型定死，唯一会涨的就是上下文长度。于是把上下文从几千开到几万，KV cache 就要成倍变大，往往成为权重之外最显眼的一块内存。这也解释了为什么本地跑长上下文时，光有"<strong>装得下权重</strong>"的内存还不够，得额外给 KV cache 留足空间；想省，就只能在<strong>更短的上下文</strong>、<strong>更省的缓存量化</strong>或<strong>共享 K/V 的注意力结构</strong>之间做权衡。</p>
     <p><strong>源码：</strong>缓存的分配、写入与复用在 <span class="mono">src/llama-kv-cache.cpp</span>；上下文越长，这块占用越大，也是本地推理要预留内存的地方。</p>
@@ -572,32 +572,32 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Tokenize</h4>
     <p>Cut the prompt text into a sequence of token ids - the model understands numeric ids, not characters; the same sentence can split into completely different ids under a different tokenizer.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_tokenize</p>
+    <p class="mono">src/llama-vocab.cpp - llama_tokenize</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Batch</h4>
     <p>Wrap the token sequence into one input (batch); with <span class="mono">llama_batch_get_one</span>, <span class="mono">pos</span>/<span class="mono">seq_id</span> are auto-assigned by <span class="mono">llama_decode</span> (sequential positions, sequence 0) - use <span class="mono">llama_batch_init</span> only when you need multiple sequences / custom positions.</p>
-    <p class="mono">src/llama-batch.cpp · llama_batch_get_one</p>
+    <p class="mono">src/llama-batch.cpp - llama_batch_get_one</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>Decode (forward)</h4>
     <p><span class="mono">llama_decode</span> runs one forward pass; internally it first <strong>builds the compute graph</strong>, then hands it to the <strong>backend</strong> to run on hardware. This is the heaviest step - the next section <strong>zooms into</strong> it.</p>
-    <p class="mono">src/llama-context.cpp · llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
+    <p class="mono">src/llama-context.cpp - llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
   </div></div>
   <div class="step"><div class="num">4</div><div class="sc">
     <h4>Get logits</h4>
     <p>Read out the "score vector for the next token" from this forward pass - one score per token in the vocabulary. At this point <strong>no</strong> token has been chosen yet.</p>
-    <p class="mono">src/llama-context.cpp · llama_get_logits_ith</p>
+    <p class="mono">src/llama-context.cpp - llama_get_logits_ith</p>
   </div></div>
   <div class="step"><div class="num">5</div><div class="sc">
     <h4>Sample</h4>
     <p>The sampler chain picks one token from the logits by some strategy (greedy / top-k / top-p...); a different strategy can pick a different token from the very same logits.</p>
-    <p class="mono">src/llama-sampler.cpp · llama_sampler_sample</p>
+    <p class="mono">src/llama-sampler.cpp - llama_sampler_sample</p>
   </div></div>
   <div class="step"><div class="num">6</div><div class="sc">
     <h4>Check end + detokenize</h4>
     <p>First use <span class="mono">llama_vocab_is_eog</span> to test for an end token; if not, <span class="mono">llama_token_to_piece</span> turns the token back into text.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_vocab_is_eog · llama_token_to_piece</p>
+    <p class="mono">src/llama-vocab.cpp - llama_vocab_is_eog - llama_token_to_piece</p>
   </div></div>
   <div class="step"><div class="num">7</div><div class="sc">
     <h4>Feed-back + loop</h4>
@@ -636,8 +636,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 </div>
 <p>Put the two rhythms on one timeline and the difference is obvious at a glance: prefill is <strong>one wide</strong> parallel block, decode is <strong>cell-by-cell</strong> steps appended after it.</p>
 <div class="timeline">
-  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1…t5) computed in parallel at once, filling the KV cache</span></div>
-  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8…</span></div>
+  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1...t5) computed in parallel at once, filling the KV cache</span></div>
+  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8...</span></div>
 </div>
 <p><strong>Why can prefill run in parallel while decode must be serial?</strong> It comes down to "what depends on what". Prefill faces an <strong>already fully given</strong> prompt where every token is known; their K/V <strong>do not depend on each other</strong>, so they can all be computed in parallel in one shot and fill the cache at once. Decode is the opposite: to compute the "<strong>next word</strong>", the precondition is that "<strong>the previous word has already been written</strong>" - the input to step n+1 is exactly the token that step n's sampling just chose. This "<strong>each step depends on the previous step's output</strong>" chain is inherently <strong>impossible to parallelize</strong>; it can only inch forward one step at a time. That is one root reason a single conversation's generation speed has a ceiling: even if the hardware is idle, decode still has to queue up and go cell by cell.</p>
 <p class="acc-intro">Prefill computes the whole prompt <strong>in parallel</strong> in one pass; afterwards each decode step computes <strong>just 1 new token</strong>, so "keep writing" is cheap.</p>
@@ -648,8 +648,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 <div class="cellgroup">
   <div class="cg-cap"><b>KV cache</b>: each generated token appends its K/V to the cache; the next step reuses them directly instead of recomputing history</div>
   <div class="cells"><span class="lab">after prefill</span><span class="cell">K1</span><span class="cell">K2</span><span class="cell">K3</span><span class="cell">K4</span><span class="cell">K5</span></div>
-  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1…K5 (reuse)</span><span class="cell hl">+K6</span></div>
-  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1…K6 (reuse)</span><span class="cell hl">+K7</span></div>
+  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1...K5 (reuse)</span><span class="cell hl">+K6</span></div>
+  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1...K6 (reuse)</span><span class="cell hl">+K7</span></div>
 </div>
 <p>Each row adds only <strong>one highlighted new cell</strong> (<span class="mono">+K6</span>, <span class="mono">+K7</span>); everything greyed out before it is "<strong>reused, not recomputed</strong>". Without this cache, generating the n-th token would recompute all n-1 before it; with it, the <strong>added work</strong> per step is essentially constant - that is why an autoregressive loop can keep running cheaply on local hardware.</p>
 <p><strong>So what exactly are K/V, and why can they be cached?</strong> In the attention mechanism, every token gets three things computed: a Query (the vector it uses to "ask"), a Key (the "label" it is matched against), and a Value (the "content" it carries). To compute "who should the current token attend to", you take its Query and compare it against <strong>the Keys of all past tokens</strong>, then weight-sum the corresponding <strong>Values</strong> by the resulting weights. Here is the key point: <strong>a past token's K and V never change once computed</strong> (they depend only on that token itself and its position), so they can simply be <strong>stored and reused</strong> - which is exactly what the KV cache holds. The cost is direct too: the cache must store one K and one V for <strong>every layer and every past token</strong>, so its memory footprint <strong>grows linearly with context length</strong>; push the context to tens of thousands of tokens and the KV cache eats a sizable chunk of memory - one reason a "context window" always has an upper bound and long context is especially hardware-hungry (allocation, writing and reuse all live in <span class="mono">src/llama-kv-cache.cpp</span>).</p>
@@ -692,7 +692,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <summary><span class="badge-num">2</span> What exactly does the KV cache save? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
     <p><strong>It saves "recomputing the past":</strong> without it, every new token re-runs all previous tokens -&gt; the <strong>recompute cost</strong> is ~<span class="mono">O(n^2)</span>; with it each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; <strong>recompute drops to</strong> <span class="mono">O(n)</span>.</p>
-    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total work for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
+    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total <strong>recompute</strong> for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
     <p><strong>Don't overstate it:</strong> attention's <strong>scan</strong> over history is still <span class="mono">O(n)</span> per step (it must look at all past tokens); what is saved is <strong>recomputing past tokens' K/V</strong>, not turning attention itself into a constant.</p>
     <p><strong>Why long context is so hardware-hungry:</strong> the KV cache footprint is roughly proportional to "<strong>layers x context length x the K/V width per layer</strong>" - layers and width are fixed by the model, so the only thing that grows is context length. Push the context from a few thousand to tens of thousands and the KV cache grows in proportion, often the biggest block of memory after the weights themselves. That is why running long context locally needs more than enough memory to "<strong>fit the weights</strong>" - you must reserve extra room for the KV cache; to save it, you can only trade among a <strong>shorter context</strong>, <strong>cheaper cache quantization</strong>, or <strong>attention that shares K/V</strong>.</p>
     <p><strong>Source:</strong> allocation, writing and reuse of the cache live in <span class="mono">src/llama-kv-cache.cpp</span>; the longer the context, the bigger this footprint - and the memory you must reserve for local inference.</p>
@@ -737,7 +737,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>The next token's logits (a score vector)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. decode only yields logits; picking a token is llama_sampler_sample's job, turning it into text is llama_token_to_piece's.</div></div></div>
   </details>
 </div>
@@ -750,7 +750,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>It reloads and quantizes the model weights</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Inside decode, llm_graph_* in llama-graph.cpp (via build_graph) describes the step as a compute graph, ggml-backend schedules it on hardware, then llama_get_logits_ith reads out the logits.</div></div></div>
   </details>
 </div>
@@ -763,7 +763,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>Because the prompt is short</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. After prefill fills the KV cache, each decode step only computes the new token's Q and reuses cached K/V, skipping recomputation over history.</div></div></div>
   </details>
 </div>

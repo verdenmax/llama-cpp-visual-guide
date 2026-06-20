@@ -697,7 +697,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>Half: it depends on a compile-time switch</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. common is a tool-shared internal convenience library; its layouts and signatures change as the project needs, with no ABI-stability promise. The stable outward contract is include/llama.h, which third-party bindings should target directly.</div></div></div>
   </details>
 </div>
@@ -710,7 +710,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>common_params_parse: it picks the option set by enum llama_example and calls each common_arg callback to write fields</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common_params_parse(argc, argv, params, ex) walks argv, matches a common_arg by name, and calls callbacks to write into common_params; the 4th arg ex (enum llama_example) decides which option set applies. common_init() only does global init (logging, build info).</div></div></div>
   </details>
 </div>
@@ -723,7 +723,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>each tool hand-writes its own separate sampler chain</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. cli/server use the common_sampler layer: common_sampler_init builds the chain in params.sampling.samplers order, and common_sampler_sample does logits, grammar, and sampling in one step. You can still recover the raw llama_sampler chain via common_sampler_get when needed.</div></div></div>
   </details>
 </div>

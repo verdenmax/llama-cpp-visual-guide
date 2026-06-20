@@ -17,7 +17,7 @@ LESSON_04 = {
 </div>
 
 <h2>decoder-only：一个 block 在算什么</h2>
-<p>课 02 说过 llama 系模型都是 <strong>decoder-only</strong> 结构。把它拆开，数据从下往上是一条很直的链：词 id 先查成向量，
+<p>llama 系模型（和当下绝大多数 LLM）都是 <strong>decoder-only</strong> 结构。把它拆开，数据从下往上是一条很直的链：词 id 先查成向量，
 再穿过<strong>许多层结构相同的 block</strong>，最后投影回词表，得到每个候选词的分数。一层 block 内部又分两个子层——
 <strong>自注意力</strong>和<strong>前馈网络（FFN）</strong>：</p>
 <div class="vflow">
@@ -258,19 +258,19 @@ rather than a "good enough" approximation. Understand this layer and you see why
 </div>
 
 <h2>decoder-only: what a block computes</h2>
-<p>As lesson 02 noted, llama-family models are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
+<p>llama-family models (like most LLMs today) are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
 token ids are looked up into vectors, pushed through <strong>many identical blocks</strong>, then projected back to the vocabulary to score
 every candidate word. Inside one block there are two sub-layers - <strong>self-attention</strong> and the <strong>feed-forward network (FFN)</strong>:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Embedding</h4>
     <p>Look up each token id into a dense vector (a word embedding); all later math runs on these vectors.</p>
-    <p class="mono">src/llama-graph.cpp · build_inp_embd</p>
+    <p class="mono">src/llama-graph.cpp - build_inp_embd</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Self-attention sub-layer (first half of each block, x N blocks)</h4>
     <p>RMSNorm -&gt; self-attention (with RoPE positions) -&gt; residual add. <strong>This is the only place tokens talk to each other.</strong></p>
-    <p class="mono">ggml_rms_norm · ggml_rope · ggml_soft_max_ext</p>
+    <p class="mono">ggml_rms_norm - ggml_rope - ggml_soft_max_ext</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>FFN sub-layer (second half of the same block)</h4>
@@ -391,7 +391,7 @@ omitting scaling and multi-head details.)</p>
 <h2>Autoregression + why the KV cache is exact</h2>
 <p>Draw "predict the next from what we already have" as a loop and you get the autoregressive cycle:</p>
 <div class="flow">
-  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 … xn</div></div>
+  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 ... xn</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">forward</div><div class="nd">N blocks</div></div>
   <div class="arrow">-&gt;</div>
@@ -1130,7 +1130,7 @@ for i in range(32):
 </div>
 <p>怎么衡量"量化掉了多少质量"？最常用的指标是<strong>困惑度（perplexity）</strong>：拿一段标准文本，看模型对"下一个词"预测得有多准，困惑度越低越好。
 社区常做的事，就是把同一个模型的各个量化档位都跑一遍困惑度、列成表对比——你会看到 Q8_0 几乎和 fp16 持平、Q4_K_M 只高一丁点，而 Q2_K 则明显抬高。
-<span class="mono">llama-perplexity</span> 工具就是干这个的，第七部分会专门讲怎么用它给量化"打分"。一个经验法则：<strong>在显存放得下的前提下，尽量选高一档</strong>，质量更有保障。</p>
+<span class="mono">llama-perplexity</span> 工具就是干这个的，第五部分的 L30 会专门讲怎么用它给量化"打分"。一个经验法则：<strong>在显存放得下的前提下，尽量选高一档</strong>，质量更有保障。</p>
 <p>最后澄清一个边界：量化只压缩权重的<strong>表示方式</strong>（每个数用几位存），<strong>并不改变模型的结构</strong>——层数、维度、参数个数都原封不动。
 这和<strong>剪枝</strong>（删掉一部分权重 / 神经元）、<strong>蒸馏</strong>（训练一个更小的新模型去模仿大模型）是完全不同的三条压缩路线。量化最大的好处就是
 <strong>几乎免费、即插即用</strong>：不用重新训练，一个命令就能把现成模型变小变快，这也是它在本地推理里如此普及的原因。</p>
@@ -1250,8 +1250,8 @@ values well, so the error is big.</p>
 A block's dynamic range is small, the scale fits tightly, and the approximation is naturally more accurate. This is "divide and conquer" applied to quantization:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>Block quantization</b>: 32 float weights -&gt; 1 scale (half-precision) + 32 low-bit integers</div>
-  <div class="cells"><span class="lab">original</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">…</span><span class="cell">-0.15</span><span class="lab">32 floats</span></div>
-  <div class="cells"><span class="lab">quantized</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">…</span><span class="cell q">5</span><span class="lab">1 scale + 32 4-bit</span></div>
+  <div class="cells"><span class="lab">original</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">...</span><span class="cell">-0.15</span><span class="lab">32 floats</span></div>
+  <div class="cells"><span class="lab">quantized</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">...</span><span class="cell q">5</span><span class="lab">1 scale + 32 4-bit</span></div>
 </div>
 <p>Another way to see "why a small in-block range is more accurate": quantization approximates continuous values with a few fixed levels, and <strong>the narrower
 the range those levels must cover, the smaller the gap between levels and the finer the quantization</strong>. A whole matrix holding both 0.001 and 5.0 forced into 16
@@ -1352,7 +1352,7 @@ deliberately kept at higher bit-widths - exactly the "mixed precision" the K-qua
 </div>
 <p>How do you measure "how much quality quantization cost"? The most common metric is <strong>perplexity</strong>: take a standard text and see how well the model
 predicts the "next word" - lower is better. A common community exercise is to run perplexity across a model's quant tiers and tabulate them - you will see Q8_0 nearly
-matching fp16, Q4_K_M only a hair higher, and Q2_K clearly higher. The <span class="mono">llama-perplexity</span> tool does exactly this, and Part 7 covers using it to
+matching fp16, Q4_K_M only a hair higher, and Q2_K clearly higher. The <span class="mono">llama-perplexity</span> tool does exactly this, and Part 5 (L30) covers using it to
 "grade" quantization. A rule of thumb: <strong>pick one tier higher whenever memory allows</strong>, for safer quality.</p>
 <p>Finally, a boundary to clarify: quantization only compresses the weights' <strong>representation</strong> (how many bits each number uses); it <strong>does not change
 the model's structure</strong> - layer count, dimensions, parameter count all stay. That makes it a different path from <strong>pruning</strong> (removing some
@@ -1649,9 +1649,9 @@ be a mess.</p>
 while "on which hardware, with which instructions" is left to a concrete backend (<span class="mono">ggml-cpu</span>, <span class="mono">ggml-cuda</span>,
 <span class="mono">ggml-metal</span>...). This is exactly the "<strong>decouple 'what to compute' from 'where to compute'</strong>" that lesson 01 kept stressing.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul · softmax · rope ...)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul - softmax - rope ...)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">interface</span><span class="name">ggml-backend</span></div><div class="ld">uniform backend interface: allocate memory, schedule ops, move data between devices</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
 </div>
 <p>The benefit of this layering: <strong>adding a new hardware needs only a new backend; not one line of upper inference code changes</strong>; and which backends you
 pick at build time decides which hardware your binary "knows". So "build" and "backend" are two sides of the same coin - the build system's main job is to compile in

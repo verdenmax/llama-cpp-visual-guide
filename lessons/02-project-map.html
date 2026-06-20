@@ -574,16 +574,16 @@ to run a tool or dig into the source.
 directory actually do</strong>". The table below is the map's legend:</p>
 <table class="t">
   <tr><th>Directory</th><th>Role</th></tr>
-  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors · compute graph · ops · backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
-  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
-  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> ...</td></tr>
+  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors - compute graph - ops - backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
+  <tr><td class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
+  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> - <code>llama-graph</code> - <code>llama-kv-cache</code> - <code>llama-sampler</code> - <code>llama-vocab</code> - <code>llama-chat</code> - <code>llama-grammar</code> - <code>llama-quant</code> ...</td></tr>
   <tr><td class="mono">include/</td><td>The <strong>public C API</strong>: <code>llama.h</code> (the only external contract); <code>llama-cpp.h</code> (a thin C++ wrapper + RAII)</td></tr>
-  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) · <code>sampling</code> (sampler wrapper) · <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
-  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code> (multimodal) · <code>llama-perplexity</code> · <span class="mono">llama-bench</span> ...</td></tr>
+  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) - <code>sampling</code> (sampler wrapper) - <code>chat</code> - <code>log</code> - <code>download</code> - <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
+  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> - <span class="mono">llama-server</span> - <span class="mono">llama-quantize</span> - <code>llama-mtmd-cli</code> (multimodal) - <code>llama-perplexity</code> - <span class="mono">llama-bench</span> ...</td></tr>
   <tr><td class="mono">examples/</td><td>Small example programs: <code>simple</code> demonstrates minimal inference in a couple hundred lines - the best "readable" entry point</td></tr>
   <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong>: the conversion scripts use it to write out a <span class="inline">.gguf</span></td></tr>
   <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>: 3 converters + 1 tokenizer-hash updater; the main one is HuggingFace -&gt; GGUF)</td></tr>
-  <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
+  <tr><td class="mono">models/ - tests/ - docs/ - grammars/ - cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
 </table>
 <p>A simple rule of thumb: <strong>the lower you go, the "harder" it gets</strong> - <span class="mono">ggml/</span> leans toward math and hardware, <span class="mono">src/</span> toward model and session logic, <span class="mono">tools/</span> and <span class="mono">common/</span> toward "for people to use". The only thing ever exposed to the outside, start to finish, is the single public header <span class="mono">include/llama.h</span>.</p>
 
@@ -593,8 +593,8 @@ directory actually do</strong>". The table below is the map's legend:</p>
   <tr><th>This block</th><th>Does exactly one thing</th><th>Roughly lives in</th></tr>
   <tr><td><strong>Engine</strong></td><td>Provide compute: define tensors, organize ops into a compute graph, schedule to the backends that actually run it</td><td class="mono">ggml/</td></tr>
   <tr><td><strong>Inference lib</strong></td><td>Assemble compute into a "session": load weights, build the graph, KV cache, sampling, tokenizing, chat templates</td><td class="mono">src/llama-*</td></tr>
-  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ · common/</td></tr>
-  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ · convert_*.py</td></tr>
+  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ - common/</td></tr>
+  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ - convert_*.py</td></tr>
 </table>
 <p><strong>Why split them so hard?</strong> Because the four jobs <strong>change at completely different rhythms</strong>: backend ops chase new hardware and instruction sets; inference logic evolves with new model architectures; CLI flags and server APIs come and go with user needs; conversion scripts track upstream model formats. Weld them together and touching one means worrying you broke another. Split apart, <strong>each can evolve, be tested, and be reused on its own</strong> - add a new backend to <span class="mono">ggml</span> without touching a line of <span class="mono">src/llama-*</span>; add a new model architecture without reaching down to the low-level ops. That is the most concrete payoff of "<strong>clean boundaries</strong>".</p>
 
@@ -605,26 +605,26 @@ directory actually do</strong>". The table below is the map's legend:</p>
 <h2>How they map onto the "four layers"</h2>
 <p>Mapping those directories back onto the four-layer structure from the previous lesson makes it click:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ · examples/</span></div>
-    <div class="ld"><span class="mono">tools/</span> (cli · server · quantize · mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ - examples/</span></div>
+    <div class="ld"><span class="mono">tools/</span> (cli - server - quantize - mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">inference lib</span><span class="name">src/llama-*</span></div>
-    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> · <span class="mono">gguf.cpp</span> · <span class="mono">ggml-alloc</span> · <span class="mono">ggml-backend</span>): tensors · compute graph · ops · scheduling · the GGUF format</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
-    <div class="ld"><span class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
+    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> - <span class="mono">gguf.cpp</span> - <span class="mono">ggml-alloc</span> - <span class="mono">ggml-backend</span>): tensors - compute graph - ops - scheduling - the GGUF format</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
+    <div class="ld"><span class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
 </div>
-<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span>.</p>
-<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
+<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span>.</p>
+<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
 
 <h2>How a model travels from training to running</h2>
 <p>String the directories together and a model's "life" is really a straight pipeline: prepared in Python on the left, run in C++ on the right, handed over through one file in the middle. Walk it once and you will see which station each directory occupies along the whole chain:</p>
 <div class="flow">
   <div class="node"><div class="nt">HF / PyTorch model</div><div class="nd">safetensors weights</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python · gguf-py</div></div>
+  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python - gguf-py</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file · weights + metadata</div></div>
+  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file - weights + metadata</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">llama_model_load_from_file</div><div class="nd">C++ runtime</div></div>
   <div class="arrow">-&gt;</div>
@@ -647,7 +647,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
 <h2>Want to read the source - where to enter</h2>
 <p>Want to read the source but not sure where to start? Rather than chewing from the first file to the last, <strong>decide your goal first</strong>, then pick the matching entry point and drill down. Three common goals map to three entries:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ · examples/simple</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ - examples/simple</span></div>
     <div class="ld">First get <code>llama-cli</code>/<code>llama-server</code> running, then read the minimal call in <code>examples/simple</code></div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">to grok inference</span><span class="name">src/llama-*</span></div>
     <div class="ld">Follow the main line: <code>llama-model-loader</code> -&gt; <code>llama-graph</code> -&gt; <code>llama-kv-cache</code> -&gt; <code>llama-sampler</code></div></div>
@@ -742,7 +742,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li><code>ggml/include/ggml.h</code></li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The public contract is just include/llama.h (plus the llama-cpp.h C++ wrapper); src and ggml are internal.</div></div></div>
   </details>
 </div>
@@ -755,7 +755,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li><code>src/llama-model-loader</code></li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.</div></div></div>
   </details>
 </div>
@@ -765,10 +765,10 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li>Part of ggml, handling the low-level ops</li>
     <li>The inference core: model loading, the compute graph and sampling all live here</li>
     <li>A set of Python conversion scripts</li>
-    <li>The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code></li>
+    <li>The shared 'glue' for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code></li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common factors out the boilerplate the programs repeat (arg, sampler wrapper, logging...) for tools/ to reuse; the real loading/graph/sampling is in src/llama-*, exposed only via include/llama.h.</div></div></div>
   </details>
 </div>

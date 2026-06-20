@@ -747,7 +747,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>neither can be shared, each must be independent</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. llama_model is read-only knowledge (weights never change after load), shareable across contexts - load once, infer in many places; llama_context holds per-session private state (KV cache, compute buffers, sampling position), so it must be one per session.</div></div></div>
   </details>
 </div>
@@ -760,7 +760,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>free the model directly</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The order is tokenize -> decode -> get_logits -> sample: after tokenizing, you must llama_decode the graph and read per-token scores via llama_get_logits before the sampler chain has anything to pick from.</div></div></div>
   </details>
 </div>
@@ -773,7 +773,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>call llama_backend_free to wipe all handles at once</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. include/llama-cpp.h defines a unique_ptr alias per handle (llama_model_ptr etc.) whose deleter calls the matching _free, so a handle frees the moment it leaves scope - no missed frees or wrong order. C/C++ has no GC, and manual _free is error-prone.</div></div></div>
   </details>
 </div>

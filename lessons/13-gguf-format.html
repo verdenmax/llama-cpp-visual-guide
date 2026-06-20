@@ -778,7 +778,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>only a version number</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Metadata is a run of typed (gguf_type) key-value pairs that self-describe architecture, hyperparameters, vocab, chat template, etc.; the loader reads the KVs to build the graph, with no external config or guessing.</div></div></div>
   </details>
 </div>
@@ -791,7 +791,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>it encrypts the weight data</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. mmap maps the file read-only into the address space, with tensor data pointers pointing straight at disk pages loaded only when touched; it avoids reading and copying several GB of weights wholesale - that is the 'instant load'.</div></div></div>
   </details>
 </div>
@@ -804,7 +804,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>there is no magic, just weights directly</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. GGUF_MAGIC = "GGUF" (the first 4 bytes), GGUF_VERSION = 3 (see ggml/include/gguf.h); the loader checks them immediately and refuses or errors if they do not match.</div></div></div>
   </details>
 </div>

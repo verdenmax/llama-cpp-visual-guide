@@ -661,7 +661,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>a multi-thousand-line monolith with every architecture's conversion logic piled inside</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. It has been refactored into a ~300-line thin CLI: main() just does load_hparams to read config.json -> get_model_architecture for the arch name -> get_model_class to look up the class in the registry -> instantiate -> call write(). Each architecture's concrete conversion logic moved into its own module under conversion/ (conversion/llama.py and friends). So do not read only the root file - look at ModelBase in conversion/base.py and the per-architecture subclasses.</div></div></div>
   </details>
 </div>
@@ -674,7 +674,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>registers the model weights onto the GPU</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. register is a classmethod on ModelBase used as a decorator factory. Python runs the line when it loads an architecture module, mapping the several HF architecture names in the parentheses onto the decorated class (one class can claim several names, e.g. Llama/Mistral/Mixtral share one). So get_model_class, given config.json's architectures, finds which subclass to use. Adding an architecture = add a subclass with register, no trunk changes - that is 'registry plus plugins'.</div></div></div>
   </details>
 </div>
@@ -687,7 +687,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>the first tensor's name, shape, type, and data</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. GGUFWriter.write_header_to_file writes just four fixed-length fields: magic 0x46554747 ("GGUF"), version=3, tensor_count (u64), kv_count (u64). The loader reads these four numbers first to know how much metadata KV and how many tensor-info records follow. Architecture/layers/dims/vocab are written in the metadata KV section after the header, not in it; a tensor's name/shape/type/offset live in the tensor-info section further on.</div></div></div>
   </details>
 </div>

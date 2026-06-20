@@ -665,7 +665,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>making matmul compute faster</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The core value of the backend abstraction is decoupling: the compute graph (L09) only describes 'what to compute', and each backend (CPU/CUDA/Metal...) implements the same ggml_backend_i interface, handling 'how and where'. So upper-layer code is not rewritten per hardware - the classic 'program to an interface' move. It does not make a single op faster (that is L31/L32's kernels), and is unrelated to quantization or file format.</div></div></div>
   </details>
 </div>
@@ -678,7 +678,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>statically compiling all backends into one huge binary</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Dynamic loading defers 'which backends this machine has' to runtime: each backend is a shared library, and ggml_backend_load_all scans, loads the usable ones, and registers them. The point is 'one package runs everywhere' - load the CUDA backend if there is a CUDA card, skip it otherwise, never crashing over a missing library. This is the opposite of 'static-link everything' (which drags in conflicting deps and is machine-picky).</div></div></div>
   </details>
 </div>
@@ -691,7 +691,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>dispatch a compute graph's ops across backends and copy tensors between devices as needed</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The scheduler connects L09/L10's 'static graph' to 'dynamic execution': it walks each op - which device's buffer the inputs are in, which backend best suits the op - dispatches accordingly, and inserts a cross-device copy first when an input is still elsewhere. To cut expensive copies it tends to give consecutive same-device ops to one backend in segments. When you put the first N layers on the GPU with -ngl, this is what dispatches by layer and moves boundary tensors.</div></div></div>
   </details>
 </div>

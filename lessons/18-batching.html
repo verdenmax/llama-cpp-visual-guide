@@ -697,7 +697,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>stores the already-computed logits</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. logits is a switch array (source comment will rename to output): only flagged positions do the output projection (a hidden-vector -> vocab-size matmul). Prefill often flags only the last, saving many useless projections.</div></div></div>
   </details>
 </div>
@@ -710,7 +710,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>for encryption</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. n_batch is the logical batch (how much you can submit at once), n_ubatch the physical batch (how much hardware efficiently computes at once). llama_batch_allocr splits the big logical batch into several &lt;= n_ubatch physical batches fed one by one, the two decoupled.</div></div></div>
   </details>
 </div>
@@ -723,7 +723,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>the token's id</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. seq_id marks which sequence(s) each token belongs to. One batch/context can hold several sequences at once, sharing weights and scheduling, each with its own KV (distinguished by seq_id, L19).</div></div></div>
   </details>
 </div>

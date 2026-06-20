@@ -625,7 +625,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>PPL = exp(mean negative log probability), lower is better (the model is less 'surprised' by real text)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Perplexity takes, per step, the model's negative log probability of the 'real next word' (surprise), averages it, then exp's: PPL = exp(mean negative log prob). Lower means the model is more confident and accurate on real text, so lower is better. It measures quality, not speed (speed is llama-bench).</div></div></div>
   </details>
 </div>
@@ -638,7 +638,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>pp = prefill (reading the prompt) throughput; tg = decode (token-by-token generation) throughput</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. pp (prompt processing, n_prompt) measures the prefill throughput of feeding the prompt at once - highly parallel, usually fast; tg (token generation, n_gen) measures token-by-token decode throughput - each step waits on the last, usually slower. Their performance characteristics differ (prefill compute-bound, decode memory-bound), so they are measured separately.</div></div></div>
   </details>
 </div>
@@ -651,7 +651,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>because ppl and bench are actually the same metric</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Quantization is a trade: you gain smaller size and more speed (measured by bench) at the cost of slightly lower quality (measured by ppl). Speed only leads you to compress until the model is dumb; quality only and you miss quantization's gains. Reading quality (ppl, lower better) and speed (bench, higher better) side by side is the only way to judge whether the trade is worth it.</div></div></div>
   </details>
 </div>

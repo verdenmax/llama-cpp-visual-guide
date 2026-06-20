@@ -733,7 +733,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>change the sampling temperature</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LoRA freezes the original W and learns only small matrices A, B; output = W*x + scale*B*A*x. The adapter is just a few MB, far lighter than retraining all weights; it is wholly different from swapping the vocab or tuning temperature.</div></div></div>
   </details>
 </div>
@@ -746,7 +746,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>the batched llama_set_adapters_lora (singular set/rm/clear removed, n=0 clears)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The current API is the plural, batched llama_set_adapters_lora (attach several at once, each with a scale; n=0 clears); the early singular set/rm/clear trio is replaced by it and no longer exists.</div></div></div>
   </details>
 </div>
@@ -759,7 +759,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>they are exactly the same</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LoRA acts on weights (a low-rank delta folded into matmul, build_lora_mm); a control vector acts on activations (shifting the residual stream along a direction, set_adapter_cvec). Both leave base weights untouched and are plug-and-play, but at different levels.</div></div></div>
   </details>
 </div>

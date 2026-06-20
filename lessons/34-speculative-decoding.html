@@ -615,7 +615,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>it skips part of the attention computation</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In decode most time goes to hauling several GB of weights in from VRAM (the memory-bound point of L30/L32), with compute to spare. So one llama_decode verifying K candidate tokens in parallel costs almost nothing extra versus generating just 1. Speculative decoding has a small model / n-gram guess a run, then the big model verify it in one parallel pass, compressing N serial steps into a few - saving 'waiting for data' time, not the amount of 'computing'.</div></div></div>
   </details>
 </div>
@@ -628,7 +628,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>it gets better, because the draft model adds detail</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Accepted tokens are ones the target itself would give (they passed verification); rejected positions use the target's own prediction (the bonus). The draft appears only in 'proposing', and how well it proposes affects only the acceptance rate (speed), never 'which token is final'. Greedy requires exact per-position matches; under temperature sampling llama.cpp samples a token from the target at each position as usual and accepts the draft only on an exact match with it - what is emitted is always the target's own sample, so the distribution is unchanged by construction. So the output distribution is identical whether speculation is on or off - trading only speed, not quality.</div></div></div>
   </details>
 </div>
@@ -641,7 +641,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>when the sequence is too short</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The speedup is set by the acceptance rate: m accepted on average -> each forward advances about m+1 tokens. When acceptance is low the draft keeps being rejected, so each round wastes a draft-model run plus extra KV for the draft tokens, making it slower. So the more 'predictable' the task (code, translation, rewriting) the more it pays; the more 'divergent' (creative writing, high-temperature sampling) the easier it loses. Practical test: watch llama.cpp's printed acceptance rate; below about 0.3, consider turning it off - do not guess, measure (L30).</div></div></div>
   </details>
 </div>

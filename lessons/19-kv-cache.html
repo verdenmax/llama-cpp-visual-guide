@@ -715,7 +715,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>caches logits</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Without a cache each step recomputes all prior tokens' K/V (quadratic in length); with one, each step computes only the new token and reads historical K/V (linear). L04 proves they are numerically equivalent but an order of magnitude faster - the root of decode's speed.</div></div></div>
   </details>
 </div>
@@ -728,7 +728,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>this position's pos, which seq_ids it belongs to (and the corresponding K/V)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. llama_kv_cells manages the grid of cells; each records pos (fed to rope/causal mask) and its seq_id (for multi-sequence); head is the rolling write pointer. pos+seq_id are a cell's core identity.</div></div></div>
   </details>
 </div>
@@ -741,7 +741,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>llama_decode</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The public sequence-op API is llama_memory_seq_* (seq_rm/seq_cp/seq_add etc.), via llama_get_memory; the old llama_kv_self_* names are renamed and removed, so beware old tutorials.</div></div></div>
   </details>
 </div>

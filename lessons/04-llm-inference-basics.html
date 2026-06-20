@@ -344,7 +344,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 </div>
 
 <h2>decoder-only：一个 block 在算什么</h2>
-<p>课 02 说过 llama 系模型都是 <strong>decoder-only</strong> 结构。把它拆开，数据从下往上是一条很直的链：词 id 先查成向量，
+<p>llama 系模型（和当下绝大多数 LLM）都是 <strong>decoder-only</strong> 结构。把它拆开，数据从下往上是一条很直的链：词 id 先查成向量，
 再穿过<strong>许多层结构相同的 block</strong>，最后投影回词表，得到每个候选词的分数。一层 block 内部又分两个子层——
 <strong>自注意力</strong>和<strong>前馈网络（FFN）</strong>：</p>
 <div class="vflow">
@@ -632,19 +632,19 @@ rather than a "good enough" approximation. Understand this layer and you see why
 </div>
 
 <h2>decoder-only: what a block computes</h2>
-<p>As lesson 02 noted, llama-family models are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
+<p>llama-family models (like most LLMs today) are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
 token ids are looked up into vectors, pushed through <strong>many identical blocks</strong>, then projected back to the vocabulary to score
 every candidate word. Inside one block there are two sub-layers - <strong>self-attention</strong> and the <strong>feed-forward network (FFN)</strong>:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Embedding</h4>
     <p>Look up each token id into a dense vector (a word embedding); all later math runs on these vectors.</p>
-    <p class="mono">src/llama-graph.cpp · build_inp_embd</p>
+    <p class="mono">src/llama-graph.cpp - build_inp_embd</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Self-attention sub-layer (first half of each block, x N blocks)</h4>
     <p>RMSNorm -&gt; self-attention (with RoPE positions) -&gt; residual add. <strong>This is the only place tokens talk to each other.</strong></p>
-    <p class="mono">ggml_rms_norm · ggml_rope · ggml_soft_max_ext</p>
+    <p class="mono">ggml_rms_norm - ggml_rope - ggml_soft_max_ext</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>FFN sub-layer (second half of the same block)</h4>
@@ -765,7 +765,7 @@ omitting scaling and multi-head details.)</p>
 <h2>Autoregression + why the KV cache is exact</h2>
 <p>Draw "predict the next from what we already have" as a loop and you get the autoregressive cycle:</p>
 <div class="flow">
-  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 … xn</div></div>
+  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 ... xn</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">forward</div><div class="nd">N blocks</div></div>
   <div class="arrow">-&gt;</div>
@@ -882,7 +882,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>Because the weights are quantized</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The causal mask makes old tokens' K/V independent of the future, so caching them is exact - bit for bit equal to recomputing - not approximate.</div></div></div>
   </details>
 </div>
@@ -895,7 +895,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>RMSNorm</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. FFN, norm, and projection all process each token independently; only attention lets tokens see each other.</div></div></div>
   </details>
 </div>
@@ -908,7 +908,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>Because predicting the next token needs only the last position's output; other positions need no output</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Autoregression emits one new token per step, which corresponds to the logits row at the sequence's last position.</div></div></div>
   </details>
 </div>

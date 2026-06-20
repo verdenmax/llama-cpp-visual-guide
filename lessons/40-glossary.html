@@ -679,7 +679,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>the sampler</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The map goes bottom-up: at the bottom is ggml_tensor (the basic data unit); tensors compose a ggml_cgraph, the backend executes the graph, llama_context holds the KV cache and drives decode, and only at the top sits 'one llama_decode'. So the tensor is the foundation - without it, the graph, backend, and context above have nothing to stand on. That is why bottom-up understanding is advised: grasp the tensor before graphs and backends.</div></div></div>
   </details>
 </div>
@@ -692,7 +692,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>src/llama-graph.cpp</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. This is a common 'cannot find the definition' trap: in the public ggml/include/ggml.h, ggml_cgraph is only a forward declaration; the real struct lives in the internal header ggml/src/ggml-impl.h. Many ggml types do this - expose an opaque pointer outward, hide the fields in an internal header, so the implementation can change without breaking the ABI. The glossary's 'source location' column is there to steer you past this trap, straight to the file to read.</div></div></div>
   </details>
 </div>
@@ -705,7 +705,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>ggml_tensor</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The KV cache is one of the runtime states held by llama_context (which also holds compute buffers, sampling state, etc.). So when debugging something to do with the KV cache, the map tells you to look inside llama_context, not to wander into the low-level ggml_tensor or ggml_backend. That is the practical value of the map: every arrow is a clue for 'which layer to chase when something goes wrong'.</div></div></div>
   </details>
 </div>

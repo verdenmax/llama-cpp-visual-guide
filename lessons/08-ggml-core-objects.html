@@ -576,7 +576,7 @@ block held by <span class="mono">ggml_context</span>.</p>
 <p>At ggml's lowest layer there are really just three things buckled together: a <strong>config</strong> (how big a pool you want), the <strong>pool itself</strong>, and the
 <strong>objects</strong> lined up one after another inside it (each wrapping a tensor or a compute graph). First, how they relate:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">config</span><span class="name">ggml_init_params</span></div><div class="ld">mem_size (how big) · mem_buffer (whose memory) · no_alloc (reserve data space?)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">config</span><span class="name">ggml_init_params</span></div><div class="ld">mem_size (how big) - mem_buffer (whose memory) - no_alloc (reserve data space?)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">pool</span><span class="name">ggml_context</span></div><div class="ld">holds one whole arena, tracking the cursor (how far used) and the object list head/tail</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">objects</span><span class="name">ggml_object -&gt; ggml_tensor / ggml_cgraph</span></div><div class="ld">objects laid out one after another, each wrapping a tensor or a graph</div></div>
 </div>
@@ -635,7 +635,7 @@ together. Understand it and you understand "where" all of ggml's data structures
 the arena. That is bump (pointer-bump) allocation: keep a "how far used" cursor, and for each object move the cursor right and place it in situ:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>bump allocation</b>: all objects line up in the same arena, the cursor only moves forward</div>
-  <div class="cells"><span class="lab">arena</span><span class="cell hl">obj1</span><span class="cell hl">obj2</span><span class="cell hl">obj3</span><span class="cell dim">free …</span><span class="lab">cursor -&gt;</span></div>
+  <div class="cells"><span class="lab">arena</span><span class="cell hl">obj1</span><span class="cell hl">obj2</span><span class="cell hl">obj3</span><span class="cell dim">free ...</span><span class="lab">cursor -&gt;</span></div>
   <div class="cells"><span class="lab">list</span><span class="cell dim">begin</span><span class="sep">-&gt;</span><span class="cell">obj1</span><span class="sep">-&gt;</span><span class="cell">obj2</span><span class="sep">-&gt;</span><span class="cell">obj3</span><span class="sep">-&gt;</span><span class="cell dim">end</span><span class="lab">begin/end are head/tail pointers</span></div>
 </div>
 <p>Each object is prefixed with a tiny <span class="mono">ggml_object</span> header (recording its offset, size, and a pointer to the next object); they form a linked list,
@@ -768,7 +768,7 @@ whole block when done. With this model, the next lesson goes to see how the tens
     <li>It stores each tensor to disk</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. ggml_init prepares one arena up front; ggml_new_object bumps a cursor and places in situ. Metadata and data are both carved from this pool, avoiding thousands of mallocs.</div></div></div>
   </details>
 </div>
@@ -781,7 +781,7 @@ whole block when done. With this model, the next lesson goes to see how the tens
     <li>Allocate tensor metadata only, no data buffer - paving the way for "build the graph first, let the backend allocate later"</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Building a graph needs only shapes and dependencies, not real data memory; no_alloc keeps the ctx metadata-only, and the backend allocates data once the graph is built (L10).</div></div></div>
   </details>
 </div>

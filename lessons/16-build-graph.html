@@ -613,7 +613,7 @@ L09 covered the essence of such graphs; this lesson just lets you see that a rea
 <h2>Reusable blocks and graph inputs</h2>
 <p>Underpinning this assembly is a set of <strong>reusable blocks</strong> and <strong>graph inputs</strong> on <span class="mono">llm_graph_context</span>. The blocks are methods like <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>; the graph inputs are the entry points that wire "external data" into the graph.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) · pos (positions) · attn_kv (KV cache)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) - pos (positions) - attn_kv (KV cache)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">blocks</span><span class="name">build_attn / build_ffn / build_norm</span></div><div class="ld">assemble weights + inputs into a subgraph, internally L11 operators</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">product</span><span class="name">llm_graph_result -&gt; ggml_cgraph</span></div><div class="ld">all blocks chained; get_gf() hands out the final graph(L09)</div></div>
 </div>
@@ -701,7 +701,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>one giant if-else</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. build_graph is the stable entry; it calls the virtual build_arch_graph, dispatching to each architecture's src/models/&lt;arch&gt;.cpp, while the real workers build_attn/build_ffn/build_norm are shared blocks on the base llm_graph_context.</div></div></div>
   </details>
 </div>
@@ -714,7 +714,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>a ggml_cgraph (built, not computed), handed to the backend to execute (L10)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. build_* only fills operators' op/src (L09 lazy build); get_gf() hands out a ggml_cgraph; actual node-by-node execution is the L10 backend's job. So the same graph runs on any backend.</div></div></div>
   </details>
 </div>
@@ -727,7 +727,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>just one mul_mat</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A block's skeleton is fixed: build_norm -> build_attn -> residual -> build_norm -> build_ffn -> residual; looped n_layer() times, fetching weights by name per layer (L15).</div></div></div>
   </details>
 </div>

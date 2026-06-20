@@ -627,7 +627,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>stores the model's hyperparameters (layers, dims, etc.)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. imatrix runs the model on calibration text and collect_imatrix accumulates each weight tensor's per-column activation magnitude, telling which columns are 'important'. Fed in at quantize time (--imatrix), at the same bits it keeps precision for important columns and pushes error onto unimportant ones, lowering overall perplexity. It does not compress further and is unrelated to sampling/hyperparameters.</div></div></div>
   </details>
 </div>
@@ -640,7 +640,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>--dry-run (params.dry_run)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. --dry-run (params.dry_run) only computes and prints the final quantized size without really compressing, handy for comparing a few levels' sizes when choosing. --keep-split keeps shards, --imatrix feeds the importance matrix, --output-tensor-type sets per-tensor precision - none merely trial-compute size.</div></div></div>
   </details>
 </div>
@@ -653,7 +653,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>L06/L12 cover tool usage, L29 covers the underlying math</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. L06/L12 is 'understand the principle' (why compression works, how each format's bytes are laid out); L29 is 'operate the tool' (one-command llama-quantize, level trade-offs, imatrix spending the same bits more cleverly via calibration data). They are complementary, not repetitive.</div></div></div>
   </details>
 </div>

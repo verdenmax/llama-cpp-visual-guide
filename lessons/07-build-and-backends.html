@@ -593,9 +593,9 @@ be a mess.</p>
 while "on which hardware, with which instructions" is left to a concrete backend (<span class="mono">ggml-cpu</span>, <span class="mono">ggml-cuda</span>,
 <span class="mono">ggml-metal</span>...). This is exactly the "<strong>decouple 'what to compute' from 'where to compute'</strong>" that lesson 01 kept stressing.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul · softmax · rope ...)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul - softmax - rope ...)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">interface</span><span class="name">ggml-backend</span></div><div class="ld">uniform backend interface: allocate memory, schedule ops, move data between devices</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
 </div>
 <p>The benefit of this layering: <strong>adding a new hardware needs only a new backend; not one line of upper inference code changes</strong>; and which backends you
 pick at build time decides which hardware your binary "knows". So "build" and "backend" are two sides of the same coin - the build system's main job is to compile in
@@ -801,7 +801,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>pip install cuda</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Backends are compile-time CMake switches: configure with -DGGML_CUDA=ON to compile in the CUDA backend, then cmake --build.</div></div></div>
   </details>
 </div>
@@ -814,7 +814,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>It parses GGUF files</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The backend is a uniform "execution layer": the upper layer only describes the graph; each backend implements how to compute it on CPU/GPU.</div></div></div>
   </details>
 </div>
@@ -827,7 +827,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>It sets the thread count</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. -ngl (n-gpu-layers) controls GPU layer offload: put more if VRAM allows, otherwise run CPU/GPU mixed.</div></div></div>
   </details>
 </div>

@@ -396,8 +396,8 @@ opposite - making inference, that one job, extremely <strong>light</strong>:</p>
 </div>
 
 <div class="cols">
-  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch · heavy deps · VRAM-hungry · often needs CUDA · hard to deploy on ordinary devices</p></div>
-  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ · quantization saves VRAM · runs on CPU too · offline · one executable + one .gguf</p></div>
+  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch - heavy deps - VRAM-hungry - often needs CUDA - hard to deploy on ordinary devices</p></div>
+  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ - quantization saves VRAM - runs on CPU too - offline - one executable + one .gguf</p></div>
 </div>
 <p><strong>Why C/C++ specifically, and not Python, Rust, or Go?</strong> An inference engine cares about two things above all - a
 <strong>zero runtime</strong> and being <strong>embeddable</strong> - and C/C++ delivers both. It compiles straight to machine code, with no
@@ -409,11 +409,11 @@ heavy-runtime language. Rust could reach a similar goal, but when the project st
 most mature and the easiest to port to. The official README states the goal up front as "<strong>minimal setup</strong> with top performance", and
 plain C/C++ is the linchpin of that sentence.</p>
 
-<h2>Three pillars: GGUF · quantization · ggml</h2>
+<h2>Three pillars: GGUF - quantization - ggml</h2>
 <p>The reason llama.cpp can "run anywhere from a single file" is three building blocks fitting together.
 Here is a first glance at each; later lessons expand every one of them:</p>
 
-<h3>① GGUF: one file holds the whole model</h3>
+<h3>(1) GGUF: one file holds the whole model</h3>
 <p><span class="inline">GGUF</span> is llama.cpp's <strong>model file format</strong>: it bundles the weights,
 hyper-parameters (layers, dimensions, vocab size), tokenizer, chat template, and more <strong>into a single
 file</strong>. Loading just <span class="mono">mmap</span>s it into memory - no extra config files or Python code.
@@ -427,7 +427,7 @@ copy</strong> of the weights to save memory. The most practical payoff: <strong>
 <span class="inline">.gguf</span>, leave the command-line flags untouched, and you are running a different model. Distribution and management become
 trivially simple.</p>
 
-<h3>② Quantization: shrink the weights, keep the accuracy</h3>
+<h3>(2) Quantization: shrink the weights, keep the accuracy</h3>
 <p>Raw weights are usually 16-bit floats (FP16), so a 7B model needs about 14 GB. <strong>Quantization</strong>
 packs each weight into a lower bit-width (e.g. 4 bits), cutting the size to roughly 1/4 - small enough for an
 ordinary laptop's RAM. The cost is a tiny accuracy loss, but a "<strong>per-block shared scale</strong>"
@@ -436,13 +436,13 @@ design keeps that loss almost unnoticeable:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>FP16 raw weights</b>: each number 16 bits - high precision, but bulky</div>
   <div class="cells">
-    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">…</span>
+    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">...</span>
     <span class="lab">a block of 32 x 16 bit</span>
   </div>
-  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale × (code − 8)</div>
+  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale x (code - 8)</div>
   <div class="cells">
-    <span class="cell scale">scale</span><span class="sep">×</span>
-    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">…</span>
+    <span class="cell scale">scale</span><span class="sep">x</span>
+    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">...</span>
     <span class="lab">~4.5 bit/weight, about 1/4 the size</span>
   </div>
 </div>
@@ -455,16 +455,16 @@ the more critical weights more accurate and push that loss down further.</p>
 <p>Put that compression in a real setting and it is a "<strong>heavy-to-light</strong>" pipeline: the same model shrinks sharply after quantization,
 and paired with one executable it can move from the data center onto your laptop:</p>
 <div class="flow">
-  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ≈ 14 GB</div></div>
+  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ~ 14 GB</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">≈ 4 GB</div></div>
+  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">~ 4 GB</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">.gguf single file</div><div class="nd">+ one executable</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">Run locally</div><div class="nd">laptop / phone / server</div></div>
 </div>
 
-<h3>③ ggml: the low-level tensor engine</h3>
+<h3>(3) ggml: the low-level tensor engine</h3>
 <p><span class="mono">ggml</span> is llama.cpp's <strong>in-house tensor library</strong>: it defines tensors,
 describes one inference run as a <strong>compute graph</strong>, then dispatches the ops in that graph
 (matmul, softmax, rope...) to different <strong>backends</strong> (CPU SIMD, CUDA, Metal, Vulkan...) to actually
@@ -475,13 +475,13 @@ model code runs unchanged across CPU and all kinds of GPUs.</p>
 <p>Stack those three pillars by "who depends on whom" and llama.cpp becomes a clean <strong>four-layer tower</strong>,
 from the hardware at the bottom up to the user-facing tools:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ · examples/</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ - examples/</span></div>
     <div class="ld">User-facing: <span class="mono">llama-cli</span>, the <span class="mono">llama-server</span> HTTP service, the <span class="mono">llama-quantize</span> tool</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">infer</span><span class="name">src/llama-*</span></div>
-    <div class="ld">Model loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld">Model loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld">Tensors · compute graph · ops (matmul/rope/softmax...) · backend scheduling · quant formats</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
+    <div class="ld">Tensors - compute graph - ops (matmul/rope/softmax...) - backend scheduling - quant formats</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
     <div class="ld">Actually runs the ops on hardware (SIMD / GPU kernels)</div></div>
 </div>
 <p>Keep this line in mind when reading the source: the <strong>backend</strong> provides compute, <strong>ggml</strong>
@@ -703,7 +703,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>It makes the model itself smarter</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. By doing inference only, it can use zero-dependency C/C++ + quantization + the ggml engine to shed heavy deps - the root reason it 'runs anywhere from a single file'.</div></div></div>
   </details>
 </div>
@@ -716,7 +716,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>inference layer src/llama-*</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. ggml describes tensors/graphs and schedules ops; the actual hardware math is implemented by each backend.</div></div></div>
   </details>
 </div>
@@ -729,7 +729,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>It retrains the weights on a GPU</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Quantization shares a scale per block, each fitting its own value range; weights tolerate tiny errors and 4-bit levels suffice, so it saves ~4x space with almost no accuracy change. K-quants can optionally pair with an importance matrix (imatrix) that weights the quantization error so important weights are preserved more faithfully - the bit-width is unchanged, the error is weighted rather than bits reallocated.</div></div></div>
   </details>
 </div>
@@ -768,16 +768,16 @@ to run a tool or dig into the source.
 directory actually do</strong>". The table below is the map's legend:</p>
 <table class="t">
   <tr><th>Directory</th><th>Role</th></tr>
-  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors · compute graph · ops · backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
-  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
-  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> ...</td></tr>
+  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors - compute graph - ops - backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
+  <tr><td class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
+  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> - <code>llama-graph</code> - <code>llama-kv-cache</code> - <code>llama-sampler</code> - <code>llama-vocab</code> - <code>llama-chat</code> - <code>llama-grammar</code> - <code>llama-quant</code> ...</td></tr>
   <tr><td class="mono">include/</td><td>The <strong>public C API</strong>: <code>llama.h</code> (the only external contract); <code>llama-cpp.h</code> (a thin C++ wrapper + RAII)</td></tr>
-  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) · <code>sampling</code> (sampler wrapper) · <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
-  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code> (multimodal) · <code>llama-perplexity</code> · <span class="mono">llama-bench</span> ...</td></tr>
+  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) - <code>sampling</code> (sampler wrapper) - <code>chat</code> - <code>log</code> - <code>download</code> - <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
+  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> - <span class="mono">llama-server</span> - <span class="mono">llama-quantize</span> - <code>llama-mtmd-cli</code> (multimodal) - <code>llama-perplexity</code> - <span class="mono">llama-bench</span> ...</td></tr>
   <tr><td class="mono">examples/</td><td>Small example programs: <code>simple</code> demonstrates minimal inference in a couple hundred lines - the best "readable" entry point</td></tr>
   <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong>: the conversion scripts use it to write out a <span class="inline">.gguf</span></td></tr>
   <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>: 3 converters + 1 tokenizer-hash updater; the main one is HuggingFace -&gt; GGUF)</td></tr>
-  <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
+  <tr><td class="mono">models/ - tests/ - docs/ - grammars/ - cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
 </table>
 <p>A simple rule of thumb: <strong>the lower you go, the "harder" it gets</strong> - <span class="mono">ggml/</span> leans toward math and hardware, <span class="mono">src/</span> toward model and session logic, <span class="mono">tools/</span> and <span class="mono">common/</span> toward "for people to use". The only thing ever exposed to the outside, start to finish, is the single public header <span class="mono">include/llama.h</span>.</p>
 
@@ -787,8 +787,8 @@ directory actually do</strong>". The table below is the map's legend:</p>
   <tr><th>This block</th><th>Does exactly one thing</th><th>Roughly lives in</th></tr>
   <tr><td><strong>Engine</strong></td><td>Provide compute: define tensors, organize ops into a compute graph, schedule to the backends that actually run it</td><td class="mono">ggml/</td></tr>
   <tr><td><strong>Inference lib</strong></td><td>Assemble compute into a "session": load weights, build the graph, KV cache, sampling, tokenizing, chat templates</td><td class="mono">src/llama-*</td></tr>
-  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ · common/</td></tr>
-  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ · convert_*.py</td></tr>
+  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ - common/</td></tr>
+  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ - convert_*.py</td></tr>
 </table>
 <p><strong>Why split them so hard?</strong> Because the four jobs <strong>change at completely different rhythms</strong>: backend ops chase new hardware and instruction sets; inference logic evolves with new model architectures; CLI flags and server APIs come and go with user needs; conversion scripts track upstream model formats. Weld them together and touching one means worrying you broke another. Split apart, <strong>each can evolve, be tested, and be reused on its own</strong> - add a new backend to <span class="mono">ggml</span> without touching a line of <span class="mono">src/llama-*</span>; add a new model architecture without reaching down to the low-level ops. That is the most concrete payoff of "<strong>clean boundaries</strong>".</p>
 
@@ -799,26 +799,26 @@ directory actually do</strong>". The table below is the map's legend:</p>
 <h2>How they map onto the "four layers"</h2>
 <p>Mapping those directories back onto the four-layer structure from the previous lesson makes it click:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ · examples/</span></div>
-    <div class="ld"><span class="mono">tools/</span> (cli · server · quantize · mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ - examples/</span></div>
+    <div class="ld"><span class="mono">tools/</span> (cli - server - quantize - mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">inference lib</span><span class="name">src/llama-*</span></div>
-    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> · <span class="mono">gguf.cpp</span> · <span class="mono">ggml-alloc</span> · <span class="mono">ggml-backend</span>): tensors · compute graph · ops · scheduling · the GGUF format</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
-    <div class="ld"><span class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
+    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> - <span class="mono">gguf.cpp</span> - <span class="mono">ggml-alloc</span> - <span class="mono">ggml-backend</span>): tensors - compute graph - ops - scheduling - the GGUF format</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
+    <div class="ld"><span class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
 </div>
-<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span>.</p>
-<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
+<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span>.</p>
+<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
 
 <h2>How a model travels from training to running</h2>
 <p>String the directories together and a model's "life" is really a straight pipeline: prepared in Python on the left, run in C++ on the right, handed over through one file in the middle. Walk it once and you will see which station each directory occupies along the whole chain:</p>
 <div class="flow">
   <div class="node"><div class="nt">HF / PyTorch model</div><div class="nd">safetensors weights</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python · gguf-py</div></div>
+  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python - gguf-py</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file · weights + metadata</div></div>
+  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file - weights + metadata</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">llama_model_load_from_file</div><div class="nd">C++ runtime</div></div>
   <div class="arrow">-&gt;</div>
@@ -841,7 +841,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
 <h2>Want to read the source - where to enter</h2>
 <p>Want to read the source but not sure where to start? Rather than chewing from the first file to the last, <strong>decide your goal first</strong>, then pick the matching entry point and drill down. Three common goals map to three entries:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ · examples/simple</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ - examples/simple</span></div>
     <div class="ld">First get <code>llama-cli</code>/<code>llama-server</code> running, then read the minimal call in <code>examples/simple</code></div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">to grok inference</span><span class="name">src/llama-*</span></div>
     <div class="ld">Follow the main line: <code>llama-model-loader</code> -&gt; <code>llama-graph</code> -&gt; <code>llama-kv-cache</code> -&gt; <code>llama-sampler</code></div></div>
@@ -937,7 +937,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li><code>ggml/include/ggml.h</code></li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The public contract is just include/llama.h (plus the llama-cpp.h C++ wrapper); src and ggml are internal.</div></div></div>
   </details>
 </div>
@@ -950,7 +950,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li><code>src/llama-model-loader</code></li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Conversion happens in Python (gguf-py + convert_*.py) producing .gguf; the C++ runtime only loads already-GGUF files.</div></div></div>
   </details>
 </div>
@@ -960,10 +960,10 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
     <li>Part of ggml, handling the low-level ops</li>
     <li>The inference core: model loading, the compute graph and sampling all live here</li>
     <li>A set of Python conversion scripts</li>
-    <li>The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code></li>
+    <li>The shared 'glue' for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code></li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common factors out the boilerplate the programs repeat (arg, sampler wrapper, logging...) for tools/ to reuse; the real loading/graph/sampling is in src/llama-*, exposed only via include/llama.h.</div></div></div>
   </details>
 </div>
@@ -1002,32 +1002,32 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Tokenize</h4>
     <p>Cut the prompt text into a sequence of token ids - the model understands numeric ids, not characters; the same sentence can split into completely different ids under a different tokenizer.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_tokenize</p>
+    <p class="mono">src/llama-vocab.cpp - llama_tokenize</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Batch</h4>
     <p>Wrap the token sequence into one input (batch); with <span class="mono">llama_batch_get_one</span>, <span class="mono">pos</span>/<span class="mono">seq_id</span> are auto-assigned by <span class="mono">llama_decode</span> (sequential positions, sequence 0) - use <span class="mono">llama_batch_init</span> only when you need multiple sequences / custom positions.</p>
-    <p class="mono">src/llama-batch.cpp · llama_batch_get_one</p>
+    <p class="mono">src/llama-batch.cpp - llama_batch_get_one</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>Decode (forward)</h4>
     <p><span class="mono">llama_decode</span> runs one forward pass; internally it first <strong>builds the compute graph</strong>, then hands it to the <strong>backend</strong> to run on hardware. This is the heaviest step - the next section <strong>zooms into</strong> it.</p>
-    <p class="mono">src/llama-context.cpp · llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
+    <p class="mono">src/llama-context.cpp - llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
   </div></div>
   <div class="step"><div class="num">4</div><div class="sc">
     <h4>Get logits</h4>
     <p>Read out the "score vector for the next token" from this forward pass - one score per token in the vocabulary. At this point <strong>no</strong> token has been chosen yet.</p>
-    <p class="mono">src/llama-context.cpp · llama_get_logits_ith</p>
+    <p class="mono">src/llama-context.cpp - llama_get_logits_ith</p>
   </div></div>
   <div class="step"><div class="num">5</div><div class="sc">
     <h4>Sample</h4>
     <p>The sampler chain picks one token from the logits by some strategy (greedy / top-k / top-p...); a different strategy can pick a different token from the very same logits.</p>
-    <p class="mono">src/llama-sampler.cpp · llama_sampler_sample</p>
+    <p class="mono">src/llama-sampler.cpp - llama_sampler_sample</p>
   </div></div>
   <div class="step"><div class="num">6</div><div class="sc">
     <h4>Check end + detokenize</h4>
     <p>First use <span class="mono">llama_vocab_is_eog</span> to test for an end token; if not, <span class="mono">llama_token_to_piece</span> turns the token back into text.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_vocab_is_eog · llama_token_to_piece</p>
+    <p class="mono">src/llama-vocab.cpp - llama_vocab_is_eog - llama_token_to_piece</p>
   </div></div>
   <div class="step"><div class="num">7</div><div class="sc">
     <h4>Feed-back + loop</h4>
@@ -1066,8 +1066,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 </div>
 <p>Put the two rhythms on one timeline and the difference is obvious at a glance: prefill is <strong>one wide</strong> parallel block, decode is <strong>cell-by-cell</strong> steps appended after it.</p>
 <div class="timeline">
-  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1…t5) computed in parallel at once, filling the KV cache</span></div>
-  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8…</span></div>
+  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1...t5) computed in parallel at once, filling the KV cache</span></div>
+  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8...</span></div>
 </div>
 <p><strong>Why can prefill run in parallel while decode must be serial?</strong> It comes down to "what depends on what". Prefill faces an <strong>already fully given</strong> prompt where every token is known; their K/V <strong>do not depend on each other</strong>, so they can all be computed in parallel in one shot and fill the cache at once. Decode is the opposite: to compute the "<strong>next word</strong>", the precondition is that "<strong>the previous word has already been written</strong>" - the input to step n+1 is exactly the token that step n's sampling just chose. This "<strong>each step depends on the previous step's output</strong>" chain is inherently <strong>impossible to parallelize</strong>; it can only inch forward one step at a time. That is one root reason a single conversation's generation speed has a ceiling: even if the hardware is idle, decode still has to queue up and go cell by cell.</p>
 <p class="acc-intro">Prefill computes the whole prompt <strong>in parallel</strong> in one pass; afterwards each decode step computes <strong>just 1 new token</strong>, so "keep writing" is cheap.</p>
@@ -1078,8 +1078,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 <div class="cellgroup">
   <div class="cg-cap"><b>KV cache</b>: each generated token appends its K/V to the cache; the next step reuses them directly instead of recomputing history</div>
   <div class="cells"><span class="lab">after prefill</span><span class="cell">K1</span><span class="cell">K2</span><span class="cell">K3</span><span class="cell">K4</span><span class="cell">K5</span></div>
-  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1…K5 (reuse)</span><span class="cell hl">+K6</span></div>
-  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1…K6 (reuse)</span><span class="cell hl">+K7</span></div>
+  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1...K5 (reuse)</span><span class="cell hl">+K6</span></div>
+  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1...K6 (reuse)</span><span class="cell hl">+K7</span></div>
 </div>
 <p>Each row adds only <strong>one highlighted new cell</strong> (<span class="mono">+K6</span>, <span class="mono">+K7</span>); everything greyed out before it is "<strong>reused, not recomputed</strong>". Without this cache, generating the n-th token would recompute all n-1 before it; with it, the <strong>added work</strong> per step is essentially constant - that is why an autoregressive loop can keep running cheaply on local hardware.</p>
 <p><strong>So what exactly are K/V, and why can they be cached?</strong> In the attention mechanism, every token gets three things computed: a Query (the vector it uses to "ask"), a Key (the "label" it is matched against), and a Value (the "content" it carries). To compute "who should the current token attend to", you take its Query and compare it against <strong>the Keys of all past tokens</strong>, then weight-sum the corresponding <strong>Values</strong> by the resulting weights. Here is the key point: <strong>a past token's K and V never change once computed</strong> (they depend only on that token itself and its position), so they can simply be <strong>stored and reused</strong> - which is exactly what the KV cache holds. The cost is direct too: the cache must store one K and one V for <strong>every layer and every past token</strong>, so its memory footprint <strong>grows linearly with context length</strong>; push the context to tens of thousands of tokens and the KV cache eats a sizable chunk of memory - one reason a "context window" always has an upper bound and long context is especially hardware-hungry (allocation, writing and reuse all live in <span class="mono">src/llama-kv-cache.cpp</span>).</p>
@@ -1122,7 +1122,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <summary><span class="badge-num">2</span> What exactly does the KV cache save? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
     <p><strong>It saves "recomputing the past":</strong> without it, every new token re-runs all previous tokens -&gt; the <strong>recompute cost</strong> is ~<span class="mono">O(n^2)</span>; with it each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; <strong>recompute drops to</strong> <span class="mono">O(n)</span>.</p>
-    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total work for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
+    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total <strong>recompute</strong> for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
     <p><strong>Don't overstate it:</strong> attention's <strong>scan</strong> over history is still <span class="mono">O(n)</span> per step (it must look at all past tokens); what is saved is <strong>recomputing past tokens' K/V</strong>, not turning attention itself into a constant.</p>
     <p><strong>Why long context is so hardware-hungry:</strong> the KV cache footprint is roughly proportional to "<strong>layers x context length x the K/V width per layer</strong>" - layers and width are fixed by the model, so the only thing that grows is context length. Push the context from a few thousand to tens of thousands and the KV cache grows in proportion, often the biggest block of memory after the weights themselves. That is why running long context locally needs more than enough memory to "<strong>fit the weights</strong>" - you must reserve extra room for the KV cache; to save it, you can only trade among a <strong>shorter context</strong>, <strong>cheaper cache quantization</strong>, or <strong>attention that shares K/V</strong>.</p>
     <p><strong>Source:</strong> allocation, writing and reuse of the cache live in <span class="mono">src/llama-kv-cache.cpp</span>; the longer the context, the bigger this footprint - and the memory you must reserve for local inference.</p>
@@ -1168,7 +1168,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>The next token's logits (a score vector)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. decode only yields logits; picking a token is llama_sampler_sample's job, turning it into text is llama_token_to_piece's.</div></div></div>
   </details>
 </div>
@@ -1181,7 +1181,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>It reloads and quantizes the model weights</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Inside decode, llm_graph_* in llama-graph.cpp (via build_graph) describes the step as a compute graph, ggml-backend schedules it on hardware, then llama_get_logits_ith reads out the logits.</div></div></div>
   </details>
 </div>
@@ -1194,7 +1194,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
     <li>Because the prompt is short</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. After prefill fills the KV cache, each decode step only computes the new token's Q and reuses cached K/V, skipping recomputation over history.</div></div></div>
   </details>
 </div>
@@ -1225,19 +1225,19 @@ rather than a "good enough" approximation. Understand this layer and you see why
 </div>
 
 <h2>decoder-only: what a block computes</h2>
-<p>As lesson 02 noted, llama-family models are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
+<p>llama-family models (like most LLMs today) are <strong>decoder-only</strong>. Unpacked, the data flows bottom-up in a straight chain:
 token ids are looked up into vectors, pushed through <strong>many identical blocks</strong>, then projected back to the vocabulary to score
 every candidate word. Inside one block there are two sub-layers - <strong>self-attention</strong> and the <strong>feed-forward network (FFN)</strong>:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Embedding</h4>
     <p>Look up each token id into a dense vector (a word embedding); all later math runs on these vectors.</p>
-    <p class="mono">src/llama-graph.cpp · build_inp_embd</p>
+    <p class="mono">src/llama-graph.cpp - build_inp_embd</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Self-attention sub-layer (first half of each block, x N blocks)</h4>
     <p>RMSNorm -&gt; self-attention (with RoPE positions) -&gt; residual add. <strong>This is the only place tokens talk to each other.</strong></p>
-    <p class="mono">ggml_rms_norm · ggml_rope · ggml_soft_max_ext</p>
+    <p class="mono">ggml_rms_norm - ggml_rope - ggml_soft_max_ext</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>FFN sub-layer (second half of the same block)</h4>
@@ -1358,7 +1358,7 @@ omitting scaling and multi-head details.)</p>
 <h2>Autoregression + why the KV cache is exact</h2>
 <p>Draw "predict the next from what we already have" as a loop and you get the autoregressive cycle:</p>
 <div class="flow">
-  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 … xn</div></div>
+  <div class="node"><div class="nt">existing tokens</div><div class="nd">x1 ... xn</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">forward</div><div class="nd">N blocks</div></div>
   <div class="arrow">-&gt;</div>
@@ -1476,7 +1476,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>Because the weights are quantized</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The causal mask makes old tokens' K/V independent of the future, so caching them is exact - bit for bit equal to recomputing - not approximate.</div></div></div>
   </details>
 </div>
@@ -1489,7 +1489,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>RMSNorm</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. FFN, norm, and projection all process each token independently; only attention lets tokens see each other.</div></div></div>
   </details>
 </div>
@@ -1502,7 +1502,7 @@ engineering must both <strong>save compute with it</strong> and <strong>shrink i
     <li>Because predicting the next token needs only the last position's output; other positions need no output</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Autoregression emits one new token per step, which corresponds to the logits row at the sequence's last position.</div></div></div>
   </details>
 </div>
@@ -1777,7 +1777,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>Copies out a new block of memory</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Transpose is a metadata-only view: swap ne/nb, point view_src back to the original, and data is untouched - hence zero-copy.</div></div></div>
   </details>
 </div>
@@ -1790,7 +1790,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>ne[3]</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. ggml is row-major: nb[0]=ggml_type_size(type) is smallest and ne[0] is laid out contiguously - the opposite of numpy/PyTorch.</div></div></div>
   </details>
 </div>
@@ -1803,7 +1803,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>Because its data is empty</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A quantized type packs a whole block (e.g. 32 weights) into fixed bytes; the ne[0]/ggml_blck_size(type) in the nb formula is exactly 'blocks per row'.</div></div></div>
   </details>
 </div>
@@ -1869,8 +1869,8 @@ values well, so the error is big.</p>
 A block's dynamic range is small, the scale fits tightly, and the approximation is naturally more accurate. This is "divide and conquer" applied to quantization:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>Block quantization</b>: 32 float weights -&gt; 1 scale (half-precision) + 32 low-bit integers</div>
-  <div class="cells"><span class="lab">original</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">…</span><span class="cell">-0.15</span><span class="lab">32 floats</span></div>
-  <div class="cells"><span class="lab">quantized</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">…</span><span class="cell q">5</span><span class="lab">1 scale + 32 4-bit</span></div>
+  <div class="cells"><span class="lab">original</span><span class="cell">0.12</span><span class="cell">-0.08</span><span class="cell">0.21</span><span class="cell dim">...</span><span class="cell">-0.15</span><span class="lab">32 floats</span></div>
+  <div class="cells"><span class="lab">quantized</span><span class="cell scale">d = scale</span><span class="cell q">9</span><span class="cell q">7</span><span class="cell q">11</span><span class="cell q">...</span><span class="cell q">5</span><span class="lab">1 scale + 32 4-bit</span></div>
 </div>
 <p>Another way to see "why a small in-block range is more accurate": quantization approximates continuous values with a few fixed levels, and <strong>the narrower
 the range those levels must cover, the smaller the gap between levels and the finer the quantization</strong>. A whole matrix holding both 0.001 and 5.0 forced into 16
@@ -1971,7 +1971,7 @@ deliberately kept at higher bit-widths - exactly the "mixed precision" the K-qua
 </div>
 <p>How do you measure "how much quality quantization cost"? The most common metric is <strong>perplexity</strong>: take a standard text and see how well the model
 predicts the "next word" - lower is better. A common community exercise is to run perplexity across a model's quant tiers and tabulate them - you will see Q8_0 nearly
-matching fp16, Q4_K_M only a hair higher, and Q2_K clearly higher. The <span class="mono">llama-perplexity</span> tool does exactly this, and Part 7 covers using it to
+matching fp16, Q4_K_M only a hair higher, and Q2_K clearly higher. The <span class="mono">llama-perplexity</span> tool does exactly this, and Part 5 (L30) covers using it to
 "grade" quantization. A rule of thumb: <strong>pick one tier higher whenever memory allows</strong>, for safer quality.</p>
 <p>Finally, a boundary to clarify: quantization only compresses the weights' <strong>representation</strong> (how many bits each number uses); it <strong>does not change
 the model's structure</strong> - layer count, dimensions, parameter count all stay. That makes it a different path from <strong>pruning</strong> (removing some
@@ -2058,7 +2058,7 @@ gets concrete about this. Overall, the mainstream Q4_K / Q8_0 are well supported
     <li>Each block has its own scale, so its dynamic range is smaller and the approximation error is smaller</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. One global scale cannot serve large and small values at once; per-block scales fit local ranges tightly, so error shrinks.</div></div></div>
   </details>
 </div>
@@ -2071,7 +2071,7 @@ gets concrete about this. Overall, the mainstream Q4_K / Q8_0 are well supported
     <li>8 bit</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. (2 + 16) bytes x 8 / 32 = 4.5 bit; the extra 0.5 bit is the per-block scale amortized over the block.</div></div></div>
   </details>
 </div>
@@ -2084,7 +2084,7 @@ gets concrete about this. Overall, the mainstream Q4_K / Q8_0 are well supported
     <li>It increases the model's memory footprint</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. imatrix changes how error is distributed, spending precision on important weights; bit-width is set by the quant tier (e.g. Q4_K), independent of imatrix.</div></div></div>
   </details>
 </div>
@@ -2120,9 +2120,9 @@ be a mess.</p>
 while "on which hardware, with which instructions" is left to a concrete backend (<span class="mono">ggml-cpu</span>, <span class="mono">ggml-cuda</span>,
 <span class="mono">ggml-metal</span>...). This is exactly the "<strong>decouple 'what to compute' from 'where to compute'</strong>" that lesson 01 kept stressing.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul · softmax · rope ...)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">upper</span><span class="name">inference logic / compute graph</span></div><div class="ld">lesson 03's "graph building": only describes what to compute (matmul - softmax - rope ...)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">interface</span><span class="name">ggml-backend</span></div><div class="ld">uniform backend interface: allocate memory, schedule ops, move data between devices</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan …</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">impl</span><span class="name">ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span></div><div class="ld">one implementation per hardware, actually computing the ops</div></div>
 </div>
 <p>The benefit of this layering: <strong>adding a new hardware needs only a new backend; not one line of upper inference code changes</strong>; and which backends you
 pick at build time decides which hardware your binary "knows". So "build" and "backend" are two sides of the same coin - the build system's main job is to compile in
@@ -2329,7 +2329,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>pip install cuda</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Backends are compile-time CMake switches: configure with -DGGML_CUDA=ON to compile in the CUDA backend, then cmake --build.</div></div></div>
   </details>
 </div>
@@ -2342,7 +2342,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>It parses GGUF files</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The backend is a uniform "execution layer": the upper layer only describes the graph; each backend implements how to compute it on CPU/GPU.</div></div></div>
   </details>
 </div>
@@ -2355,7 +2355,7 @@ graph, memory pool, and operators - the "machine parts" - actually turn. Part 2 
     <li>It sets the thread count</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. -ngl (n-gpu-layers) controls GPU layer offload: put more if VRAM allows, otherwise run CPU/GPU mixed.</div></div></div>
   </details>
 </div>
@@ -2396,7 +2396,7 @@ block held by <span class="mono">ggml_context</span>.</p>
 <p>At ggml's lowest layer there are really just three things buckled together: a <strong>config</strong> (how big a pool you want), the <strong>pool itself</strong>, and the
 <strong>objects</strong> lined up one after another inside it (each wrapping a tensor or a compute graph). First, how they relate:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">config</span><span class="name">ggml_init_params</span></div><div class="ld">mem_size (how big) · mem_buffer (whose memory) · no_alloc (reserve data space?)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">config</span><span class="name">ggml_init_params</span></div><div class="ld">mem_size (how big) - mem_buffer (whose memory) - no_alloc (reserve data space?)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">pool</span><span class="name">ggml_context</span></div><div class="ld">holds one whole arena, tracking the cursor (how far used) and the object list head/tail</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">objects</span><span class="name">ggml_object -&gt; ggml_tensor / ggml_cgraph</span></div><div class="ld">objects laid out one after another, each wrapping a tensor or a graph</div></div>
 </div>
@@ -2455,7 +2455,7 @@ together. Understand it and you understand "where" all of ggml's data structures
 the arena. That is bump (pointer-bump) allocation: keep a "how far used" cursor, and for each object move the cursor right and place it in situ:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>bump allocation</b>: all objects line up in the same arena, the cursor only moves forward</div>
-  <div class="cells"><span class="lab">arena</span><span class="cell hl">obj1</span><span class="cell hl">obj2</span><span class="cell hl">obj3</span><span class="cell dim">free …</span><span class="lab">cursor -&gt;</span></div>
+  <div class="cells"><span class="lab">arena</span><span class="cell hl">obj1</span><span class="cell hl">obj2</span><span class="cell hl">obj3</span><span class="cell dim">free ...</span><span class="lab">cursor -&gt;</span></div>
   <div class="cells"><span class="lab">list</span><span class="cell dim">begin</span><span class="sep">-&gt;</span><span class="cell">obj1</span><span class="sep">-&gt;</span><span class="cell">obj2</span><span class="sep">-&gt;</span><span class="cell">obj3</span><span class="sep">-&gt;</span><span class="cell dim">end</span><span class="lab">begin/end are head/tail pointers</span></div>
 </div>
 <p>Each object is prefixed with a tiny <span class="mono">ggml_object</span> header (recording its offset, size, and a pointer to the next object); they form a linked list,
@@ -2589,7 +2589,7 @@ whole block when done. With this model, the next lesson goes to see how the tens
     <li>It stores each tensor to disk</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. ggml_init prepares one arena up front; ggml_new_object bumps a cursor and places in situ. Metadata and data are both carved from this pool, avoiding thousands of mallocs.</div></div></div>
   </details>
 </div>
@@ -2602,7 +2602,7 @@ whole block when done. With this model, the next lesson goes to see how the tens
     <li>Allocate tensor metadata only, no data buffer - paving the way for "build the graph first, let the backend allocate later"</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Building a graph needs only shapes and dependencies, not real data memory; no_alloc keeps the ctx metadata-only, and the backend allocates data once the graph is built (L10).</div></div></div>
   </details>
 </div>
@@ -2837,7 +2837,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>It modifies the contents of a</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. ggml builds graphs lazily: an operator function only builds the result tensor and fills op/src back-pointers; the real math waits for execution (next lesson).</div></div></div>
   </details>
 </div>
@@ -2850,7 +2850,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>nodes are leaves, leafs are branches</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The criterion is whether it has an origin: op==NONE means a leaf (input/constant, used directly); having an op means a node (computed in dependency order).</div></div></div>
   </details>
 </div>
@@ -2863,7 +2863,7 @@ echoes the "family tree" metaphor: the same person is a junior in their own bran
     <li>It immediately executes the whole graph</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. "Recurse to collect dependencies first, then add itself" naturally yields topological order: earlier never depends on later, so execution just goes front to back.</div></div></div>
   </details>
 </div>
@@ -2945,7 +2945,7 @@ planning would be impossible.</p>
 </div>
 <p>A common misconception in passing: memory reuse does <strong>not</strong> affect correctness. Some worry "giving A's plot to C - won't it corrupt A's data?" - no, because reuse only happens after A
 is <strong>certainly needed by no one</strong>. The allocator strictly follows lifetimes: as long as anyone might still read A, A's memory is never requisitioned. So memory reuse is a <strong>completely
-lossless</strong> optimization - it saves space without touching results, the same thinking as L06's distinction "quantization is lossy, the KV cache is lossless".</p>
+lossless</strong> optimization - it saves space without touching results, the same thinking as the earlier distinction "quantization is lossy (L06), the KV cache is lossless (L04)".</p>
 
 <h2>Computing nodes: the backend steps in</h2>
 <p>With memory planned, we finally reach "actually compute". This step is carried out by a <strong>backend</strong> (the CPU/CUDA/Metal from L07). The simplest case uses one backend:</p>
@@ -3074,7 +3074,7 @@ it always runs - just faster the more layers go on GPU.</p>
     <li>Because it uses quantization</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Only the complete graph lets it compute where each tensor is last used; past that it reclaims immediately, and best-fit reuse + merging free blocks crushes the peak.</div></div></div>
   </details>
 </div>
@@ -3087,7 +3087,7 @@ it always runs - just faster the more layers go on GPU.</p>
     <li>Parsing GGUF files</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. sched is the "general contractor": split, assign operators by device, and auto-insert copies at CPU/GPU boundaries - the mechanism behind -ngl putting some layers on GPU.</div></div></div>
   </details>
 </div>
@@ -3100,7 +3100,7 @@ it always runs - just faster the more layers go on GPU.</p>
     <li>A random half is computed</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Leafs are ready-made data like weights/inputs, only read at execution; the engine computes only the nodes, front to back.</div></div></div>
   </details>
 </div>
@@ -3205,7 +3205,7 @@ opening - and at its core is this one mul_mat shape rule.</p>
 <p>Besides matmul, three operators recur in the attention layer. Stringing L04's attention with ggml operators gives roughly this pipeline:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>rms_norm(x)</h4><p>normalize the input first, stabilizing the numeric scale (L04's "training stability" rests on it).</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, ·)</h4><p>project out the Query / Key / Value tensors.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, x)</h4><p>project out the Query / Key / Value tensors.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>rope(q, k)</h4><p>inject position info into Q, K (L04's RoPE rotation).</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>soft_max_ext(scores, mask)</h4><p>compute attention scores, apply the causal mask, normalize to weights (L04's -inf mask is here).</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>mul_mat(V, weights)</h4><p>weight-sum the Values by the weights to get the attention output.</p></div></div>
@@ -3332,7 +3332,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>b must be square</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. mul_mat requires a->ne[0]==b->ne[0]; result ne={a.ne[1], b.ne[1], ...}. Since ggml is row-major with ne[0] innermost, this reads reversed from math's rows x columns.</div></div></div>
   </details>
 </div>
@@ -3345,7 +3345,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>Normalizes the input</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. soft_max_ext fuses softmax(a*scale + mask): scale is usually 1/sqrt(d) to keep scores in range, mask adds the causal mask (future at -inf, weight 0 after softmax).</div></div></div>
   </details>
 </div>
@@ -3358,7 +3358,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>Frontend web page and backend server</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The build side (ggml.c) only defines the shape and fills op/src, no compute; the compute side (each backend's ggml_compute_forward_*) actually computes. They meet via enum ggml_op + switch(op).</div></div></div>
   </details>
 </div>
@@ -3371,7 +3371,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>It recompiles each time</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The operator number is recorded in tensor->op at build; at execution the backend uses switch(op) to jump to the implementation. Adding an operator = add an enum value + write a forward wired into the switch.</div></div></div>
   </details>
 </div>
@@ -3633,7 +3633,7 @@ that much more solid.</p>
     <li>16 bytes of scale + 2 bytes of values</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. block_q4_0 = {ggml_half d; uint8_t qs[16]}: a 2-byte scale + 16 bytes holding 32 4-bit values (two nibbles per byte), 18 bytes total, 4.5 bits per weight on average.</div></div></div>
   </details>
 </div>
@@ -3646,7 +3646,7 @@ that much more solid.</p>
     <li>It actually uses more bits</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. q4_K has a two-level scale: super-block d/dmin set the broad range, 8 sub-blocks each carry a 6-bit scale/min for local fine-tuning, plus dmin's offset - the same 4.5 bits but more accurate than q4_0's single scale.</div></div></div>
   </details>
 </div>
@@ -3659,7 +3659,7 @@ that much more solid.</p>
     <li>A ggml_type_traits table + to_float/from_float_ref function pointers; operators dequantize per traits, no need to rewrite per type</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. ggml_type_traits registers one row per type (blck_size, type_size, to_float, from_float_ref, ...); operators look it up and call the function pointers, so a new type needs only one row + its dequant/quant functions.</div></div></div>
   </details>
 </div>
@@ -3890,7 +3890,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>only a version number</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Metadata is a run of typed (gguf_type) key-value pairs that self-describe architecture, hyperparameters, vocab, chat template, etc.; the loader reads the KVs to build the graph, with no external config or guessing.</div></div></div>
   </details>
 </div>
@@ -3903,7 +3903,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>it encrypts the weight data</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. mmap maps the file read-only into the address space, with tensor data pointers pointing straight at disk pages loaded only when touched; it avoids reading and copying several GB of weights wholesale - that is the 'instant load'.</div></div></div>
   </details>
 </div>
@@ -3916,7 +3916,7 @@ weights wholesale onto GPU VRAM) may not use mmap either. But for the common cas
     <li>there is no magic, just weights directly</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. GGUF_MAGIC = "GGUF" (the first 4 bytes), GGUF_VERSION = 3 (see ggml/include/gguf.h); the loader checks them immediately and refuses or errors if they do not match.</div></div></div>
   </details>
 </div>
@@ -4108,7 +4108,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>compile GPU kernels</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The loader computes nothing; it organizes bytes into a usable model: gguf_init_from_file reads the header, weights_map registers each tensor by name, and with use_mmap the data pointers point into the file mapping (L13 zero-copy).</div></div></div>
   </details>
 </div>
@@ -4121,7 +4121,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>random hash names</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Split filenames are built by llama_split_path as "%s-%05d-of-%05d.gguf"; split.count records the total; the loader opens each by number and merges into one weights_map.</div></div></div>
   </details>
 </div>
@@ -4134,7 +4134,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>by reading an external config.json</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Hyperparameters live in the GGUF metadata KVs (L13 self-description); the loader's templated get_key maps a key to a specific field, with no external config or guessing.</div></div></div>
   </details>
 </div>
@@ -4322,7 +4322,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>general.file_type</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The loader reads the general.architecture string and looks it up in LLM_ARCH_NAMES to get an enum like LLM_ARCH_LLAMA; that enum decides the KV/tensor conventions and graph builder used (L16).</div></div></div>
   </details>
 </div>
@@ -4335,7 +4335,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>it is a typo; it should be a field</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. In modern architectures per-layer attention configs can differ (GQA gives fewer KV than Q heads; hybrids differ by layer), so head counts are stored per layer in n_head_arr, and n_head(il) is an accessor method (not a field) fetching by layer.</div></div></div>
   </details>
 </div>
@@ -4348,7 +4348,7 @@ one step short: actually assembling these parts by the blueprint into a runnable
     <li>by random matching</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Tensor names follow LLM_TENSOR_NAMES templates (blk.%d filled with the layer index), built by LLM_TN's tn(); graph-building fetches weights from weights_map by name. A name is a stable contract, robust across tools and splits.</div></div></div>
   </details>
 </div>
@@ -4442,7 +4442,7 @@ L09 covered the essence of such graphs; this lesson just lets you see that a rea
 <h2>Reusable blocks and graph inputs</h2>
 <p>Underpinning this assembly is a set of <strong>reusable blocks</strong> and <strong>graph inputs</strong> on <span class="mono">llm_graph_context</span>. The blocks are methods like <span class="mono">build_attn</span>/<span class="mono">build_ffn</span>/<span class="mono">build_norm</span>; the graph inputs are the entry points that wire "external data" into the graph.</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) · pos (positions) · attn_kv (KV cache)</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">graph inputs</span><span class="name">llm_graph_input_*</span></div><div class="ld">wire external data into the graph: embd (token vectors) - pos (positions) - attn_kv (KV cache)</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">blocks</span><span class="name">build_attn / build_ffn / build_norm</span></div><div class="ld">assemble weights + inputs into a subgraph, internally L11 operators</div></div>
   <div class="layer l-core"><div class="lh"><span class="badge">product</span><span class="name">llm_graph_result -&gt; ggml_cgraph</span></div><div class="ld">all blocks chained; get_gf() hands out the final graph(L09)</div></div>
 </div>
@@ -4531,7 +4531,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>one giant if-else</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. build_graph is the stable entry; it calls the virtual build_arch_graph, dispatching to each architecture's src/models/&lt;arch&gt;.cpp, while the real workers build_attn/build_ffn/build_norm are shared blocks on the base llm_graph_context.</div></div></div>
   </details>
 </div>
@@ -4544,7 +4544,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>a ggml_cgraph (built, not computed), handed to the backend to execute (L10)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. build_* only fills operators' op/src (L09 lazy build); get_gf() hands out a ggml_cgraph; actual node-by-node execution is the L10 backend's job. So the same graph runs on any backend.</div></div></div>
   </details>
 </div>
@@ -4557,7 +4557,7 @@ switching backends or adding new hardware needs <strong>no change to graph-build
     <li>just one mul_mat</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A block's skeleton is fixed: build_norm -> build_attn -> residual -> build_norm -> build_ffn -> residual; looped n_layer() times, fetching weights by name per layer (L15).</div></div></div>
   </details>
 </div>
@@ -4587,8 +4587,8 @@ the KV cache (memory), the backend scheduler (sched), and output buffers; <span 
 <h2>model vs context: read-only knowledge vs stateful session</h2>
 <p>This is the cut to grasp first: <strong>weights are read-only knowledge, a session is stateful progress</strong>, and the two are deliberately split into two objects.</p>
 <div class="cols">
-  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights · hyperparameters · vocab · <strong>read-only</strong> · one is enough · <strong>shareable by many contexts</strong></p></div>
-  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits · <strong>stateful</strong> · <strong>one per session</strong> · remembers where this conversation is</p></div>
+  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights - hyperparameters - vocab - <strong>read-only</strong> - one is enough - <strong>shareable by many contexts</strong></p></div>
+  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits - <strong>stateful</strong> - <strong>one per session</strong> - remembers where this conversation is</p></div>
 </div>
 <p>Why split this way? Because weights are several GB, loaded once and unchanging, and ought to be <strong>shared</strong>; while "conversation progress" (KV cache, current position) is <strong>per-session state</strong> that must be stored separately. Splitting unchanging knowledge from changing state, one copy of weights can hold up many concurrent sessions - the basis of multi-user serving.</p>
 <p>An analogy: the model is like a dictionary (everyone consults it, its content fixed), the context like each person's scratch paper (each writes their own, none interfering). You would never print a separate dictionary per reader, but everyone needs their own scratch paper. llama.cpp's cut is exactly between "shared knowledge" and "private state".</p>
@@ -4758,7 +4758,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>model is stateful, context is read-only</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weights are read-only and several GB, so sharing one copy across sessions saves the most memory; KV cache and current position are per-session state stored separately. So model is read-only/shareable, context is stateful/per-session.</div></div></div>
   </details>
 </div>
@@ -4771,7 +4771,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>loads the model</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_decode eats a batch, internally splitting ubatch (L18) -> build_graph (L16) -> sched execute (L10) -> update KV (L19) -> write logits to the output buffer. Sampling is the next step's job (L21).</div></div></div>
   </details>
 </div>
@@ -4784,7 +4784,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>llama_get_model</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_get_logits_ith(ctx, i) reads the logits of the i-th flagged-output position - an n_vocab-dimensional vector handed to sampling (L21) to pick a word.</div></div></div>
   </details>
 </div>
@@ -4965,7 +4965,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>stores the already-computed logits</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. logits is a switch array (source comment will rename to output): only flagged positions do the output projection (a hidden-vector -> vocab-size matmul). Prefill often flags only the last, saving many useless projections.</div></div></div>
   </details>
 </div>
@@ -4978,7 +4978,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>for encryption</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. n_batch is the logical batch (how much you can submit at once), n_ubatch the physical batch (how much hardware efficiently computes at once). llama_batch_allocr splits the big logical batch into several &lt;= n_ubatch physical batches fed one by one, the two decoupled.</div></div></div>
   </details>
 </div>
@@ -4991,7 +4991,7 @@ alloc.<span class="fn">init</span>(batch)                       <span class="cm"
     <li>the token's id</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. seq_id marks which sequence(s) each token belongs to. One batch/context can hold several sequences at once, sharing weights and scheduling, each with its own KV (distinguished by seq_id, L19).</div></div></div>
   </details>
 </div>
@@ -5181,7 +5181,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>caches logits</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Without a cache each step recomputes all prior tokens' K/V (quadratic in length); with one, each step computes only the new token and reads historical K/V (linear). L04 proves they are numerically equivalent but an order of magnitude faster - the root of decode's speed.</div></div></div>
   </details>
 </div>
@@ -5194,7 +5194,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>this position's pos, which seq_ids it belongs to (and the corresponding K/V)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. llama_kv_cells manages the grid of cells; each records pos (fed to rope/causal mask) and its seq_id (for multi-sequence); head is the rolling write pointer. pos+seq_id are a cell's core identity.</div></div></div>
   </details>
 </div>
@@ -5207,7 +5207,7 @@ mem = <span class="fn">llama_get_memory</span>(ctx)
     <li>llama_decode</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The public sequence-op API is llama_memory_seq_* (seq_rm/seq_cp/seq_add etc.), via llama_get_memory; the old llama_kv_self_* names are renamed and removed, so beware old tutorials.</div></div></div>
   </details>
 </div>
@@ -5410,7 +5410,7 @@ text = <span class="st">""</span>
     <li>cuts a text string into a list of token ids (to feed the model)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. tokenize is the encoding direction: text -> a list of token ids, fed into the model. The reverse (id -> text) is done by token_to_piece/detokenize.</div></div></div>
   </details>
 </div>
@@ -5423,7 +5423,7 @@ text = <span class="st">""</span>
     <li>lets any UTF-8 char be encoded (split into byte tokens), avoiding out-of-vocabulary OOV</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A char absent from the vocab is split into UTF-8 bytes, one &lt;0xXX&gt; token per byte (256 of them, guaranteed to cover), so even rare chars encode losslessly, abolishing OOV; the cost is rare chars take several tokens.</div></div></div>
   </details>
 </div>
@@ -5436,7 +5436,7 @@ text = <span class="st">""</span>
     <li>llama_vocab_n_tokens (old llama_n_vocab is deprecated)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Vocab size is a vocab property; the authoritative API is llama_vocab_n_tokens; the old llama_n_vocab is marked DEPRECATED. n_ctx/n_embd are different quantities.</div></div></div>
   </details>
 </div>
@@ -5642,7 +5642,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>a random one</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. greedy always takes the max-logit candidate (argmax); same input always same output. dist is the one that draws randomly by probability. Use greedy for reproducibility/rigor, dist for diversity.</div></div></div>
   </details>
 </div>
@@ -5655,7 +5655,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>all with probability greater than p</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. top_p accumulates probability until reaching p, so the candidate count adapts to the distribution (few when peaked, many when flat); top_k is the fixed-count one. They often pair: top_k chops the tail, top_p closes adaptively.</div></div></div>
   </details>
 </div>
@@ -5668,7 +5668,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>it runs faster</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The chain turns the strategy into data: each sampler is an independent part with its own state, order is adjustable, add/remove is free; users tune parameters to assemble any strategy without touching the engine. Speed/memory are not its design goal.</div></div></div>
   </details>
 </div>
@@ -5705,7 +5705,7 @@ M4a let the model compute, L20 cut text into tokens, L21 taught it to pick the n
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
 </div>
-<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure, but rather a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
+<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure - it eats a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
 <p>The assembled string, besides each message's body, inserts a pile of <strong>special markers</strong>: marking where each message starts, ends, and who spoke. These markers correspond to special tokens in the vocab (L20), and the model relies on them to recognize "it is the assistant's turn now", "the user is done with this turn".</p>
 <p>The order is: message list -&gt; apply the template into a string -&gt; hand to the vocab to tokenize -&gt; into the model. The template handles "structure to text", tokenize handles "text to tokens" - two relays, neither dispensable. This is also why this lesson follows the vocab (L20) closely - its product is exactly tokenize's input.</p>
 <div class="card detail">
@@ -5872,7 +5872,7 @@ dest = <span class="st">""</span>
     <li>score the reply</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The template assembles the system/user/assistant message list into a string per the model's training format (inserting special markers), then hands it to the vocab to tokenize. Cutting tokens is L20, scoring is L21.</div></div></div>
   </details>
 </div>
@@ -5885,7 +5885,7 @@ dest = <span class="st">""</span>
     <li>[INST] and [/INST]</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. ChatML wraps each message as &lt;|im_start|&gt;role ... &lt;|im_end|&gt;; [INST]/[/INST] is Llama-2's; &lt;s&gt;/&lt;/s&gt; are sequence delimiters; {{ }} is Jinja syntax.</div></div></div>
   </details>
 </div>
@@ -5898,7 +5898,7 @@ dest = <span class="st">""</span>
     <li>remove the system message</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. add_ass appends the assistant's start marker (no content) at the end of the assembled prompt, like handing over the mic so the model continues from 'the assistant's turn'. On for chat, off for plain completion.</div></div></div>
   </details>
 </div>
@@ -6031,7 +6031,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 <rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">val</text>
 <rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">end</text>
 <rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">done</text>
-<text x="19" y="138" fill="#5b6470" font-size="12">state need ':' - which candidate tokens survive:</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">state needs ':' - which candidate tokens survive:</text>
 <rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
 <text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">keep</text>
 <rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
@@ -6123,7 +6123,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>change the prompt</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The grammar masks illegal candidates before sampling (logit to negative infinity, probability zeroed), then advances the grammar state after a pick. So every step is legal and the output is necessarily valid - no after-the-fact check, no fine-tuning or prompt change.</div></div></div>
   </details>
 </div>
@@ -6136,7 +6136,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>root</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. GBNF conventionally names the entry rule root, where the grammar starts expanding (like a program at main). The easiest way to read a GBNF is to start from root and follow ::= downward.</div></div></div>
   </details>
 </div>
@@ -6149,7 +6149,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>it needs no vocabulary</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After-the-fact checking is slow, may fail repeatedly, and is not guaranteed to converge; token-level masking moves the gate to every step, so output is necessarily valid in one go. It still works in the vocab's token space.</div></div></div>
   </details>
 </div>
@@ -6348,7 +6348,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>change the sampling temperature</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LoRA freezes the original W and learns only small matrices A, B; output = W*x + scale*B*A*x. The adapter is just a few MB, far lighter than retraining all weights; it is wholly different from swapping the vocab or tuning temperature.</div></div></div>
   </details>
 </div>
@@ -6361,7 +6361,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>the batched llama_set_adapters_lora (singular set/rm/clear removed, n=0 clears)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The current API is the plural, batched llama_set_adapters_lora (attach several at once, each with a scale; n=0 clears); the early singular set/rm/clear trio is replaced by it and no longer exists.</div></div></div>
   </details>
 </div>
@@ -6374,7 +6374,7 @@ adapter = <span class="fn">llama_adapter_lora_init</span>(model, <span class="st
     <li>they are exactly the same</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. LoRA acts on weights (a low-rank delta folded into matmul, build_lora_mm); a control vector acts on activations (shifting the residual stream along a direction, set_adapter_cvec). Both leave base weights untouched and are plug-and-play, but at different levels.</div></div></div>
   </details>
 </div>
@@ -6580,7 +6580,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>neither can be shared, each must be independent</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. llama_model is read-only knowledge (weights never change after load), shareable across contexts - load once, infer in many places; llama_context holds per-session private state (KV cache, compute buffers, sampling position), so it must be one per session.</div></div></div>
   </details>
 </div>
@@ -6593,7 +6593,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>free the model directly</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The order is tokenize -> decode -> get_logits -> sample: after tokenizing, you must llama_decode the graph and read per-token scores via llama_get_logits before the sampler chain has anything to pick from.</div></div></div>
   </details>
 </div>
@@ -6606,7 +6606,7 @@ batch = <span class="fn">llama_batch_get_one</span>(tokens, n);             <spa
     <li>call llama_backend_free to wipe all handles at once</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. include/llama-cpp.h defines a unique_ptr alias per handle (llama_model_ptr etc.) whose deleter calls the matching _free, so a handle frees the moment it leaves scope - no missed frees or wrong order. C/C++ has no GC, and manual _free is error-prone.</div></div></div>
   </details>
 </div>
@@ -6787,7 +6787,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>Half: it depends on a compile-time switch</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. common is a tool-shared internal convenience library; its layouts and signatures change as the project needs, with no ABI-stability promise. The stable outward contract is include/llama.h, which third-party bindings should target directly.</div></div></div>
   </details>
 </div>
@@ -6800,7 +6800,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>common_params_parse: it picks the option set by enum llama_example and calls each common_arg callback to write fields</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. common_params_parse(argc, argv, params, ex) walks argv, matches a common_arg by name, and calls callbacks to write into common_params; the 4th arg ex (enum llama_example) decides which option set applies. common_init() only does global init (logging, build info).</div></div></div>
   </details>
 </div>
@@ -6813,7 +6813,7 @@ llama_token id = <span class="fn">common_sampler_sample</span>(smpl, ctx, -1);  
     <li>each tool hand-writes its own separate sampler chain</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. cli/server use the common_sampler layer: common_sampler_init builds the chain in params.sampling.samplers order, and common_sampler_sample does logits, grammar, and sampling in one step. You can still recover the raw llama_sampler chain via common_sampler_get when needed.</div></div></div>
   </details>
 </div>
@@ -6987,7 +6987,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>ggml's graph executor, bypassing the llama layer</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A modern cli no longer carries its own bare loop: cli.cpp #includes server-common.h / server-context.h / server-task.h and CMake links server-context, reusing server's server_context (slot/task). cli and server are 'same engine, different shells'.</div></div></div>
   </details>
 </div>
@@ -7000,7 +7000,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>it always stops unconditionally after exactly 2048 tokens</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Three stop conditions: n_predict counting to zero (your length cap), an end-of-generation token detected by llama_vocab_is_eog (the model stopping itself), or hitting your reverse prompt in interactive mode. Forget -n and meet a model that will not emit EOG, and it may run forever.</div></div></div>
   </details>
 </div>
@@ -7013,7 +7013,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) fills argv into common_params (L26)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. cli reuses common's arg parsing: common_params_parse picks cli's option set via the 4th argument LLAMA_EXAMPLE_CLI, calls each common_arg callback to write argv into common_params, then hands it to common_init_from_params to produce model+ctx+sampler.</div></div></div>
   </details>
 </div>
@@ -7032,7 +7032,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
 Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a "command-line shell"; this lesson's <span class="mono">llama-server</span> fits the same engine with an "HTTP shell" - turning inference into a network service: many users and many requests connect at once, and it speaks the OpenAI API, so an existing SDK just needs a new address.
 </p>
 <p style="color:var(--muted);margin-top:.4rem">Since cli and server share one engine (revealed in L27), this lesson looks head-on at how that engine runs when it must serve many requests at once. Its most brilliant and most memorable move is <strong>continuous batching</strong>: one forward pass advances many requests together.</p>
-<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) wait for L35 in Part 7.</p>
+<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) are beyond this overview.</p>
 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
@@ -7041,7 +7041,7 @@ Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a
 
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
-  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is left to L35.
+  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is beyond this lesson.
 </div>
 
 <h2>Overall architecture: a request's journey</h2>
@@ -7166,13 +7166,13 @@ curl http://localhost:8080/v1/chat/completions \
 <details class="accordion" open>
   <summary><span class="badge-num">1</span> Slots are full - what happens to a new request? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly the scheduling topic L35 covers in detail. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
+    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly a deeper layer of scheduling trade-off. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
   </div>
 </details>
 <details class="accordion" open>
   <summary><span class="badge-num">2</span> Why is continuous batching faster than "per request"? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are left to L35. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
+    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are beyond this lesson. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
   </div>
 </details>
 
@@ -7189,7 +7189,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 <div class="card spark">
   <div class="tag">💡 Design insight</div>
-  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when L35 dissects finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
+  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when you dig into finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
 </div>
 
 <div class="selftest">
@@ -7203,7 +7203,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>queue the requests and have the GPU process them strictly one after another</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Continuous batching tags each active slot's token with its seq_id via common_batch_add and packs them into one batch; one llama_decode then advances all active sequences using the attention mask - one forward, serve many, the heart of server throughput. Copying weights / many processes is exactly what it avoids.</div></div></div>
   </details>
 </div>
@@ -7216,7 +7216,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>--parallel N (n_parallel in the source)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. --parallel N opens N slots (n_parallel), each an independent parallel sequence with its own seq_id + KV + state machine. -c sets the total context (divided among slots as n_ctx_slot), -t is thread count, -n is generation length - none set the slot count.</div></div></div>
   </details>
 </div>
@@ -7229,7 +7229,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>the llama.h C API speaks HTTP directly</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. server-chat converts between OpenAI's JSON schema (messages, tools, ...) and the engine's internal representation and exposes OpenAI-identical endpoints like /v1/chat/completions; an existing OpenAI client/SDK just points its base URL at llama-server, with no protocol change and no detour through OpenAI's cloud.</div></div></div>
   </details>
 </div>
@@ -7375,7 +7375,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>stores the model's hyperparameters (layers, dims, etc.)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. imatrix runs the model on calibration text and collect_imatrix accumulates each weight tensor's per-column activation magnitude, telling which columns are 'important'. Fed in at quantize time (--imatrix), at the same bits it keeps precision for important columns and pushes error onto unimportant ones, lowering overall perplexity. It does not compress further and is unrelated to sampling/hyperparameters.</div></div></div>
   </details>
 </div>
@@ -7388,7 +7388,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>--dry-run (params.dry_run)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. --dry-run (params.dry_run) only computes and prints the final quantized size without really compressing, handy for comparing a few levels' sizes when choosing. --keep-split keeps shards, --imatrix feeds the importance matrix, --output-tensor-type sets per-tensor precision - none merely trial-compute size.</div></div></div>
   </details>
 </div>
@@ -7401,7 +7401,7 @@ llama-quantize --imatrix imatrix.gguf in.gguf out.gguf IQ2_XS</pre>
     <li>L06/L12 cover tool usage, L29 covers the underlying math</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. L06/L12 is 'understand the principle' (why compression works, how each format's bytes are laid out); L29 is 'operate the tool' (one-command llama-quantize, level trade-offs, imatrix spending the same bits more cleverly via calibration data). They are complementary, not repetitive.</div></div></div>
   </details>
 </div>
@@ -7546,7 +7546,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>PPL = exp(mean negative log probability), lower is better (the model is less 'surprised' by real text)</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Perplexity takes, per step, the model's negative log probability of the 'real next word' (surprise), averages it, then exp's: PPL = exp(mean negative log prob). Lower means the model is more confident and accurate on real text, so lower is better. It measures quality, not speed (speed is llama-bench).</div></div></div>
   </details>
 </div>
@@ -7559,7 +7559,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>pp = prefill (reading the prompt) throughput; tg = decode (token-by-token generation) throughput</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. pp (prompt processing, n_prompt) measures the prefill throughput of feeding the prompt at once - highly parallel, usually fast; tg (token generation, n_gen) measures token-by-token decode throughput - each step waits on the last, usually slower. Their performance characteristics differ (prefill compute-bound, decode memory-bound), so they are measured separately.</div></div></div>
   </details>
 </div>
@@ -7572,7 +7572,7 @@ ppl = <span class="fn">exp</span>(total / (len(tokens) - 1))            <span cl
     <li>because ppl and bench are actually the same metric</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Quantization is a trade: you gain smaller size and more speed (measured by bench) at the cost of slightly lower quality (measured by ppl). Speed only leads you to compress until the model is dumb; quality only and you miss quantization's gains. Reading quality (ppl, lower better) and speed (bench, higher better) side by side is the only way to judge whether the trade is worth it.</div></div></div>
   </details>
 </div>
@@ -7794,7 +7794,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>it skips some multiply-adds, computing fewer terms</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. SIMD is data parallelism: the same number of multiply-adds, but one instruction (e.g. _mm256_fmadd_ps) handles 8 lanes at once, filling the core's otherwise-idle wide vector units. It does not change results (the scalar reference is the correctness baseline; the vector version must match bit for bit), skips nothing, and does not offload to the GPU - it just turns 'one at a time' into 'a row at once'.</div></div></div>
   </details>
 </div>
@@ -7807,7 +7807,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>because without unpacking the model cannot be loaded into memory</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weights are stored compactly at 4-bit (saving memory), but the hardware's vector multiply-add works on byte/int lanes - there is no '4-bit lane'. So the kernel masks the low nibble and shifts the high nibble to restore each value to int8 (then subtracts 8 to shift into the signed range) before doing an integer dot product with _mm256_*. Unpacking changes no numeric precision; it just re-lays-out the data into a form SIMD can process.</div></div></div>
   </details>
 </div>
@@ -7820,7 +7820,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>all threads compute the same row and vote for the majority at the end</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Whether you can parallelize comes down to 'are there dependencies'. In matmul the output rows are mutually independent (row 5 does not need row 3's result), so rows can be split evenly among N threads, each computing its own, then merged. Each op uses params->ith/nth to work out 'which rows are mine'. If rows had dependencies (e.g. a reduction must see the whole row first), splitting needs synchronization and the payoff drops - the same test applies to the GPU in L32.</div></div></div>
   </details>
 </div>
@@ -8051,7 +8051,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>how many threads this kernel launched in total</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. blockIdx.x is 'which block', blockDim.x is 'threads per block', threadIdx.x is 'which thread within the block'; together they form a globally unique thread id tid. This is the first line of almost every CUDA kernel - all threads run the same code, landing on different data only through their different tid (SIMT). When data exceeds threads, a grid-stride loop lets each thread handle a few more, hopping by stride.</div></div></div>
   </details>
 </div>
@@ -8064,7 +8064,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>because global VRAM cannot hold the whole matrix</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In the naive version each thread reads a whole row/column from global, neighboring threads duplicating reads and wasting bandwidth, so the bottleneck is 'waiting for data'. Tiling has the block's threads cooperatively load a small tile into on-chip shared memory (one-to-two orders faster), then reuse it repeatedly; a T x T tile is reused about T-fold, slashing slow global traffic. This is L31's 'load once, reuse many' moved to the GPU - the CPU reuses cache, the GPU reuses shared memory.</div></div></div>
   </details>
 </div>
@@ -8077,7 +8077,7 @@ O = acc / run_sum                    <span class="cm">// normalize once; write o
     <li>not writing the huge N x N attention-score matrix back to VRAM and reading it again - saving VRAM and bandwidth</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Naive attention computes the whole N x N score matrix, writes it to VRAM, reads it back for softmax, reads it again to multiply V - writing N x N once and reading it three times burns the bandwidth. Flash attention uses an 'online softmax' to compute and correct tile by tile, never materializing the full N x N, writing out only the final O. Note: the compute is not reduced (those scores are still computed); what is saved is the costliest memory traffic, and the longer the sequence the more it saves - so it is especially key for long context.</div></div></div>
   </details>
 </div>
@@ -8242,7 +8242,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>making matmul compute faster</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The core value of the backend abstraction is decoupling: the compute graph (L09) only describes 'what to compute', and each backend (CPU/CUDA/Metal...) implements the same ggml_backend_i interface, handling 'how and where'. So upper-layer code is not rewritten per hardware - the classic 'program to an interface' move. It does not make a single op faster (that is L31/L32's kernels), and is unrelated to quantization or file format.</div></div></div>
   </details>
 </div>
@@ -8255,7 +8255,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>statically compiling all backends into one huge binary</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Dynamic loading defers 'which backends this machine has' to runtime: each backend is a shared library, and ggml_backend_load_all scans, loads the usable ones, and registers them. The point is 'one package runs everywhere' - load the CUDA backend if there is a CUDA card, skip it otherwise, never crashing over a missing library. This is the opposite of 'static-link everything' (which drags in conflicting deps and is machine-picky).</div></div></div>
   </details>
 </div>
@@ -8268,7 +8268,7 @@ sched = <span class="fn">ggml_backend_sched_new</span>({backend_gpu, backend_cpu
     <li>dispatch a compute graph's ops across backends and copy tensors between devices as needed</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The scheduler connects L09/L10's 'static graph' to 'dynamic execution': it walks each op - which device's buffer the inputs are in, which backend best suits the op - dispatches accordingly, and inserts a cross-device copy first when an input is still elsewhere. To cut expensive copies it tends to give consecutive same-device ops to one backend in segments. When you put the first N layers on the GPU with -ngl, this is what dispatches by layer and moves boundary tensors.</div></div></div>
   </details>
 </div>
@@ -8408,7 +8408,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>it skips part of the attention computation</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In decode most time goes to hauling several GB of weights in from VRAM (the memory-bound point of L30/L32), with compute to spare. So one llama_decode verifying K candidate tokens in parallel costs almost nothing extra versus generating just 1. Speculative decoding has a small model / n-gram guess a run, then the big model verify it in one parallel pass, compressing N serial steps into a few - saving 'waiting for data' time, not the amount of 'computing'.</div></div></div>
   </details>
 </div>
@@ -8421,7 +8421,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>it gets better, because the draft model adds detail</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Accepted tokens are ones the target itself would give (they passed verification); rejected positions use the target's own prediction (the bonus). The draft appears only in 'proposing', and how well it proposes affects only the acceptance rate (speed), never 'which token is final'. Greedy requires exact per-position matches; under temperature sampling llama.cpp samples a token from the target at each position as usual and accepts the draft only on an exact match with it - what is emitted is always the target's own sample, so the distribution is unchanged by construction. So the output distribution is identical whether speculation is on or off - trading only speed, not quality.</div></div></div>
   </details>
 </div>
@@ -8434,7 +8434,7 @@ In inference the model emits one token at a time: run the whole sequence forward
     <li>when the sequence is too short</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The speedup is set by the acceptance rate: m accepted on average -> each forward advances about m+1 tokens. When acceptance is low the draft keeps being rejected, so each round wastes a draft-model run plus extra KV for the draft tokens, making it slower. So the more 'predictable' the task (code, translation, rewriting) the more it pays; the more 'divergent' (creative writing, high-temperature sampling) the easier it loses. Practical test: watch llama.cpp's printed acceptance rate; below about 0.3, consider turning it off - do not guess, measure (L30).</div></div></div>
   </details>
 </div>
@@ -8585,7 +8585,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>fewer parameters and less compute</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.</div></div></div>
   </details>
 </div>
@@ -8598,7 +8598,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.</div></div></div>
   </details>
 </div>
@@ -8611,7 +8611,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>VRAM only needs to hold the k activated experts</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.</div></div></div>
   </details>
 </div>
@@ -8750,7 +8750,7 @@ std::vector&lt;float&gt; out_vec;
     <li>a set of special token ids looked up in the vocabulary</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Key insight: the LLM body only ever processes sequences of embedding vectors - it has no idea what a 'token' looks like. So multimodality does not change the model body; it encodes the image into N embeddings too (clip encodes + projector projects into the LLM's embedding space), spliced into the text sequence at the &lt;image&gt; marker. Handed this run of vectors, the LLM cannot tell which came from text and which from the image - it just runs forward. This is also why llama_batch can carry both token and embd (L18): images go in through the embd entry.</div></div></div>
   </details>
 </div>
@@ -8763,7 +8763,7 @@ std::vector&lt;float&gt; out_vec;
     <li>project clip's visual features into the LLM's embedding dimension and space, making them 'look like a token embedding'</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. clip's visual features and the LLM's token embeddings are not in the same space - dimensions may differ, and value distributions and semantics are two different systems, so feeding them in directly is unreadable to the model. The projector is that bridge: a small network aligning visual features to the LLM's embedding dimension/space. clip_n_mmproj_embd must equal the LLM's embedding dimension or the vectors will not fit. Because it is trained for one specific 'this clip + this LLM' pairing, it is a separate mmproj file loaded separately; without it the model only reads text and cannot see images.</div></div></div>
   </details>
 </div>
@@ -8776,7 +8776,7 @@ std::vector&lt;float&gt; out_vec;
     <li>images do not enter the KV cache, they exist only briefly during encoding</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Once image embeddings are spliced in, to the LLM they are N real positions: assigned positions, written into the KV cache (L19), and joining the attention of every later token. So one high-res image can take hundreds or thousands of positions, and a few images in the KV cache rivals long text - a '32K-context multimodal model' shares that 32K between images and text. clip_n_output_tokens sets this N, and some projectors (resamplers) actively compress N to save KV. This echoes L19: the longer the sequence, the bigger the KV cache, the fewer concurrent requests.</div></div></div>
   </details>
 </div>
@@ -8934,7 +8934,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>constant (O(1)) - a fixed-size recurrent state summarizes the history, not growing with the sequence</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. This is the SSM's biggest selling point. Attention must store every token's KV in the KV cache (memory grows linearly, L19) and step t looks back over all history (O(n^2) overall). The SSM does the reverse: maintain a fixed-size state h (size fixed by ssm_d_state), and each step computes the new state from only the previous state h_(t-1) and current input x_t - independent of history length. So memory is O(1), whole-sequence compute O(n), and even at hundreds of thousands of tokens the per-step cost does not budge. This makes it especially sweet for very long context, streaming, and low-VRAM on-device.</div></div></div>
   </details>
 </div>
@@ -8947,7 +8947,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>the selective scan: recur the state along time by A/B/C/dt; 'selectivity' means B/C/dt vary with the input</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. ggml_ssm_scan does the core recurrence h = A*h + B*x; y = C*h, scanning the sequence start to end and pushing the state forward step by step. A governs 'how much of the previous state to keep', B 'how the input is written into the state', C 'what is read out of the state', and dt (Delta) is the step size. The key is 'selectivity': Mamba projects B, C, dt from the current input x (input-dependent), so the model can dynamically decide 'write an important token into the state more, ignore a useless one' - exactly what let it match transformers. A stays fixed (a learned parameter), governing the state's own stable decay.</div></div></div>
   </details>
 </div>
@@ -8960,7 +8960,7 @@ y = <span class="fn">ggml_ssm_scan</span>(ctx0, states, x, dt, A, B, C, ids);
     <li>the state is lossy compression; long-range exact retrieval (e.g. verbatim copy) is worse than attention, which can look up KV</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. No free lunch. Compressing arbitrarily long history into a fixed-size state is inherently lossy: when there is too much worth remembering and the state cannot hold it, it must forget selectively. So SSMs are handicapped on 'exact retrieval' tasks - e.g. copying out the 3000th token from long ago verbatim (the copy task), or looking back to compare a detail exactly. Attention can look back and check each KV; the SSM has only one repeatedly-overwritten summary. This is not an implementation flaw but the fundamental cost of choosing 'fixed state'. Hence the common hybrid architecture (llama-memory-hybrid): most layers use SSM to carry length, a few insert attention for exact retrieval.</div></div></div>
   </details>
 </div>
@@ -9123,7 +9123,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>a multi-thousand-line monolith with every architecture's conversion logic piled inside</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. It has been refactored into a ~300-line thin CLI: main() just does load_hparams to read config.json -> get_model_architecture for the arch name -> get_model_class to look up the class in the registry -> instantiate -> call write(). Each architecture's concrete conversion logic moved into its own module under conversion/ (conversion/llama.py and friends). So do not read only the root file - look at ModelBase in conversion/base.py and the per-architecture subclasses.</div></div></div>
   </details>
 </div>
@@ -9136,7 +9136,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>registers the model weights onto the GPU</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. register is a classmethod on ModelBase used as a decorator factory. Python runs the line when it loads an architecture module, mapping the several HF architecture names in the parentheses onto the decorated class (one class can claim several names, e.g. Llama/Mistral/Mixtral share one). So get_model_class, given config.json's architectures, finds which subclass to use. Adding an architecture = add a subclass with register, no trunk changes - that is 'registry plus plugins'.</div></div></div>
   </details>
 </div>
@@ -9149,7 +9149,7 @@ fout.write(self.<span class="fn">_pack</span>(<span class="st">"Q"</span>,  len(
     <li>the first tensor's name, shape, type, and data</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. GGUFWriter.write_header_to_file writes just four fixed-length fields: magic 0x46554747 ("GGUF"), version=3, tensor_count (u64), kv_count (u64). The loader reads these four numbers first to know how much metadata KV and how many tensor-info records follow. Architecture/layers/dims/vocab are written in the metadata KV section after the header, not in it; a tensor's name/shape/type/offset live in the tensor-info section further on.</div></div></div>
   </details>
 </div>
@@ -9290,7 +9290,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>--gpu</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In docs/build.md, the CUDA backend is enabled at configure time with -DGGML_CUDA=ON, e.g. cmake -B build -DGGML_CUDA=ON then cmake --build build --config Release. Each backend has a -DGGML_* flag (Metal on by default, Vulkan via -DGGML_VULKAN=ON, etc.); switching backend only changes the 'configure' step, not the source. --gpu would be a runtime argument, not a build flag; and llama.cpp will not silently compile CUDA in for you.</div></div></div>
   </details>
 </div>
@@ -9303,7 +9303,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>test-tokenizer-0</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. CONTRIBUTING is explicit: if you change or add a ggml operator you must run (and extend if needed) test-backend-ops. It runs the operator on CPU and the target backend and compares elementwise, keeping backends in agreement - exactly what lets llama.cpp maintain a dozen-plus backends at once. test-tokenizer-0 / test-sampling cover tokenization and sampling, unrelated to operator correctness; and 'CI will handle it' is no excuse: running locally first keeps you from discovering a failure only after opening the PR.</div></div></div>
   </details>
 </div>
@@ -9316,7 +9316,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>does not accept PRs that are fully or predominantly AI-generated; contributors must be able to independently understand and maintain their code</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The AI policy near the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.</div></div></div>
   </details>
 </div>
@@ -9488,7 +9488,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>the sampler</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The map goes bottom-up: at the bottom is ggml_tensor (the basic data unit); tensors compose a ggml_cgraph, the backend executes the graph, llama_context holds the KV cache and drives decode, and only at the top sits 'one llama_decode'. So the tensor is the foundation - without it, the graph, backend, and context above have nothing to stand on. That is why bottom-up understanding is advised: grasp the tensor before graphs and backends.</div></div></div>
   </details>
 </div>
@@ -9501,7 +9501,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>src/llama-graph.cpp</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. This is a common 'cannot find the definition' trap: in the public ggml/include/ggml.h, ggml_cgraph is only a forward declaration; the real struct lives in the internal header ggml/src/ggml-impl.h. Many ggml types do this - expose an opaque pointer outward, hide the fields in an internal header, so the implementation can change without breaking the ABI. The glossary's 'source location' column is there to steer you past this trap, straight to the file to read.</div></div></div>
   </details>
 </div>
@@ -9514,7 +9514,7 @@ Here we are - all 40 lessons done. Starting from "what is llama.cpp", you have w
     <li>ggml_tensor</li>
   </ol>
   <details class="accordion" open>
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The KV cache is one of the runtime states held by llama_context (which also holds compute buffers, sampling state, etc.). So when debugging something to do with the KV cache, the map tells you to look inside llama_context, not to wander into the low-level ggml_tensor or ggml_backend. That is the practical value of the map: every arrow is a clue for 'which layer to chase when something goes wrong'.</div></div></div>
   </details>
 </div>

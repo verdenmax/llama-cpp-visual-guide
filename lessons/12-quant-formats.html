@@ -836,7 +836,7 @@ that much more solid.</p>
     <li>16 bytes of scale + 2 bytes of values</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. block_q4_0 = {ggml_half d; uint8_t qs[16]}: a 2-byte scale + 16 bytes holding 32 4-bit values (two nibbles per byte), 18 bytes total, 4.5 bits per weight on average.</div></div></div>
   </details>
 </div>
@@ -849,7 +849,7 @@ that much more solid.</p>
     <li>It actually uses more bits</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. q4_K has a two-level scale: super-block d/dmin set the broad range, 8 sub-blocks each carry a 6-bit scale/min for local fine-tuning, plus dmin's offset - the same 4.5 bits but more accurate than q4_0's single scale.</div></div></div>
   </details>
 </div>
@@ -862,7 +862,7 @@ that much more solid.</p>
     <li>A ggml_type_traits table + to_float/from_float_ref function pointers; operators dequantize per traits, no need to rewrite per type</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. ggml_type_traits registers one row per type (blck_size, type_size, to_float, from_float_ref, ...); operators look it up and call the function pointers, so a new type needs only one row + its dequant/quant functions.</div></div></div>
   </details>
 </div>

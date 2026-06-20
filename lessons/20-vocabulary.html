@@ -741,7 +741,7 @@ text = <span class="st">""</span>
     <li>cuts a text string into a list of token ids (to feed the model)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. tokenize is the encoding direction: text -> a list of token ids, fed into the model. The reverse (id -> text) is done by token_to_piece/detokenize.</div></div></div>
   </details>
 </div>
@@ -754,7 +754,7 @@ text = <span class="st">""</span>
     <li>lets any UTF-8 char be encoded (split into byte tokens), avoiding out-of-vocabulary OOV</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. A char absent from the vocab is split into UTF-8 bytes, one &lt;0xXX&gt; token per byte (256 of them, guaranteed to cover), so even rare chars encode losslessly, abolishing OOV; the cost is rare chars take several tokens.</div></div></div>
   </details>
 </div>
@@ -767,7 +767,7 @@ text = <span class="st">""</span>
     <li>llama_vocab_n_tokens (old llama_n_vocab is deprecated)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Vocab size is a vocab property; the authoritative API is llama_vocab_n_tokens; the old llama_n_vocab is marked DEPRECATED. n_ctx/n_embd are different quantities.</div></div></div>
   </details>
 </div>

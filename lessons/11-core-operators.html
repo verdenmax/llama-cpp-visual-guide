@@ -667,7 +667,7 @@ opening - and at its core is this one mul_mat shape rule.</p>
 <p>Besides matmul, three operators recur in the attention layer. Stringing L04's attention with ggml operators gives roughly this pipeline:</p>
 <div class="vflow">
   <div class="step"><div class="num">1</div><div class="sc"><h4>rms_norm(x)</h4><p>normalize the input first, stabilizing the numeric scale (L04's "training stability" rests on it).</p></div></div>
-  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, ·)</h4><p>project out the Query / Key / Value tensors.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="sc"><h4>mul_mat(Wq/Wk/Wv, x)</h4><p>project out the Query / Key / Value tensors.</p></div></div>
   <div class="step"><div class="num">3</div><div class="sc"><h4>rope(q, k)</h4><p>inject position info into Q, K (L04's RoPE rotation).</p></div></div>
   <div class="step"><div class="num">4</div><div class="sc"><h4>soft_max_ext(scores, mask)</h4><p>compute attention scores, apply the causal mask, normalize to weights (L04's -inf mask is here).</p></div></div>
   <div class="step"><div class="num">5</div><div class="sc"><h4>mul_mat(V, weights)</h4><p>weight-sum the Values by the weights to get the attention output.</p></div></div>
@@ -793,7 +793,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>b must be square</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. mul_mat requires a->ne[0]==b->ne[0]; result ne={a.ne[1], b.ne[1], ...}. Since ggml is row-major with ne[0] innermost, this reads reversed from math's rows x columns.</div></div></div>
   </details>
 </div>
@@ -806,7 +806,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>Normalizes the input</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. soft_max_ext fuses softmax(a*scale + mask): scale is usually 1/sqrt(d) to keep scores in range, mask adds the causal mask (future at -inf, weight 0 after softmax).</div></div></div>
   </details>
 </div>
@@ -819,7 +819,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>Frontend web page and backend server</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. The build side (ggml.c) only defines the shape and fills op/src, no compute; the compute side (each backend's ggml_compute_forward_*) actually computes. They meet via enum ggml_op + switch(op).</div></div></div>
   </details>
 </div>
@@ -832,7 +832,7 @@ authors each mind their own patch, without disturbing each other</strong>" - is 
     <li>It recompiles each time</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The operator number is recorded in tensor->op at build; at execution the backend uses switch(op) to jump to the implementation. Adding an operator = add an enum value + write a forward wired into the switch.</div></div></div>
   </details>
 </div>

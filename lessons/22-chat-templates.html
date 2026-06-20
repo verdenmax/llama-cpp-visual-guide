@@ -577,7 +577,7 @@ M4a let the model compute, L20 cut text into tokens, L21 taught it to pick the n
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">model</div><div class="nd">L17</div></div>
 </div>
-<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure, but rather a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
+<p>First see where this step sits in the whole pipeline. Your conversation is a list of structured messages: each has a role (system/user/assistant) and some content. But the model doesn't eat this structure - it eats a long string of tokens (L20). There must be a step that flattens "the message list" into "one string", and that step is the chat template.</p>
 <p>The assembled string, besides each message's body, inserts a pile of <strong>special markers</strong>: marking where each message starts, ends, and who spoke. These markers correspond to special tokens in the vocab (L20), and the model relies on them to recognize "it is the assistant's turn now", "the user is done with this turn".</p>
 <p>The order is: message list -&gt; apply the template into a string -&gt; hand to the vocab to tokenize -&gt; into the model. The template handles "structure to text", tokenize handles "text to tokens" - two relays, neither dispensable. This is also why this lesson follows the vocab (L20) closely - its product is exactly tokenize's input.</p>
 <div class="card detail">
@@ -743,7 +743,7 @@ dest = <span class="st">""</span>
     <li>score the reply</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The template assembles the system/user/assistant message list into a string per the model's training format (inserting special markers), then hands it to the vocab to tokenize. Cutting tokens is L20, scoring is L21.</div></div></div>
   </details>
 </div>
@@ -756,7 +756,7 @@ dest = <span class="st">""</span>
     <li>[INST] and [/INST]</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. ChatML wraps each message as &lt;|im_start|&gt;role ... &lt;|im_end|&gt;; [INST]/[/INST] is Llama-2's; &lt;s&gt;/&lt;/s&gt; are sequence delimiters; {{ }} is Jinja syntax.</div></div></div>
   </details>
 </div>
@@ -769,7 +769,7 @@ dest = <span class="st">""</span>
     <li>remove the system message</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. add_ass appends the assistant's start marker (no content) at the end of the assembled prompt, like handing over the mic so the model continues from 'the assistant's turn'. On for chat, off for plain completion.</div></div></div>
   </details>
 </div>

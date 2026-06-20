@@ -24,7 +24,7 @@ write literal ``<``/``&`` as ``&lt;``/``&amp;`` (or wrap code in ``<code>``).
 import hashlib
 
 _HEAD = {"zh": "🧪 自测 · 想一想为什么这么设计", "en": "🧪 Self-test - think about the design"}
-_SEE = {"zh": "看答案与解析", "en": "Show answer & explanation"}
+_SEE = {"zh": "看答案与解析", "en": "Show answer &amp; explanation"}
 _CLICK = {"zh": "点击展开", "en": "click to expand"}
 _ANS = {"zh": "答案：", "en": "Answer: "}
 _SEP = {"zh": "。", "en": ". "}
@@ -163,7 +163,7 @@ QUIZZES = {
                     },
                     {
                         "zh": "各可执行程序共用的“胶水”（参数解析、采样封装、日志…），推理本体在 <code>src/llama-*</code>",
-                        "en": "The shared “glue” for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code>",
+                        "en": "The shared 'glue' for the executables (arg parsing, sampler wrapper, logging...); the inference core is in <code>src/llama-*</code>",
                     },
                     {"zh": "ggml 的一部分，负责底层算子", "en": "Part of ggml, handling the low-level ops"},
                     {"zh": "一组 Python 转换脚本", "en": "A set of Python conversion scripts"},

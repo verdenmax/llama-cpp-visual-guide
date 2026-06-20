@@ -694,7 +694,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
 <rect x="349" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="385" y="66" text-anchor="middle" fill="#1d2129" font-size="12">val</text>
 <rect x="459" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="495" y="66" text-anchor="middle" fill="#1d2129" font-size="12">end</text>
 <rect x="569" y="46" width="72" height="30" rx="14" fill="#ffffff" stroke="#cdd5df"/><text x="605" y="66" text-anchor="middle" fill="#1d2129" font-size="12">done</text>
-<text x="19" y="138" fill="#5b6470" font-size="12">state need ':' - which candidate tokens survive:</text>
+<text x="19" y="138" fill="#5b6470" font-size="12">state needs ':' - which candidate tokens survive:</text>
 <rect x="19" y="150" width="58" height="36" rx="5" fill="#c2630e" stroke="#c2630e"/><text x="48" y="174" text-anchor="middle" fill="#fff" font-weight="700">:</text>
 <text x="48" y="202" text-anchor="middle" fill="#c2630e" font-size="11">keep</text>
 <rect x="89" y="150" width="58" height="36" rx="5" fill="#ffffff" stroke="#cdd5df"/><text x="118" y="174" text-anchor="middle" fill="#5b6470" font-weight="700">,</text>
@@ -785,7 +785,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>change the prompt</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The grammar masks illegal candidates before sampling (logit to negative infinity, probability zeroed), then advances the grammar state after a pick. So every step is legal and the output is necessarily valid - no after-the-fact check, no fine-tuning or prompt change.</div></div></div>
   </details>
 </div>
@@ -798,7 +798,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>root</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. GBNF conventionally names the entry rule root, where the grammar starts expanding (like a program at main). The easiest way to read a GBNF is to start from root and follow ::= downward.</div></div></div>
   </details>
 </div>
@@ -811,7 +811,7 @@ grammar.<span class="fn">accept</span>(chosen_token)          <span class="cm">#
     <li>it needs no vocabulary</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. After-the-fact checking is slow, may fail repeatedly, and is not guaranteed to converge; token-level masking moves the gate to every step, so output is necessarily valid in one go. It still works in the vocab's token space.</div></div></div>
   </details>
 </div>

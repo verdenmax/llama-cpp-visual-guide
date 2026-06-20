@@ -779,7 +779,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>it skips some multiply-adds, computing fewer terms</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. SIMD is data parallelism: the same number of multiply-adds, but one instruction (e.g. _mm256_fmadd_ps) handles 8 lanes at once, filling the core's otherwise-idle wide vector units. It does not change results (the scalar reference is the correctness baseline; the vector version must match bit for bit), skips nothing, and does not offload to the GPU - it just turns 'one at a time' into 'a row at once'.</div></div></div>
   </details>
 </div>
@@ -792,7 +792,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>because without unpacking the model cannot be loaded into memory</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weights are stored compactly at 4-bit (saving memory), but the hardware's vector multiply-add works on byte/int lanes - there is no '4-bit lane'. So the kernel masks the low nibble and shifts the high nibble to restore each value to int8 (then subtracts 8 to shift into the signed range) before doing an integer dot product with _mm256_*. Unpacking changes no numeric precision; it just re-lays-out the data into a form SIMD can process.</div></div></div>
   </details>
 </div>
@@ -805,7 +805,7 @@ float sumf = <span class="fn">hsum_float_8</span>(acc);                      <sp
     <li>all threads compute the same row and vote for the majority at the end</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Whether you can parallelize comes down to 'are there dependencies'. In matmul the output rows are mutually independent (row 5 does not need row 3's result), so rows can be split evenly among N threads, each computing its own, then merged. Each op uses params->ith/nth to work out 'which rows are mine'. If rows had dependencies (e.g. a reduction must see the whole row first), splitting needs synchronization and the payoff drops - the same test applies to the GPU in L32.</div></div></div>
   </details>
 </div>

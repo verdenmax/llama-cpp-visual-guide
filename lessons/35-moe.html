@@ -637,7 +637,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>fewer parameters and less compute</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. MoE splits one big FFN into N experts but activates only top-k per token (e.g. 2 of 8). So the knowledge the model 'holds' is set by the total parameter count (like a large dense model), while the multiply-adds actually computed per token come only from the k selected experts (like a small model). The cost is that VRAM must hold every expert's weights, and irregular routing brings memory-access and load-balancing headaches. In short: trade VRAM for compute, using sparse activation to get both 'large capacity' and 'low per-step compute' at once.</div></div></div>
   </details>
 </div>
@@ -650,7 +650,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>to gather only the selected experts' weights by each token's expert ids - genuinely computing 'only the k chosen'</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. Sparsity hinges on 'computing only the selected experts'. If you used a plain mul_mat to multiply all 8 experts and then threw 6 away, the params are sparse but no compute is saved. ggml_mul_mat_id takes an ids tensor (the top-k routing result), gathers the matching experts' weight columns by id, and does multiply-adds only for the k chosen. That is exactly where MoE's compute saving lands - without this op, '2-of-8 saves 3/4 of the compute' is only words on paper.</div></div></div>
   </details>
 </div>
@@ -663,7 +663,7 @@ out  = <span class="fn">ggml_mul_mat_id</span>(down_exps, act, selected); <span 
     <li>VRAM only needs to hold the k activated experts</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Which token routes to which expert is known only at runtime, so every expert's weights must stay resident in VRAM on standby - VRAM is sized by 'total parameters', not by 'the k activated'. That is why MoE models' GGUF files and VRAM needs are often huge (DeepSeek, Mixtral run to tens or hundreds of GB). MoE saves 'multiply-adds per token' (compute / time), not 'how many weights to hold' (VRAM). Keep these two apart and you will not misjudge MoE's resource needs.</div></div></div>
   </details>
 </div>

@@ -747,7 +747,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>a random one</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. greedy always takes the max-logit candidate (argmax); same input always same output. dist is the one that draws randomly by probability. Use greedy for reproducibility/rigor, dist for diversity.</div></div></div>
   </details>
 </div>
@@ -760,7 +760,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>all with probability greater than p</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. top_p accumulates probability until reaching p, so the candidate count adapts to the distribution (few when peaked, many when flat); top_k is the fixed-count one. They often pair: top_k chops the tail, top_p closes adaptively.</div></div></div>
   </details>
 </div>
@@ -773,7 +773,7 @@ id = <span class="fn">llama_sampler_sample</span>(chain, ctx, -1)         <span 
     <li>it runs faster</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. The chain turns the strategy into data: each sampler is an independent part with its own state, order is adjustable, add/remove is free; users tune parameters to assemble any strategy without touching the engine. Speed/memory are not its design goal.</div></div></div>
   </details>
 </div>

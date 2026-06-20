@@ -567,8 +567,8 @@ the KV cache (memory), the backend scheduler (sched), and output buffers; <span 
 <h2>model vs context: read-only knowledge vs stateful session</h2>
 <p>This is the cut to grasp first: <strong>weights are read-only knowledge, a session is stateful progress</strong>, and the two are deliberately split into two objects.</p>
 <div class="cols">
-  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights · hyperparameters · vocab · <strong>read-only</strong> · one is enough · <strong>shareable by many contexts</strong></p></div>
-  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits · <strong>stateful</strong> · <strong>one per session</strong> · remembers where this conversation is</p></div>
+  <div class="col"><h4>llama_model (read-only knowledge)</h4><p>weights - hyperparameters - vocab - <strong>read-only</strong> - one is enough - <strong>shareable by many contexts</strong></p></div>
+  <div class="col"><h4>llama_context (stateful session)</h4><p>cparams + KV cache + sched + logits - <strong>stateful</strong> - <strong>one per session</strong> - remembers where this conversation is</p></div>
 </div>
 <p>Why split this way? Because weights are several GB, loaded once and unchanging, and ought to be <strong>shared</strong>; while "conversation progress" (KV cache, current position) is <strong>per-session state</strong> that must be stored separately. Splitting unchanging knowledge from changing state, one copy of weights can hold up many concurrent sessions - the basis of multi-user serving.</p>
 <p>An analogy: the model is like a dictionary (everyone consults it, its content fixed), the context like each person's scratch paper (each writes their own, none interfering). You would never print a separate dictionary per reader, but everyone needs their own scratch paper. llama.cpp's cut is exactly between "shared knowledge" and "private state".</p>
@@ -737,7 +737,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>model is stateful, context is read-only</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. Weights are read-only and several GB, so sharing one copy across sessions saves the most memory; KV cache and current position are per-session state stored separately. So model is read-only/shareable, context is stateful/per-session.</div></div></div>
   </details>
 </div>
@@ -750,7 +750,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>loads the model</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_decode eats a batch, internally splitting ubatch (L18) -> build_graph (L16) -> sched execute (L10) -> update KV (L19) -> write logits to the output buffer. Sampling is the next step's job (L21).</div></div></div>
   </details>
 </div>
@@ -763,7 +763,7 @@ Precisely because the context keeps the state throughout, decode can be so fast 
     <li>llama_get_model</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. llama_get_logits_ith(ctx, i) reads the logits of the i-th flagged-output position - an n_vocab-dimensional vector handed to sampling (L21) to pick a word.</div></div></div>
   </details>
 </div>

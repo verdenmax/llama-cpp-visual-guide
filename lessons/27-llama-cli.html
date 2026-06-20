@@ -683,7 +683,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>ggml's graph executor, bypassing the llama layer</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. A modern cli no longer carries its own bare loop: cli.cpp #includes server-common.h / server-context.h / server-task.h and CMake links server-context, reusing server's server_context (slot/task). cli and server are 'same engine, different shells'.</div></div></div>
   </details>
 </div>
@@ -696,7 +696,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>it always stops unconditionally after exactly 2048 tokens</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Three stop conditions: n_predict counting to zero (your length cap), an end-of-generation token detected by llama_vocab_is_eog (the model stopping itself), or hitting your reverse prompt in interactive mode. Forget -n and meet a model that will not emit EOG, and it may run forever.</div></div></div>
   </details>
 </div>
@@ -709,7 +709,7 @@ target_link_libraries(${TARGET} PUBLIC server-context llama-common ...)</pre>
     <li>common_params_parse(argc, argv, params, LLAMA_EXAMPLE_CLI) fills argv into common_params (L26)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. cli reuses common's arg parsing: common_params_parse picks cli's option set via the 4th argument LLAMA_EXAMPLE_CLI, calls each common_arg callback to write argv into common_params, then hands it to common_init_from_params to produce model+ctx+sampler.</div></div></div>
   </details>
 </div>

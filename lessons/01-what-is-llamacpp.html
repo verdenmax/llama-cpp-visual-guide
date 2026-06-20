@@ -676,8 +676,8 @@ opposite - making inference, that one job, extremely <strong>light</strong>:</p>
 </div>
 
 <div class="cols">
-  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch · heavy deps · VRAM-hungry · often needs CUDA · hard to deploy on ordinary devices</p></div>
-  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ · quantization saves VRAM · runs on CPU too · offline · one executable + one .gguf</p></div>
+  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch - heavy deps - VRAM-hungry - often needs CUDA - hard to deploy on ordinary devices</p></div>
+  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ - quantization saves VRAM - runs on CPU too - offline - one executable + one .gguf</p></div>
 </div>
 <p><strong>Why C/C++ specifically, and not Python, Rust, or Go?</strong> An inference engine cares about two things above all - a
 <strong>zero runtime</strong> and being <strong>embeddable</strong> - and C/C++ delivers both. It compiles straight to machine code, with no
@@ -689,11 +689,11 @@ heavy-runtime language. Rust could reach a similar goal, but when the project st
 most mature and the easiest to port to. The official README states the goal up front as "<strong>minimal setup</strong> with top performance", and
 plain C/C++ is the linchpin of that sentence.</p>
 
-<h2>Three pillars: GGUF · quantization · ggml</h2>
+<h2>Three pillars: GGUF - quantization - ggml</h2>
 <p>The reason llama.cpp can "run anywhere from a single file" is three building blocks fitting together.
 Here is a first glance at each; later lessons expand every one of them:</p>
 
-<h3>① GGUF: one file holds the whole model</h3>
+<h3>(1) GGUF: one file holds the whole model</h3>
 <p><span class="inline">GGUF</span> is llama.cpp's <strong>model file format</strong>: it bundles the weights,
 hyper-parameters (layers, dimensions, vocab size), tokenizer, chat template, and more <strong>into a single
 file</strong>. Loading just <span class="mono">mmap</span>s it into memory - no extra config files or Python code.
@@ -707,7 +707,7 @@ copy</strong> of the weights to save memory. The most practical payoff: <strong>
 <span class="inline">.gguf</span>, leave the command-line flags untouched, and you are running a different model. Distribution and management become
 trivially simple.</p>
 
-<h3>② Quantization: shrink the weights, keep the accuracy</h3>
+<h3>(2) Quantization: shrink the weights, keep the accuracy</h3>
 <p>Raw weights are usually 16-bit floats (FP16), so a 7B model needs about 14 GB. <strong>Quantization</strong>
 packs each weight into a lower bit-width (e.g. 4 bits), cutting the size to roughly 1/4 - small enough for an
 ordinary laptop's RAM. The cost is a tiny accuracy loss, but a "<strong>per-block shared scale</strong>"
@@ -716,13 +716,13 @@ design keeps that loss almost unnoticeable:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>FP16 raw weights</b>: each number 16 bits - high precision, but bulky</div>
   <div class="cells">
-    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">…</span>
+    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">...</span>
     <span class="lab">a block of 32 x 16 bit</span>
   </div>
-  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale × (code − 8)</div>
+  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale x (code - 8)</div>
   <div class="cells">
-    <span class="cell scale">scale</span><span class="sep">×</span>
-    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">…</span>
+    <span class="cell scale">scale</span><span class="sep">x</span>
+    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">...</span>
     <span class="lab">~4.5 bit/weight, about 1/4 the size</span>
   </div>
 </div>
@@ -735,16 +735,16 @@ the more critical weights more accurate and push that loss down further.</p>
 <p>Put that compression in a real setting and it is a "<strong>heavy-to-light</strong>" pipeline: the same model shrinks sharply after quantization,
 and paired with one executable it can move from the data center onto your laptop:</p>
 <div class="flow">
-  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ≈ 14 GB</div></div>
+  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ~ 14 GB</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">≈ 4 GB</div></div>
+  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">~ 4 GB</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">.gguf single file</div><div class="nd">+ one executable</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">Run locally</div><div class="nd">laptop / phone / server</div></div>
 </div>
 
-<h3>③ ggml: the low-level tensor engine</h3>
+<h3>(3) ggml: the low-level tensor engine</h3>
 <p><span class="mono">ggml</span> is llama.cpp's <strong>in-house tensor library</strong>: it defines tensors,
 describes one inference run as a <strong>compute graph</strong>, then dispatches the ops in that graph
 (matmul, softmax, rope...) to different <strong>backends</strong> (CPU SIMD, CUDA, Metal, Vulkan...) to actually
@@ -755,13 +755,13 @@ model code runs unchanged across CPU and all kinds of GPUs.</p>
 <p>Stack those three pillars by "who depends on whom" and llama.cpp becomes a clean <strong>four-layer tower</strong>,
 from the hardware at the bottom up to the user-facing tools:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ · examples/</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ - examples/</span></div>
     <div class="ld">User-facing: <span class="mono">llama-cli</span>, the <span class="mono">llama-server</span> HTTP service, the <span class="mono">llama-quantize</span> tool</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">infer</span><span class="name">src/llama-*</span></div>
-    <div class="ld">Model loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld">Model loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld">Tensors · compute graph · ops (matmul/rope/softmax...) · backend scheduling · quant formats</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
+    <div class="ld">Tensors - compute graph - ops (matmul/rope/softmax...) - backend scheduling - quant formats</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
     <div class="ld">Actually runs the ops on hardware (SIMD / GPU kernels)</div></div>
 </div>
 <p>Keep this line in mind when reading the source: the <strong>backend</strong> provides compute, <strong>ggml</strong>
@@ -982,7 +982,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>It makes the model itself smarter</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. By doing inference only, it can use zero-dependency C/C++ + quantization + the ggml engine to shed heavy deps - the root reason it 'runs anywhere from a single file'.</div></div></div>
   </details>
 </div>
@@ -995,7 +995,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>inference layer src/llama-*</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. ggml describes tensors/graphs and schedules ops; the actual hardware math is implemented by each backend.</div></div></div>
   </details>
 </div>
@@ -1008,7 +1008,7 @@ doing the forward pass for just one token. <span class="mono">llama_decode</span
     <li>It retrains the weights on a GPU</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Quantization shares a scale per block, each fitting its own value range; weights tolerate tiny errors and 4-bit levels suffice, so it saves ~4x space with almost no accuracy change. K-quants can optionally pair with an importance matrix (imatrix) that weights the quantization error so important weights are preserved more faithfully - the bit-width is unchanged, the error is weighted rather than bits reallocated.</div></div></div>
   </details>
 </div>

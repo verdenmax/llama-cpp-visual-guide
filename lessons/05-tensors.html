@@ -872,7 +872,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>Copies out a new block of memory</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Transpose is a metadata-only view: swap ne/nb, point view_src back to the original, and data is untouched - hence zero-copy.</div></div></div>
   </details>
 </div>
@@ -885,7 +885,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>ne[3]</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. ggml is row-major: nb[0]=ggml_type_size(type) is smallest and ne[0] is laid out contiguously - the opposite of numpy/PyTorch.</div></div></div>
   </details>
 </div>
@@ -898,7 +898,7 @@ GGUF tools or debug logs come straight from this field.</p>
     <li>Because its data is empty</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. A quantized type packs a whole block (e.g. 32 weights) into fixed bytes; the ne[0]/ggml_blck_size(type) in the nb formula is exactly 'blocks per row'.</div></div></div>
   </details>
 </div>

@@ -333,7 +333,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 上一课的 <span class="mono">llama-cli</span> 给共享引擎套了个"命令行壳"；这一课的 <span class="mono">llama-server</span> 给同一台引擎换上"HTTP 壳"——把推理变成一个网络服务：多个用户、多条请求同时连进来，还兼容 OpenAI 的接口，现成的 SDK 改个地址就能用。
 </p>
 <p style="color:var(--muted);margin-top:.4rem">既然 cli 和 server 共用一台引擎（L27 已揭晓），这一课我们就正面看这台引擎在"要同时伺候很多请求"时是怎么转的。它最精彩、也最值得记住的一招，叫<strong>连续批处理</strong>（continuous batching）：一次前向，同时推进多条请求。</p>
-<p style="color:var(--muted)">本课只做<strong>架构总览</strong>——把请求从进门到出门的主干道走通，把 slot 与连续批处理这两个核心概念讲清。更深的调度取舍（prefill 与 decode 如何交错、batch 容量、抢占与公平）留到第七部分的 L35 再展开。</p>
+<p style="color:var(--muted)">本课只做<strong>架构总览</strong>——把请求从进门到出门的主干道走通，把 slot 与连续批处理这两个核心概念讲清。更深的调度取舍（prefill 与 decode 如何交错、batch 容量、抢占与公平）超出本课总览的范围，这里点到为止。</p>
 
 <div class="card macro">
   <div class="tag">🌍 宏观理解</div>
@@ -342,7 +342,7 @@ html[data-lang="zh"] .lang-en { display: none !important; }
 
 <div class="card analogy">
   <div class="tag">🔌 生活类比</div>
-  把 server 想成一家<strong>餐厅后厨</strong>：每张餐桌（slot）坐一桌客人（一条请求），厨房（引擎）只有一个。笨办法是一桌一桌做——做完第一桌才招呼第二桌，客人全在干等。连续批处理像一个<strong>会"并灶"的大厨</strong>：他把此刻所有桌"下一道菜要下的料"一起下锅、一次翻炒，再分到各桌去。灶台（GPU 的一次前向）开一次火，同时把好几桌的菜往前推进了一步。桌子的数量（<span class="mono">--parallel N</span>）决定了后厨能同时招呼几桌；而那位会并灶的大厨，就是 <span class="mono">update_slots</span>。这个类比还藏着一个容易被忽略的点：并灶之所以划算，前提是各桌的"下一道菜"恰好能同时下锅——也就是各请求都正好处在"该算下一个 token"的节拍上。真实的 server 里，有的桌还在吃前菜（prefill 一大段 prompt）、有的已在逐字上主菜（生成），大厨得把这些不同阶段的活儿巧妙编排进同一锅。这也是"连续"二字的分量：它不是把请求一次性凑齐再开火，而是每一轮都重新决定"这一锅放谁的料"——有桌吃完就撤下、新客来了就补位，灶台一刻不停地转。本课先尝到"并灶"的甜头，至于大厨具体怎么排班、怎么在"多接客"和"每桌都快"之间拿捏分寸，留到 L35。
+  把 server 想成一家<strong>餐厅后厨</strong>：每张餐桌（slot）坐一桌客人（一条请求），厨房（引擎）只有一个。笨办法是一桌一桌做——做完第一桌才招呼第二桌，客人全在干等。连续批处理像一个<strong>会"并灶"的大厨</strong>：他把此刻所有桌"下一道菜要下的料"一起下锅、一次翻炒，再分到各桌去。灶台（GPU 的一次前向）开一次火，同时把好几桌的菜往前推进了一步。桌子的数量（<span class="mono">--parallel N</span>）决定了后厨能同时招呼几桌；而那位会并灶的大厨，就是 <span class="mono">update_slots</span>。这个类比还藏着一个容易被忽略的点：并灶之所以划算，前提是各桌的"下一道菜"恰好能同时下锅——也就是各请求都正好处在"该算下一个 token"的节拍上。真实的 server 里，有的桌还在吃前菜（prefill 一大段 prompt）、有的已在逐字上主菜（生成），大厨得把这些不同阶段的活儿巧妙编排进同一锅。这也是"连续"二字的分量：它不是把请求一次性凑齐再开火，而是每一轮都重新决定"这一锅放谁的料"——有桌吃完就撤下、新客来了就补位，灶台一刻不停地转。本课先尝到"并灶"的甜头，至于大厨具体怎么排班、怎么在"多接客"和"每桌都快"之间拿捏分寸，是更专门的调度话题，这里就不细究了。
 </div>
 
 <h2>整体架构：一条请求的旅程</h2>
@@ -467,13 +467,13 @@ curl http://localhost:8080/v1/chat/completions \
 <details class="accordion">
   <summary><span class="badge-num">1</span> slot 占满了，新请求怎么办？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
-    <p>slot 的数量是固定的（<span class="mono">--parallel N</span>）。如果 N 个 slot 全在忙，又来了新请求，它不会被丢弃，而是<strong>排队等待</strong>：留在 <span class="mono">server_queue</span> 里（实现上有一条"延后任务"的队列），直到某个 slot 生成完、回到 <span class="mono">IDLE</span>，调度器再把它取出来分配进去。所以 <span class="mono">--parallel</span> 这个数字是一种取舍：调大，能同时接的请求更多，但每条分到的 KV 上下文（<span class="mono">n_ctx_slot</span>）和算力被摊薄；调小则相反。怎么权衡要看你的显存和负载——这正是 L35 要细讲的调度话题。一个实用的经验法则是：先按"单条请求大概要多长上下文"估出每个 slot 至少要留多少 KV，再拿剩余显存除以它，得到的大致就是 N 的上限——超过这个数，要么爆显存，要么每条分到的上下文被压得不够用。</p>
+    <p>slot 的数量是固定的（<span class="mono">--parallel N</span>）。如果 N 个 slot 全在忙，又来了新请求，它不会被丢弃，而是<strong>排队等待</strong>：留在 <span class="mono">server_queue</span> 里（实现上有一条"延后任务"的队列），直到某个 slot 生成完、回到 <span class="mono">IDLE</span>，调度器再把它取出来分配进去。所以 <span class="mono">--parallel</span> 这个数字是一种取舍：调大，能同时接的请求更多，但每条分到的 KV 上下文（<span class="mono">n_ctx_slot</span>）和算力被摊薄；调小则相反。怎么权衡要看你的显存和负载——这正是更深一层的调度权衡。一个实用的经验法则是：先按"单条请求大概要多长上下文"估出每个 slot 至少要留多少 KV，再拿剩余显存除以它，得到的大致就是 N 的上限——超过这个数，要么爆显存，要么每条分到的上下文被压得不够用。</p>
   </div>
 </details>
 <details class="accordion">
   <summary><span class="badge-num">2</span> 连续批处理为什么比"逐请求"快？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
-    <p>关键在于 GPU 的特性：它做一次大矩阵运算（一次前向）的开销，<strong>几乎</strong>不随"同时算几条序列"线性增长——一次算 1 条和一次算 8 条，耗时差得远没有 8 倍。所以把多条请求的 token 合进一次 <span class="mono">llama_decode</span>，等于让同一次前向的成本摊给了好几条请求，单位时间能吐出的 token 总量（吞吐）大大提高。代价是实现复杂了（要管 seq_id、注意力掩码、各 slot 的进度），还有一些公平与延迟的权衡——但"一次前向、服务多人"这个核心收益，足以让它成为现代推理服务的标配。更深的取舍留给 L35。顺带一提，这也解释了"延迟"和"吞吐"为什么常是一对冤家：连续批处理拉高了整体吞吐，却可能让单条请求因为要和别人挤同一次前向而稍稍变慢——到底偏向哪头，取决于你是想让一个人尽快拿到答案，还是想让一整批人平均都不等太久。</p>
+    <p>关键在于 GPU 的特性：它做一次大矩阵运算（一次前向）的开销，<strong>几乎</strong>不随"同时算几条序列"线性增长——一次算 1 条和一次算 8 条，耗时差得远没有 8 倍。所以把多条请求的 token 合进一次 <span class="mono">llama_decode</span>，等于让同一次前向的成本摊给了好几条请求，单位时间能吐出的 token 总量（吞吐）大大提高。代价是实现复杂了（要管 seq_id、注意力掩码、各 slot 的进度），还有一些公平与延迟的权衡——但"一次前向、服务多人"这个核心收益，足以让它成为现代推理服务的标配。更深的取舍这里不展开。顺带一提，这也解释了"延迟"和"吞吐"为什么常是一对冤家：连续批处理拉高了整体吞吐，却可能让单条请求因为要和别人挤同一次前向而稍稍变慢——到底偏向哪头，取决于你是想让一个人尽快拿到答案，还是想让一整批人平均都不等太久。</p>
   </div>
 </details>
 
@@ -490,7 +490,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 <div class="card spark">
   <div class="tag">💡 设计洞察</div>
-  server 这一课的精华，是"<strong>批处理换吞吐</strong>"这个朴素而深刻的工程思想。单看一条请求，连续批处理并不会让它更快（延迟没变小）；但把视角放大到"整台服务器单位时间能服务多少 token"，它就是数量级的提升。这背后是对硬件的深刻顺应——GPU 擅长"一次算一大批"，那就把请求攒成批喂给它，而不是逼它一条条算。从 cli 到 server，你看到的是同一台引擎的两种用法：cli 追求"一个人用得顺手"，server 追求"一群人用得高效"。而把"一群人"伺候好的关键，从来不是把引擎复制很多份，而是让一份引擎学会"并灶"。把这个思想记住，等到 L35 拆解更细的调度时，你会发现一切取舍都围着它转。再把它放进更大的图景：从 L25 的 C API、L26 的 common、L27 的 cli，到这一课的 server，第五部分其实在反复讲同一件事——如何把"一份稳定的核"用在越来越复杂的场景里。cli 让一个人用得顺，server 让一群人用得起，而支撑这一切的，始终是前四部分打磨出来的那台引擎。当你下次面对"如何让一个系统服务更多用户"时，不妨先问一句：我的"那一次前向"是什么？能不能把多个请求的它合并起来一次做完？它的反面也值得警惕——如果一个系统天然无法批处理、每个请求都得独占资源跑到底，那它的扩展性从架构之初就被卡死了。能不能批，往往一开始就决定了上限。
+  server 这一课的精华，是"<strong>批处理换吞吐</strong>"这个朴素而深刻的工程思想。单看一条请求，连续批处理并不会让它更快（延迟没变小）；但把视角放大到"整台服务器单位时间能服务多少 token"，它就是数量级的提升。这背后是对硬件的深刻顺应——GPU 擅长"一次算一大批"，那就把请求攒成批喂给它，而不是逼它一条条算。从 cli 到 server，你看到的是同一台引擎的两种用法：cli 追求"一个人用得顺手"，server 追求"一群人用得高效"。而把"一群人"伺候好的关键，从来不是把引擎复制很多份，而是让一份引擎学会"并灶"。把这个思想记住，等到你深入更细的调度时，你会发现一切取舍都围着它转。再把它放进更大的图景：从 L25 的 C API、L26 的 common、L27 的 cli，到这一课的 server，第五部分其实在反复讲同一件事——如何把"一份稳定的核"用在越来越复杂的场景里。cli 让一个人用得顺，server 让一群人用得起，而支撑这一切的，始终是前四部分打磨出来的那台引擎。当你下次面对"如何让一个系统服务更多用户"时，不妨先问一句：我的"那一次前向"是什么？能不能把多个请求的它合并起来一次做完？它的反面也值得警惕——如果一个系统天然无法批处理、每个请求都得独占资源跑到底，那它的扩展性从架构之初就被卡死了。能不能批，往往一开始就决定了上限。
 </div>
 <div class="selftest">
 <h2>🧪 自测 · 想一想为什么这么设计</h2>
@@ -545,7 +545,7 @@ curl http://localhost:8080/v1/chat/completions \
 Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a "command-line shell"; this lesson's <span class="mono">llama-server</span> fits the same engine with an "HTTP shell" - turning inference into a network service: many users and many requests connect at once, and it speaks the OpenAI API, so an existing SDK just needs a new address.
 </p>
 <p style="color:var(--muted);margin-top:.4rem">Since cli and server share one engine (revealed in L27), this lesson looks head-on at how that engine runs when it must serve many requests at once. Its most brilliant and most memorable move is <strong>continuous batching</strong>: one forward pass advances many requests together.</p>
-<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) wait for L35 in Part 7.</p>
+<p style="color:var(--muted)">This lesson is an <strong>architecture overview</strong> only - walk the main road a request takes from door to door, and make the two core concepts, slots and continuous batching, clear. The deeper scheduling trade-offs (how prefill and decode interleave, batch capacity, preemption and fairness) are beyond this overview.</p>
 
 <div class="card macro">
   <div class="tag">🌍 Big picture</div>
@@ -554,7 +554,7 @@ Last lesson's <span class="mono">llama-cli</span> wrapped the shared engine in a
 
 <div class="card analogy">
   <div class="tag">🔌 Analogy</div>
-  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is left to L35.
+  Think of server as a restaurant <strong>kitchen</strong>: each table (slot) seats one party (one request), and there is only one kitchen (the engine). The clumsy way is table by table - finish table one before greeting table two, everyone else waiting. Continuous batching is like a chef who can <strong>cook several woks at once</strong>: he throws "the next ingredient every table needs right now" into one pan, stir-fries once, and splits it out to each table. The stove (one GPU forward pass) lights once and advances several tables' dishes by a step. The number of tables (<span class="mono">--parallel N</span>) sets how many parties the kitchen serves at once; and that multi-wok chef is <span class="mono">update_slots</span>. The analogy hides a point easy to miss: cooking many woks pays off only if each table's "next dish" can go into the pan at the same moment - that is, each request is right on the beat of "compute the next token". In a real server, some tables are still on appetizers (prefilling a long prompt) and some already plating mains token by token (generating), and the chef must weave these different stages into one pan. That is the weight of the word "continuous": it does not gather all requests before lighting the fire, but every round re-decides "whose ingredients go in this pan" - clearing a table that finished and seating a newcomer, the stove turning without pause. This lesson tastes the sweetness of "many woks"; how the chef actually schedules and weighs "more guests" against "every table fast" is beyond this lesson.
 </div>
 
 <h2>Overall architecture: a request's journey</h2>
@@ -679,13 +679,13 @@ curl http://localhost:8080/v1/chat/completions \
 <details class="accordion">
   <summary><span class="badge-num">1</span> Slots are full - what happens to a new request? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly the scheduling topic L35 covers in detail. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
+    <p>The number of slots is fixed (<span class="mono">--parallel N</span>). If all N slots are busy and a new request arrives, it is not dropped but <strong>queued to wait</strong>: it stays in the <span class="mono">server_queue</span> (the implementation has a "deferred tasks" queue) until some slot finishes generating and returns to <span class="mono">IDLE</span>, then the scheduler takes it out and assigns it. So <span class="mono">--parallel</span> is a trade-off: larger means more concurrent requests, but each slot's KV context (<span class="mono">n_ctx_slot</span>) and compute are thinner; smaller is the opposite. How to weigh it depends on your VRAM and load - exactly a deeper layer of scheduling trade-off. A handy rule of thumb: estimate from "how much context one request needs" how much KV each slot must reserve, then divide remaining VRAM by it, and that is roughly the ceiling for N - beyond it you either blow VRAM or squeeze each one's context too thin.</p>
   </div>
 </details>
 <details class="accordion">
   <summary><span class="badge-num">2</span> Why is continuous batching faster than "per request"? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
-    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are left to L35. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
+    <p>The key is a property of the GPU: the cost of one big matrix op (one forward pass) <strong>barely</strong> grows with "how many sequences computed at once" - one sequence versus eight is nowhere near 8x the time. So merging many requests' tokens into one <span class="mono">llama_decode</span> spreads the cost of that single forward over several requests, and the total tokens produced per unit time (throughput) rises sharply. The price is more complex code (managing seq_ids, the attention mask, each slot's progress), plus some fairness and latency trade-offs - but the core gain of "one forward, serve many" is enough to make it standard for modern inference services. The deeper trade-offs are beyond this lesson. By the way, this also explains why "latency" and "throughput" are often at odds: continuous batching lifts overall throughput, yet may make a single request slightly slower for having to share one forward with others - which way you lean depends on whether you want one person to get an answer as fast as possible, or a whole batch of people to each wait not too long on average.</p>
   </div>
 </details>
 
@@ -702,7 +702,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 <div class="card spark">
   <div class="tag">💡 Design insight</div>
-  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when L35 dissects finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
+  the essence of this server lesson is the plain yet profound engineering idea of "<strong>batching for throughput</strong>". For a single request, continuous batching does not make it faster (latency is unchanged); but zoom out to "how many tokens the whole server produces per unit time" and it is an order-of-magnitude gain. Behind it is a deep deference to the hardware - the GPU excels at "computing one big batch at once", so gather requests into batches and feed it, instead of forcing it to compute one by one. From cli to server you see two uses of the same engine: cli chases "smooth for one person", server chases "efficient for a crowd". And the key to serving "a crowd" well is never to copy the engine many times, but to teach one engine to "cook many woks". Hold this idea, and when you dig into finer scheduling, you will find every trade-off revolves around it. Place it in a bigger picture: from L25's C API, L26's common, L27's cli, to this lesson's server, Part 5 keeps telling one story - how to use "one stable core" in ever more complex settings. cli makes it smooth for one person, server makes it affordable for a crowd, and underneath it all is the engine honed across the first four parts. Next time you face "how to make a system serve more users", first ask: what is my "one forward pass"? Can I merge many requests' version of it into one shot? Its inverse is worth heeding too - if a system inherently cannot batch and each request must hog resources to the end, its scalability is capped from the very birth of the architecture. Whether you can batch often sets the ceiling from the start.
 </div>
 <div class="selftest">
 <h2>🧪 Self-test - think about the design</h2>
@@ -715,7 +715,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>queue the requests and have the GPU process them strictly one after another</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. Continuous batching tags each active slot's token with its seq_id via common_batch_add and packs them into one batch; one llama_decode then advances all active sequences using the attention mask - one forward, serve many, the heart of server throughput. Copying weights / many processes is exactly what it avoids.</div></div></div>
   </details>
 </div>
@@ -728,7 +728,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>--parallel N (n_parallel in the source)</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. --parallel N opens N slots (n_parallel), each an independent parallel sequence with its own seq_id + KV + state machine. -c sets the total context (divided among slots as n_ctx_slot), -t is thread count, -n is generation length - none set the slot count.</div></div></div>
   </details>
 </div>
@@ -741,7 +741,7 @@ curl http://localhost:8080/v1/chat/completions \
     <li>the llama.h C API speaks HTTP directly</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: A</strong>. server-chat converts between OpenAI's JSON schema (messages, tools, ...) and the engine's internal representation and exposes OpenAI-identical endpoints like /v1/chat/completions; an existing OpenAI client/SDK just points its base URL at llama-server, with no protocol change and no detour through OpenAI's cloud.</div></div></div>
   </details>
 </div>

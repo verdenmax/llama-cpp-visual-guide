@@ -719,7 +719,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>compile GPU kernels</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. The loader computes nothing; it organizes bytes into a usable model: gguf_init_from_file reads the header, weights_map registers each tensor by name, and with use_mmap the data pointers point into the file mapping (L13 zero-copy).</div></div></div>
   </details>
 </div>
@@ -732,7 +732,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>random hash names</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Split filenames are built by llama_split_path as "%s-%05d-of-%05d.gguf"; split.count records the total; the loader opens each by number and merges into one weights_map.</div></div></div>
   </details>
 </div>
@@ -745,7 +745,7 @@ the inner <span class="mono">_impl</span> and static <span class="mono">llama_mo
     <li>by reading an external config.json</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: B</strong>. Hyperparameters live in the GGUF metadata KVs (L13 self-description); the loader's templated get_key maps a key to a specific field, with no external config or guessing.</div></div></div>
   </details>
 </div>

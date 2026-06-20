@@ -302,8 +302,8 @@ opposite - making inference, that one job, extremely <strong>light</strong>:</p>
 </div>
 
 <div class="cols">
-  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch · heavy deps · VRAM-hungry · often needs CUDA · hard to deploy on ordinary devices</p></div>
-  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ · quantization saves VRAM · runs on CPU too · offline · one executable + one .gguf</p></div>
+  <div class="col"><h4>Typical research stack</h4><p>Python + PyTorch - heavy deps - VRAM-hungry - often needs CUDA - hard to deploy on ordinary devices</p></div>
+  <div class="col"><h4>llama.cpp</h4><p>zero-dep C/C++ - quantization saves VRAM - runs on CPU too - offline - one executable + one .gguf</p></div>
 </div>
 <p><strong>Why C/C++ specifically, and not Python, Rust, or Go?</strong> An inference engine cares about two things above all - a
 <strong>zero runtime</strong> and being <strong>embeddable</strong> - and C/C++ delivers both. It compiles straight to machine code, with no
@@ -315,11 +315,11 @@ heavy-runtime language. Rust could reach a similar goal, but when the project st
 most mature and the easiest to port to. The official README states the goal up front as "<strong>minimal setup</strong> with top performance", and
 plain C/C++ is the linchpin of that sentence.</p>
 
-<h2>Three pillars: GGUF · quantization · ggml</h2>
+<h2>Three pillars: GGUF - quantization - ggml</h2>
 <p>The reason llama.cpp can "run anywhere from a single file" is three building blocks fitting together.
 Here is a first glance at each; later lessons expand every one of them:</p>
 
-<h3>① GGUF: one file holds the whole model</h3>
+<h3>(1) GGUF: one file holds the whole model</h3>
 <p><span class="inline">GGUF</span> is llama.cpp's <strong>model file format</strong>: it bundles the weights,
 hyper-parameters (layers, dimensions, vocab size), tokenizer, chat template, and more <strong>into a single
 file</strong>. Loading just <span class="mono">mmap</span>s it into memory - no extra config files or Python code.
@@ -333,7 +333,7 @@ copy</strong> of the weights to save memory. The most practical payoff: <strong>
 <span class="inline">.gguf</span>, leave the command-line flags untouched, and you are running a different model. Distribution and management become
 trivially simple.</p>
 
-<h3>② Quantization: shrink the weights, keep the accuracy</h3>
+<h3>(2) Quantization: shrink the weights, keep the accuracy</h3>
 <p>Raw weights are usually 16-bit floats (FP16), so a 7B model needs about 14 GB. <strong>Quantization</strong>
 packs each weight into a lower bit-width (e.g. 4 bits), cutting the size to roughly 1/4 - small enough for an
 ordinary laptop's RAM. The cost is a tiny accuracy loss, but a "<strong>per-block shared scale</strong>"
@@ -342,13 +342,13 @@ design keeps that loss almost unnoticeable:</p>
 <div class="cellgroup">
   <div class="cg-cap"><b>FP16 raw weights</b>: each number 16 bits - high precision, but bulky</div>
   <div class="cells">
-    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">…</span>
+    <span class="cell">0.12</span><span class="cell">-0.34</span><span class="cell">0.08</span><span class="cell">0.51</span><span class="cell dim">...</span>
     <span class="lab">a block of 32 x 16 bit</span>
   </div>
-  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale × (code − 8)</div>
+  <div class="cg-cap" style="margin-top:.7rem"><b>After Q4_0</b>: the whole block shares one scale; each weight stores just a 4-bit level; dequant = scale x (code - 8)</div>
   <div class="cells">
-    <span class="cell scale">scale</span><span class="sep">×</span>
-    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">…</span>
+    <span class="cell scale">scale</span><span class="sep">x</span>
+    <span class="cell q">0110</span><span class="cell q">1001</span><span class="cell q">0011</span><span class="cell q">1100</span><span class="cell q dim">...</span>
     <span class="lab">~4.5 bit/weight, about 1/4 the size</span>
   </div>
 </div>
@@ -361,16 +361,16 @@ the more critical weights more accurate and push that loss down further.</p>
 <p>Put that compression in a real setting and it is a "<strong>heavy-to-light</strong>" pipeline: the same model shrinks sharply after quantization,
 and paired with one executable it can move from the data center onto your laptop:</p>
 <div class="flow">
-  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ≈ 14 GB</div></div>
+  <div class="node"><div class="nt">FP16 model</div><div class="nd">7B ~ 14 GB</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">≈ 4 GB</div></div>
+  <div class="node hl"><div class="nt">Quantize Q4</div><div class="nd">~ 4 GB</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">.gguf single file</div><div class="nd">+ one executable</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node hl"><div class="nt">Run locally</div><div class="nd">laptop / phone / server</div></div>
 </div>
 
-<h3>③ ggml: the low-level tensor engine</h3>
+<h3>(3) ggml: the low-level tensor engine</h3>
 <p><span class="mono">ggml</span> is llama.cpp's <strong>in-house tensor library</strong>: it defines tensors,
 describes one inference run as a <strong>compute graph</strong>, then dispatches the ops in that graph
 (matmul, softmax, rope...) to different <strong>backends</strong> (CPU SIMD, CUDA, Metal, Vulkan...) to actually
@@ -381,13 +381,13 @@ model code runs unchanged across CPU and all kinds of GPUs.</p>
 <p>Stack those three pillars by "who depends on whom" and llama.cpp becomes a clean <strong>four-layer tower</strong>,
 from the hardware at the bottom up to the user-facing tools:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ · examples/</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools</span><span class="name">tools/ - examples/</span></div>
     <div class="ld">User-facing: <span class="mono">llama-cli</span>, the <span class="mono">llama-server</span> HTTP service, the <span class="mono">llama-quantize</span> tool</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">infer</span><span class="name">src/llama-*</span></div>
-    <div class="ld">Model loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld">Model loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld">Tensors · compute graph · ops (matmul/rope/softmax...) · backend scheduling · quant formats</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
+    <div class="ld">Tensors - compute graph - ops (matmul/rope/softmax...) - backend scheduling - quant formats</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backend</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
     <div class="ld">Actually runs the ops on hardware (SIMD / GPU kernels)</div></div>
 </div>
 <p>Keep this line in mind when reading the source: the <strong>backend</strong> provides compute, <strong>ggml</strong>
@@ -800,16 +800,16 @@ to run a tool or dig into the source.
 directory actually do</strong>". The table below is the map's legend:</p>
 <table class="t">
   <tr><th>Directory</th><th>Role</th></tr>
-  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors · compute graph · ops · backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
-  <tr><td class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
-  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> · <code>llama-graph</code> · <code>llama-kv-cache</code> · <code>llama-sampler</code> · <code>llama-vocab</code> · <code>llama-chat</code> · <code>llama-grammar</code> · <code>llama-quant</code> ...</td></tr>
+  <tr><td class="mono">ggml/</td><td>The in-house <strong>tensor engine</strong>: tensors - compute graph - ops - backend scheduling; a standalone sub-project (ships its own <code>include/</code> and <code>src/</code>) - the lowest and "hardest" layer of the whole project</td></tr>
+  <tr><td class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</td><td>The individual <strong>hardware backends</strong> that actually run the ops on CPU / GPU (plus hip / sycl / musa / opencl and a dozen more)</td></tr>
+  <tr><td class="mono">src/</td><td>The <strong>llama inference library</strong>: assembles the engine into "session-level" inference - <code>llama-model-loader</code> - <code>llama-graph</code> - <code>llama-kv-cache</code> - <code>llama-sampler</code> - <code>llama-vocab</code> - <code>llama-chat</code> - <code>llama-grammar</code> - <code>llama-quant</code> ...</td></tr>
   <tr><td class="mono">include/</td><td>The <strong>public C API</strong>: <code>llama.h</code> (the only external contract); <code>llama-cpp.h</code> (a thin C++ wrapper + RAII)</td></tr>
-  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) · <code>sampling</code> (sampler wrapper) · <code>chat</code> · <code>log</code> · <code>download</code> · <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
-  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> · <span class="mono">llama-server</span> · <span class="mono">llama-quantize</span> · <code>llama-mtmd-cli</code> (multimodal) · <code>llama-perplexity</code> · <span class="mono">llama-bench</span> ...</td></tr>
+  <tr><td class="mono">common/</td><td><strong>Reusable helpers / glue</strong>: <code>arg</code> (argument parsing) - <code>sampling</code> (sampler wrapper) - <code>chat</code> - <code>log</code> - <code>download</code> - <code>json-schema-to-grammar</code> ...; for the programs, not the inference library itself</td></tr>
+  <tr><td class="mono">tools/</td><td>The <strong>executable programs</strong>: <span class="mono">llama-cli</span> - <span class="mono">llama-server</span> - <span class="mono">llama-quantize</span> - <code>llama-mtmd-cli</code> (multimodal) - <code>llama-perplexity</code> - <span class="mono">llama-bench</span> ...</td></tr>
   <tr><td class="mono">examples/</td><td>Small example programs: <code>simple</code> demonstrates minimal inference in a couple hundred lines - the best "readable" entry point</td></tr>
   <tr><td class="mono">gguf-py/</td><td>The <strong>Python GGUF read/write library</strong>: the conversion scripts use it to write out a <span class="inline">.gguf</span></td></tr>
   <tr><td class="mono">convert_hf_to_gguf.py, etc.</td><td><strong>Python conversion scripts</strong> (4 <code>convert_*.py</code>: 3 converters + 1 tokenizer-hash updater; the main one is HuggingFace -&gt; GGUF)</td></tr>
-  <tr><td class="mono">models/ · tests/ · docs/ · grammars/ · cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
+  <tr><td class="mono">models/ - tests/ - docs/ - grammars/ - cmake/</td><td>Model data / tests / docs / GBNF examples / build system</td></tr>
 </table>
 <p>A simple rule of thumb: <strong>the lower you go, the "harder" it gets</strong> - <span class="mono">ggml/</span> leans toward math and hardware, <span class="mono">src/</span> toward model and session logic, <span class="mono">tools/</span> and <span class="mono">common/</span> toward "for people to use". The only thing ever exposed to the outside, start to finish, is the single public header <span class="mono">include/llama.h</span>.</p>
 
@@ -819,8 +819,8 @@ directory actually do</strong>". The table below is the map's legend:</p>
   <tr><th>This block</th><th>Does exactly one thing</th><th>Roughly lives in</th></tr>
   <tr><td><strong>Engine</strong></td><td>Provide compute: define tensors, organize ops into a compute graph, schedule to the backends that actually run it</td><td class="mono">ggml/</td></tr>
   <tr><td><strong>Inference lib</strong></td><td>Assemble compute into a "session": load weights, build the graph, KV cache, sampling, tokenizing, chat templates</td><td class="mono">src/llama-*</td></tr>
-  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ · common/</td></tr>
-  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ · convert_*.py</td></tr>
+  <tr><td><strong>Programs / glue</strong></td><td>For people to use: the CLI, the HTTP server, the quantizer, plus the shared bits that turn a library into a program</td><td class="mono">tools/ - common/</td></tr>
+  <tr><td><strong>Model prep</strong></td><td>Bring outside models in: turn HuggingFace weights into a <span class="inline">.gguf</span></td><td class="mono">gguf-py/ - convert_*.py</td></tr>
 </table>
 <p><strong>Why split them so hard?</strong> Because the four jobs <strong>change at completely different rhythms</strong>: backend ops chase new hardware and instruction sets; inference logic evolves with new model architectures; CLI flags and server APIs come and go with user needs; conversion scripts track upstream model formats. Weld them together and touching one means worrying you broke another. Split apart, <strong>each can evolve, be tested, and be reused on its own</strong> - add a new backend to <span class="mono">ggml</span> without touching a line of <span class="mono">src/llama-*</span>; add a new model architecture without reaching down to the low-level ops. That is the most concrete payoff of "<strong>clean boundaries</strong>".</p>
 
@@ -831,26 +831,26 @@ directory actually do</strong>". The table below is the map's legend:</p>
 <h2>How they map onto the "four layers"</h2>
 <p>Mapping those directories back onto the four-layer structure from the previous lesson makes it click:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ · examples/</span></div>
-    <div class="ld"><span class="mono">tools/</span> (cli · server · quantize · mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">tools &amp; apps</span><span class="name">tools/ - examples/</span></div>
+    <div class="ld"><span class="mono">tools/</span> (cli - server - quantize - mtmd ...) and <span class="mono">examples/</span>: the user-facing CLI, server and samples</div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">inference lib</span><span class="name">src/llama-*</span></div>
-    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading · compute graph · KV cache · sampling · tokenizer · chat templates</div></div>
+    <div class="ld"><span class="mono">src/llama-*</span> plus the public header <span class="mono">include/llama.h</span>: loading - compute graph - KV cache - sampling - tokenizer - chat templates</div></div>
   <div class="layer l-main"><div class="lh"><span class="badge">engine</span><span class="name">ggml</span></div>
-    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> · <span class="mono">gguf.cpp</span> · <span class="mono">ggml-alloc</span> · <span class="mono">ggml-backend</span>): tensors · compute graph · ops · scheduling · the GGUF format</div></div>
-  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU · CUDA · Metal · Vulkan ...</span></div>
-    <div class="ld"><span class="mono">ggml/src/ggml-cpu · ggml-cuda · ggml-metal · ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
+    <div class="ld"><span class="mono">ggml/</span> (<span class="mono">ggml.c</span> - <span class="mono">gguf.cpp</span> - <span class="mono">ggml-alloc</span> - <span class="mono">ggml-backend</span>): tensors - compute graph - ops - scheduling - the GGUF format</div></div>
+  <div class="layer l-core"><div class="lh"><span class="badge">backends</span><span class="name">CPU - CUDA - Metal - Vulkan ...</span></div>
+    <div class="ld"><span class="mono">ggml/src/ggml-cpu - ggml-cuda - ggml-metal - ggml-vulkan ...</span>: actually run the ops on hardware</div></div>
 </div>
-<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span>.</p>
-<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> · <span class="mono">docs/</span> · <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
+<p>Besides this main trunk there are two <strong>side-paths</strong>: (1) <strong>model prep</strong> - <span class="mono">gguf-py/</span> plus <span class="mono">convert_*.py</span> (Python) turn a HuggingFace model into a <span class="inline">.gguf</span> file fed to the engine; (2) <strong>support</strong> - <span class="mono">common/</span> (the glue that turns the library into programs) plus <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span>.</p>
+<p>Why call them "side-paths"? Because <strong>an inference request only travels up and down the four-layer trunk</strong> - it never runs into these two. Model prep is done <strong>once, before you run</strong> (it emits the <span class="inline">.gguf</span> and steps aside), while support sits around the trunk like <strong>scaffolding</strong>: <span class="mono">common/</span> spares programs from boilerplate, and <span class="mono">tests/</span> - <span class="mono">docs/</span> - <span class="mono">cmake/</span> handle testing, docs, and the build. Tell apart "what the runtime passes through" from "what runs before or around it" and you won't mistake the scaffolding for a load-bearing wall when reading the source.</p>
 
 <h2>How a model travels from training to running</h2>
 <p>String the directories together and a model's "life" is really a straight pipeline: prepared in Python on the left, run in C++ on the right, handed over through one file in the middle. Walk it once and you will see which station each directory occupies along the whole chain:</p>
 <div class="flow">
   <div class="node"><div class="nt">HF / PyTorch model</div><div class="nd">safetensors weights</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python · gguf-py</div></div>
+  <div class="node hl"><div class="nt">convert_hf_to_gguf.py</div><div class="nd">Python - gguf-py</div></div>
   <div class="arrow">-&gt;</div>
-  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file · weights + metadata</div></div>
+  <div class="node"><div class="nt">model.gguf</div><div class="nd">single file - weights + metadata</div></div>
   <div class="arrow">-&gt;</div>
   <div class="node"><div class="nt">llama_model_load_from_file</div><div class="nd">C++ runtime</div></div>
   <div class="arrow">-&gt;</div>
@@ -873,7 +873,7 @@ llama-cli -m my-model-Q4.gguf -p <span class="st">"Hello"</span></pre>
 <h2>Want to read the source - where to enter</h2>
 <p>Want to read the source but not sure where to start? Rather than chewing from the first file to the last, <strong>decide your goal first</strong>, then pick the matching entry point and drill down. Three common goals map to three entries:</p>
 <div class="layers">
-  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ · examples/simple</span></div>
+  <div class="layer l-app"><div class="lh"><span class="badge">to use it</span><span class="name">tools/ - examples/simple</span></div>
     <div class="ld">First get <code>llama-cli</code>/<code>llama-server</code> running, then read the minimal call in <code>examples/simple</code></div></div>
   <div class="layer l-part"><div class="lh"><span class="badge">to grok inference</span><span class="name">src/llama-*</span></div>
     <div class="ld">Follow the main line: <code>llama-model-loader</code> -&gt; <code>llama-graph</code> -&gt; <code>llama-kv-cache</code> -&gt; <code>llama-sampler</code></div></div>
@@ -1099,7 +1099,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <summary><span class="badge-num">2</span> KV cache 到底省了什么？ <span class="hint">点击展开</span></summary>
   <div class="acc-body">
     <p><strong>省的是"重算过去"：</strong>没有它，每生成一个新 token 都要把前面所有 token <strong>重算一遍</strong> -&gt; <strong>重算成本</strong>约 <span class="mono">O(n^2)</span>；有了它每步只算<strong>新 token</strong> 的 K/V 并追加进缓存 -&gt; <strong>重算降到</strong> <span class="mono">O(n)</span>。</p>
-    <p><strong>给个体感：</strong>假设上下文已经有 1000 个 token，现在要生成第 1001 个。没有缓存，这一步得把前面 1000 个 token 的 K/V <strong>全部重算一遍</strong>；有了缓存，只需算<strong>第 1001 个</strong>这一个 token 的 K/V，再追加到缓存末尾，省下的几乎是整段历史的重复前向。把每一步都这么省下来，一整段生成累计省掉的计算量，就从 <span class="mono">O(n^2)</span> 量级压到 <span class="mono">O(n)</span> 量级——这正是自回归生成能在本地"<strong>一直往下写而不越写越慢</strong>"的根本。</p>
+    <p><strong>给个体感：</strong>假设上下文已经有 1000 个 token，现在要生成第 1001 个。没有缓存，这一步得把前面 1000 个 token 的 K/V <strong>全部重算一遍</strong>；有了缓存，只需算<strong>第 1001 个</strong>这一个 token 的 K/V，再追加到缓存末尾，省下的几乎是整段历史的重复前向。把每一步都这么省下来，一整段生成累计的<strong>重算量</strong>，就从 <span class="mono">O(n^2)</span> 量级压到 <span class="mono">O(n)</span> 量级——这正是自回归生成能在本地"<strong>一直往下写而不越写越慢</strong>"的根本。</p>
     <p><strong>注意别夸大：</strong>注意力对历史的<strong>扫描</strong>仍是每步 <span class="mono">O(n)</span>（要看过去所有 token），省掉的是<strong>重复计算过去 token 的 K/V</strong>，不是把注意力也变成常数。</p>
     <p><strong>为什么长上下文这么"吃"硬件：</strong>KV cache 的占用大致正比于"<strong>层数 × 上下文长度 × 每层 K/V 的宽度</strong>"——层数和宽度由模型定死，唯一会涨的就是上下文长度。于是把上下文从几千开到几万，KV cache 就要成倍变大，往往成为权重之外最显眼的一块内存。这也解释了为什么本地跑长上下文时，光有"<strong>装得下权重</strong>"的内存还不够，得额外给 KV cache 留足空间；想省，就只能在<strong>更短的上下文</strong>、<strong>更省的缓存量化</strong>或<strong>共享 K/V 的注意力结构</strong>之间做权衡。</p>
     <p><strong>源码：</strong>缓存的分配、写入与复用在 <span class="mono">src/llama-kv-cache.cpp</span>；上下文越长，这块占用越大，也是本地推理要预留内存的地方。</p>
@@ -1158,32 +1158,32 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
   <div class="step"><div class="num">1</div><div class="sc">
     <h4>Tokenize</h4>
     <p>Cut the prompt text into a sequence of token ids - the model understands numeric ids, not characters; the same sentence can split into completely different ids under a different tokenizer.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_tokenize</p>
+    <p class="mono">src/llama-vocab.cpp - llama_tokenize</p>
   </div></div>
   <div class="step"><div class="num">2</div><div class="sc">
     <h4>Batch</h4>
     <p>Wrap the token sequence into one input (batch); with <span class="mono">llama_batch_get_one</span>, <span class="mono">pos</span>/<span class="mono">seq_id</span> are auto-assigned by <span class="mono">llama_decode</span> (sequential positions, sequence 0) - use <span class="mono">llama_batch_init</span> only when you need multiple sequences / custom positions.</p>
-    <p class="mono">src/llama-batch.cpp · llama_batch_get_one</p>
+    <p class="mono">src/llama-batch.cpp - llama_batch_get_one</p>
   </div></div>
   <div class="step"><div class="num">3</div><div class="sc">
     <h4>Decode (forward)</h4>
     <p><span class="mono">llama_decode</span> runs one forward pass; internally it first <strong>builds the compute graph</strong>, then hands it to the <strong>backend</strong> to run on hardware. This is the heaviest step - the next section <strong>zooms into</strong> it.</p>
-    <p class="mono">src/llama-context.cpp · llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
+    <p class="mono">src/llama-context.cpp - llama_decode; graph build src/llama-graph.cpp (llm_graph_*) + src/llama-model.cpp; execution ggml-backend</p>
   </div></div>
   <div class="step"><div class="num">4</div><div class="sc">
     <h4>Get logits</h4>
     <p>Read out the "score vector for the next token" from this forward pass - one score per token in the vocabulary. At this point <strong>no</strong> token has been chosen yet.</p>
-    <p class="mono">src/llama-context.cpp · llama_get_logits_ith</p>
+    <p class="mono">src/llama-context.cpp - llama_get_logits_ith</p>
   </div></div>
   <div class="step"><div class="num">5</div><div class="sc">
     <h4>Sample</h4>
     <p>The sampler chain picks one token from the logits by some strategy (greedy / top-k / top-p...); a different strategy can pick a different token from the very same logits.</p>
-    <p class="mono">src/llama-sampler.cpp · llama_sampler_sample</p>
+    <p class="mono">src/llama-sampler.cpp - llama_sampler_sample</p>
   </div></div>
   <div class="step"><div class="num">6</div><div class="sc">
     <h4>Check end + detokenize</h4>
     <p>First use <span class="mono">llama_vocab_is_eog</span> to test for an end token; if not, <span class="mono">llama_token_to_piece</span> turns the token back into text.</p>
-    <p class="mono">src/llama-vocab.cpp · llama_vocab_is_eog · llama_token_to_piece</p>
+    <p class="mono">src/llama-vocab.cpp - llama_vocab_is_eog - llama_token_to_piece</p>
   </div></div>
   <div class="step"><div class="num">7</div><div class="sc">
     <h4>Feed-back + loop</h4>
@@ -1222,8 +1222,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 </div>
 <p>Put the two rhythms on one timeline and the difference is obvious at a glance: prefill is <strong>one wide</strong> parallel block, decode is <strong>cell-by-cell</strong> steps appended after it.</p>
 <div class="timeline">
-  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1…t5) computed in parallel at once, filling the KV cache</span></div>
-  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8…</span></div>
+  <div class="lane"><span class="lane-label">Prefill</span><span class="tslot span">whole prompt (t1...t5) computed in parallel at once, filling the KV cache</span></div>
+  <div class="lane"><span class="lane-label">Decode</span><span class="tslot">t6</span><span class="tslot">t7</span><span class="tslot now">t8...</span></div>
 </div>
 <p><strong>Why can prefill run in parallel while decode must be serial?</strong> It comes down to "what depends on what". Prefill faces an <strong>already fully given</strong> prompt where every token is known; their K/V <strong>do not depend on each other</strong>, so they can all be computed in parallel in one shot and fill the cache at once. Decode is the opposite: to compute the "<strong>next word</strong>", the precondition is that "<strong>the previous word has already been written</strong>" - the input to step n+1 is exactly the token that step n's sampling just chose. This "<strong>each step depends on the previous step's output</strong>" chain is inherently <strong>impossible to parallelize</strong>; it can only inch forward one step at a time. That is one root reason a single conversation's generation speed has a ceiling: even if the hardware is idle, decode still has to queue up and go cell by cell.</p>
 <p class="acc-intro">Prefill computes the whole prompt <strong>in parallel</strong> in one pass; afterwards each decode step computes <strong>just 1 new token</strong>, so "keep writing" is cheap.</p>
@@ -1234,8 +1234,8 @@ explain why this loop can keep turning <strong>cheaply, round after round</stron
 <div class="cellgroup">
   <div class="cg-cap"><b>KV cache</b>: each generated token appends its K/V to the cache; the next step reuses them directly instead of recomputing history</div>
   <div class="cells"><span class="lab">after prefill</span><span class="cell">K1</span><span class="cell">K2</span><span class="cell">K3</span><span class="cell">K4</span><span class="cell">K5</span></div>
-  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1…K5 (reuse)</span><span class="cell hl">+K6</span></div>
-  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1…K6 (reuse)</span><span class="cell hl">+K7</span></div>
+  <div class="cells"><span class="lab">decode t6</span><span class="cell dim">K1...K5 (reuse)</span><span class="cell hl">+K6</span></div>
+  <div class="cells"><span class="lab">decode t7</span><span class="cell dim">K1...K6 (reuse)</span><span class="cell hl">+K7</span></div>
 </div>
 <p>Each row adds only <strong>one highlighted new cell</strong> (<span class="mono">+K6</span>, <span class="mono">+K7</span>); everything greyed out before it is "<strong>reused, not recomputed</strong>". Without this cache, generating the n-th token would recompute all n-1 before it; with it, the <strong>added work</strong> per step is essentially constant - that is why an autoregressive loop can keep running cheaply on local hardware.</p>
 <p><strong>So what exactly are K/V, and why can they be cached?</strong> In the attention mechanism, every token gets three things computed: a Query (the vector it uses to "ask"), a Key (the "label" it is matched against), and a Value (the "content" it carries). To compute "who should the current token attend to", you take its Query and compare it against <strong>the Keys of all past tokens</strong>, then weight-sum the corresponding <strong>Values</strong> by the resulting weights. Here is the key point: <strong>a past token's K and V never change once computed</strong> (they depend only on that token itself and its position), so they can simply be <strong>stored and reused</strong> - which is exactly what the KV cache holds. The cost is direct too: the cache must store one K and one V for <strong>every layer and every past token</strong>, so its memory footprint <strong>grows linearly with context length</strong>; push the context to tens of thousands of tokens and the KV cache eats a sizable chunk of memory - one reason a "context window" always has an upper bound and long context is especially hardware-hungry (allocation, writing and reuse all live in <span class="mono">src/llama-kv-cache.cpp</span>).</p>
@@ -1278,7 +1278,7 @@ batch  = <span class="fn">llama_batch_get_one</span>(tokens)           <span cla
   <summary><span class="badge-num">2</span> What exactly does the KV cache save? <span class="hint">click to expand</span></summary>
   <div class="acc-body">
     <p><strong>It saves "recomputing the past":</strong> without it, every new token re-runs all previous tokens -&gt; the <strong>recompute cost</strong> is ~<span class="mono">O(n^2)</span>; with it each step only computes the <strong>new token</strong>'s K/V and appends it -&gt; <strong>recompute drops to</strong> <span class="mono">O(n)</span>.</p>
-    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total work for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
+    <p><strong>A feel for it:</strong> say the context already has 1000 tokens and you want to generate the 1001st. Without the cache, this step would <strong>recompute the K/V of all 1000</strong> prior tokens; with it, you only compute the K/V of <strong>the 1001st</strong> token and append it to the end - saving nearly a whole history's worth of repeated forward work. Save that at every step and the total <strong>recompute</strong> for a full generation drops from the <span class="mono">O(n^2)</span> ballpark to the <span class="mono">O(n)</span> ballpark - the very reason autoregressive generation can "<strong>keep writing without getting slower and slower</strong>" locally.</p>
     <p><strong>Don't overstate it:</strong> attention's <strong>scan</strong> over history is still <span class="mono">O(n)</span> per step (it must look at all past tokens); what is saved is <strong>recomputing past tokens' K/V</strong>, not turning attention itself into a constant.</p>
     <p><strong>Why long context is so hardware-hungry:</strong> the KV cache footprint is roughly proportional to "<strong>layers x context length x the K/V width per layer</strong>" - layers and width are fixed by the model, so the only thing that grows is context length. Push the context from a few thousand to tens of thousands and the KV cache grows in proportion, often the biggest block of memory after the weights themselves. That is why running long context locally needs more than enough memory to "<strong>fit the weights</strong>" - you must reserve extra room for the KV cache; to save it, you can only trade among a <strong>shorter context</strong>, <strong>cheaper cache quantization</strong>, or <strong>attention that shares K/V</strong>.</p>
     <p><strong>Source:</strong> allocation, writing and reuse of the cache live in <span class="mono">src/llama-kv-cache.cpp</span>; the longer the context, the bigger this footprint - and the memory you must reserve for local inference.</p>

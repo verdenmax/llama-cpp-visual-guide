@@ -617,7 +617,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>--gpu</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. In docs/build.md, the CUDA backend is enabled at configure time with -DGGML_CUDA=ON, e.g. cmake -B build -DGGML_CUDA=ON then cmake --build build --config Release. Each backend has a -DGGML_* flag (Metal on by default, Vulkan via -DGGML_VULKAN=ON, etc.); switching backend only changes the 'configure' step, not the source. --gpu would be a runtime argument, not a build flag; and llama.cpp will not silently compile CUDA in for you.</div></div></div>
   </details>
 </div>
@@ -630,7 +630,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>test-tokenizer-0</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: C</strong>. CONTRIBUTING is explicit: if you change or add a ggml operator you must run (and extend if needed) test-backend-ops. It runs the operator on CPU and the target backend and compares elementwise, keeping backends in agreement - exactly what lets llama.cpp maintain a dozen-plus backends at once. test-tokenizer-0 / test-sampling cover tokenization and sampling, unrelated to operator correctness; and 'CI will handle it' is no excuse: running locally first keeps you from discovering a failure only after opening the PR.</div></div></div>
   </details>
 </div>
@@ -643,7 +643,7 @@ ctest --test-dir build -R backend-ops  <span class="cm"># only those whose name 
     <li>does not accept PRs that are fully or predominantly AI-generated; contributors must be able to independently understand and maintain their code</li>
   </ol>
   <details class="accordion">
-    <summary>Show answer & explanation <span class="hint">click to expand</span></summary>
+    <summary>Show answer &amp; explanation <span class="hint">click to expand</span></summary>
     <div class="acc-body"><div class="qa"><div class="a"><strong>Answer: D</strong>. The AI policy near the top of CONTRIBUTING is clear: it does not accept PRs that are fully or predominantly AI-generated, and AI-written-then-human-edited still counts as AI-generated; AI may only assist, and contributors must independently understand, debug, and maintain their code and disclose how AI was used. It is neither 'ban AI entirely' nor 'anything goes' - the core demand is 'there must be a person who truly understands this code and can be responsible for it'. A reminder for AI-assisted learners: let it help you read, do not let it think for you.</div></div></div>
   </details>
 </div>
