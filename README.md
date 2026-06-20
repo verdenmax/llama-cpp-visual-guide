@@ -26,7 +26,7 @@ The guide is organized into nine parts that build up step by step:
 
 ## How to view
 
-**Online:** published via GitHub Pages at `https://<owner>.github.io/<repo>/` (see the Deploy note below to enable it).
+**Online:** published via GitHub Pages at **https://verdenmax.github.io/llama-cpp-visual-guide/**.
 
 **Locally** (zero dependencies, just Python 3):
 
@@ -75,10 +75,6 @@ python3 check_links.py    # all internal links must resolve
 
 The generated HTML is committed and kept in sync with the sources; a re-run of `build.py` should produce no diff.
 
-## Deploy note (GitHub Pages)
-
-Deployment uses GitHub Actions (`.github/workflows/deploy.yml`). The repository owner must enable Pages **once**: go to **Settings -> Pages -> Source** and select **"GitHub Actions"**. The workflow cannot create the Pages site automatically (it lacks admin scope); it only deploys.
-
 ## License
 
 Dual-licensed:
@@ -98,10 +94,8 @@ Dual-licensed:
 
 **九个部分**（层层递进）：① 宏观全景（L01-03）② 前置基础（L04-07）③ ggml 引擎（L08-13）④ llama 推理内部（L14-24）⑤ 公共 API 与工具（L25-30）⑥ 底层内核（L31-33）⑦ 进阶专题（L34-37）⑧ 实战与贡献（L38-39）⑨ 速查（L40）。
 
-**怎么看：** 在线版见 GitHub Pages（`https://<owner>.github.io/<repo>/`）；本地零依赖，`cd src && python3 build.py` 后用浏览器打开 `index.html`。
+**怎么看：** 在线版见 **https://verdenmax.github.io/llama-cpp-visual-guide/**；本地零依赖，`cd src && python3 build.py` 后用浏览器打开 `index.html`。
 
 **怎么打印：** `cd src && python3 build_print.py`，再打开 `print_zh.html`（中文）或 `print_en.html`（英文），用 `Ctrl/Cmd+P` 导出 PDF，每课自动分页。
 
 **许可：** 双许可 —— 代码（`src/`）用 MIT（见 LICENSE），教学内容（课程文字与图）用 CC BY 4.0（见 LICENSE-CONTENT）。
-
-**部署须知：** GitHub Pages 需所有者先在 **Settings -> Pages -> Source** 手动选 **"GitHub Actions"** 启用一次。
