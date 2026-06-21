@@ -33,8 +33,6 @@
 
 ---
 
-<!-- TASKS 待逐段补充 -->
-
 ## Task 1: 课 38「从 HF 转换模型 / Converting HF models to GGUF」
 
 **Files:** **新建** `src/part8.py`（写 `LESSON_38`，文件头 `"""Content for Part 8 (practice & contributing)."""`）、改 `src/registry.py`、`src/shell.py`、`src/quizzes.py`。产出 `38-convert-hf.html`。trace 为 **Style A（无 SVG）**；另含 GGUF 字节布局 `layers` 图。

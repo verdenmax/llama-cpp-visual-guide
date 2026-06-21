@@ -33,8 +33,6 @@
 
 ---
 
-<!-- TASKS 待逐段补充 -->
-
 ## Task 1: 课 34「投机解码 / Speculative decoding」
 
 **Files:** **新建** `src/part7.py`（写 `LESSON_34`，文件头 `"""Content for Part 7 (advanced topics)."""`）、改 `src/registry.py`、`src/shell.py`、`src/quizzes.py`。产出 `34-speculative-decoding.html`。trace 为 **Style A（无 SVG）**。
@@ -74,8 +72,6 @@
 - [ ] **Step 7: commit**：`feat: add lesson 34 speculative decoding (bilingual) with trace + quiz` + `Assisted-by: GitHub Copilot`（暂存 4 源文件 + 重建的全部 HTML，提交后 git status 干净）。
 
 ---
-
-<!-- TASK 2-5 待续 -->
 
 ## Task 2: 课 35「MoE 专家混合 / Mixture of experts」
 
@@ -122,8 +118,6 @@
 
 ---
 
-<!-- TASK 3-5 待续 -->
-
 ## Task 3: 课 36「多模态 / Multimodal」
 
 **Files:** `src/part7.py`（追加 `LESSON_36`）、`src/registry.py`、`src/shell.py`、`src/quizzes.py`。产出 `36-multimodal.html`。trace 为 **Style A（无 SVG）**。
@@ -165,8 +159,6 @@
 - [ ] **Step 7: commit**：`feat: add lesson 36 multimodal (bilingual) with pipeline trace + quiz` + `Assisted-by: GitHub Copilot`。
 
 ---
-
-<!-- TASK 4-5 待续 -->
 
 ## Task 4: 课 37「状态空间模型 Mamba/RWKV / State-space models」
 
@@ -210,8 +202,6 @@
 - [ ] **Step 7: commit**：`feat: add lesson 37 state-space models (bilingual) with scan SVG trace + quiz` + `Assisted-by: GitHub Copilot`。
 
 ---
-
-<!-- TASK 5 待续 -->
 
 ## Task 5: 收尾（roadmap 勾选 + 全量验证 + 完成分支）
 

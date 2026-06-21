@@ -89,7 +89,7 @@ The generated HTML is committed and kept in sync with the sources; a re-run of `
 
 Dual-licensed:
 
-- **Code** (everything under `src/`) - MIT, see [LICENSE](LICENSE).
+- **Code** (the Python generators and validation scripts under `src/`) - MIT, see [LICENSE](LICENSE).
 - **Content** (the lesson text and diagrams rendered into `index.html`, `lessons/*.html`, `print_*.html`) - CC BY 4.0, see [LICENSE-CONTENT](LICENSE-CONTENT).
 
 ---
@@ -108,4 +108,4 @@ Dual-licensed:
 
 **怎么打印：** `cd src && python3 build_print.py`，再打开 `print_zh.html`（中文）或 `print_en.html`（英文），用 `Ctrl/Cmd+P` 导出 PDF，每课自动分页。
 
-**许可：** 双许可 —— 代码（`src/`）用 MIT（见 LICENSE），教学内容（课程文字与图）用 CC BY 4.0（见 LICENSE-CONTENT）。
+**许可：** 双许可 —— 代码（`src/` 下的 Python 生成器与校验脚本）用 MIT（见 LICENSE），教学内容（课程文字与图）用 CC BY 4.0（见 LICENSE-CONTENT）。

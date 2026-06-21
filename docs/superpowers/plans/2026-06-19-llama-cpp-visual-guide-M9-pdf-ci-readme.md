@@ -28,8 +28,6 @@
 
 ---
 
-<!-- TASKS 待逐段补充 -->
-
 ## Task 1: `src/build_print.py`（双语打印版生成器）
 
 **Files:** **新建** `src/build_print.py`。产出仓库根 `print_zh.html`、`print_en.html`。复用 `registry.CONTENT`、`shell.CSS`/`shell.PAGES`、`quizzes.render`。
